@@ -1,0 +1,22 @@
+# Go build outputs
+ai-meeting
+*.exe
+*.test
+*.out
+coverage.out
+
+# Build and temp directories
+bin/
+dist/
+tmp/
+
+# Local environment and secrets
+.env
+.env.*
+*.local.yaml
+config/*.local.yaml
+
+# OS and editor files
+.DS_Store
+.idea/
+.vscode/
