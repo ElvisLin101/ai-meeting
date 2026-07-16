@@ -46,6 +46,7 @@ func (s *AiConversationService) UpdateConversation(sessionID string, messageCoun
 	return mysqlrepo.UpdateAiConversation(sessionID, username, updates)
 }
 
+// UpdateConversationMessageCount 仅更新会话消息计数
 func (s *AiConversationService) UpdateConversationMessageCount(sessionID, username string, messageCount int) error {
 	updates := map[string]interface{}{
 		"message_cnt": messageCount,

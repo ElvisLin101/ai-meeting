@@ -25,6 +25,7 @@ type MemoryService struct {
 
 var memoryServiceInstance *MemoryService
 
+// GetMemoryService 获取 MemoryService 单例
 func GetMemoryService() *MemoryService {
 	if memoryServiceInstance == nil {
 		memoryServiceInstance = &MemoryService{threshold: COMPRESSION_THRESHOLD}
@@ -62,6 +63,7 @@ func (s *MemoryService) GetContext(sessionID, userID string, threshold int) (str
 	return contextText, nil
 }
 
+// loadCompressedContext 加载 Agent 压缩上下文（Redis 优先，miss 从 Mongo 恢复并异步回填）
 func (s *MemoryService) loadCompressedContext(ctx context.Context, sessionID string) (string, int) {
 	compressedCtx, index, ok := s.getCompressedContextFromRedis(ctx, sessionID)
 	if ok {
@@ -81,6 +83,7 @@ func (s *MemoryService) loadCompressedContext(ctx context.Context, sessionID str
 	return mongoCtx.CompressedContent, mongoCtx.Index
 }
 
+// getCompressedContextFromRedis 从 Redis 读取 Agent 压缩摘要和索引
 func (s *MemoryService) getCompressedContextFromRedis(ctx context.Context, sessionID string) (string, int, bool) {
 	compressedCtx, err := repositories.RedisClient.Get(ctx, compressedContextKey(sessionID)).Result()
 	if err != nil && !errors.Is(err, redis.Nil) {
@@ -104,6 +107,7 @@ func (s *MemoryService) getCompressedContextFromRedis(ctx context.Context, sessi
 	return compressedCtx, index, true
 }
 
+// buildContextWithWindow 用预算窗口拼接压缩摘要 + 近期 Agent 消息，超预算时截断，返回上下文文本和可用长度
 func (s *MemoryService) buildContextWithWindow(compressedCtx string, messages []models.AgentMessage, threshold int) (string, int) {
 	var contextBuilder strings.Builder
 
@@ -207,6 +211,7 @@ func (s *MemoryService) doCompressContext(ctx context.Context, sessionID, userID
 	return nil, nil
 }
 
+// saveCompressedContextToRedis 将 Agent 压缩摘要和索引写入 Redis（TTL 7 天）
 func (s *MemoryService) saveCompressedContextToRedis(ctx context.Context, sessionID, compressedContent string, index int) error {
 	if err := repositories.RedisClient.Set(ctx, compressedContextKey(sessionID), compressedContent, REDIS_EXPIRE_DURATION).Err(); err != nil {
 		return err
@@ -214,6 +219,7 @@ func (s *MemoryService) saveCompressedContextToRedis(ctx context.Context, sessio
 	return repositories.RedisClient.Set(ctx, compressedContextIndexKey(sessionID), strconv.Itoa(index), REDIS_EXPIRE_DURATION).Err()
 }
 
+// persistToMongo 异步将 Agent 压缩上下文持久化到 MongoDB（upsert）
 func (s *MemoryService) persistToMongo(sessionID, compressedContent string, index, totalLength, messageCount int) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -233,6 +239,7 @@ func (s *MemoryService) persistToMongo(sessionID, compressedContent string, inde
 	logrus.Infof("Compressed context persisted to MongoDB for session %s", sessionID)
 }
 
+// getCompressedContextFromMongo 从 MongoDB 读取 Agent 压缩上下文
 func (s *MemoryService) getCompressedContextFromMongo(sessionID string) (*models.CompressedContext, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -249,6 +256,7 @@ func (s *MemoryService) getCompressedContextFromMongo(sessionID string) (*models
 	return mongorepo.FindCompressedContextBySessionID(ctx, sessionID)
 }
 
+// syncToRedis 异步将 Mongo 中的 Agent 压缩上下文同步到 Redis
 func (s *MemoryService) syncToRedis(sessionID, compressedContent string, index int) {
 	ctx := context.Background()
 	if err := s.saveCompressedContextToRedis(ctx, sessionID, compressedContent, index); err != nil {
@@ -258,6 +266,7 @@ func (s *MemoryService) syncToRedis(sessionID, compressedContent string, index i
 	logrus.Infof("Compressed context synced to Redis for session %s", sessionID)
 }
 
+// callAIForCompression 调用 AI 生成 Agent 上下文摘要，失败时回退本地截断
 func (s *MemoryService) callAIForCompression(ctx context.Context, contextText string) (string, error) {
 	prompt := buildCompressionPrompt(contextText)
 	compressed, err := clients.CallConfiguredAIChat(ctx, 0, []clients.PromptMessage{
@@ -273,6 +282,7 @@ func (s *MemoryService) callAIForCompression(ctx context.Context, contextText st
 	return fallbackCompressedSummary(contextText), nil
 }
 
+// buildCompressionPrompt 构建 Agent 压缩请求的 system prompt
 func buildCompressionPrompt(contextText string) string {
 	return fmt.Sprintf(`请将下面的多轮聊天记录压缩为“长期记忆摘要”，用于下一次继续对话时恢复上下文。
 
@@ -289,6 +299,7 @@ func buildCompressionPrompt(contextText string) string {
 --- 待压缩聊天记录结束 ---`, contextText)
 }
 
+// fallbackCompressedSummary AI 压缩失败时的本地兜底：截取首尾 450 字
 func fallbackCompressedSummary(contextText string) string {
 	contextText = strings.TrimSpace(contextText)
 	const maxLen = 900
@@ -300,6 +311,7 @@ func fallbackCompressedSummary(contextText string) string {
 	return "【长期记忆】" + head + "\n...\n" + tail
 }
 
+// buildChronologicalContext 将 Agent 消息列表按时间正序拼接为文本
 func buildChronologicalContext(messages []models.AgentMessage) string {
 	var builder strings.Builder
 	for i := len(messages) - 1; i >= 0; i-- {
@@ -308,6 +320,7 @@ func buildChronologicalContext(messages []models.AgentMessage) string {
 	return builder.String()
 }
 
+// messagesLength 计算 Agent 消息列表总字节长度
 func messagesLength(messages []models.AgentMessage) int {
 	total := 0
 	for _, msg := range messages {
@@ -316,6 +329,7 @@ func messagesLength(messages []models.AgentMessage) int {
 	return total
 }
 
+// formatMessageLine 格式化单条 Agent 消息为文本行
 func formatMessageLine(msg models.AgentMessage) string {
 	role := "assistant"
 	if msg.Role == "user" {
@@ -324,6 +338,7 @@ func formatMessageLine(msg models.AgentMessage) string {
 	return fmt.Sprintf("%s: %s\n", role, msg.Content)
 }
 
+// ClearCompressedContext 清理 Agent 压缩上下文（Redis + Mongo）
 func (s *MemoryService) ClearCompressedContext(sessionID string) error {
 	ctx := context.Background()
 	_, err1 := repositories.RedisClient.Del(ctx, compressedContextKey(sessionID)).Result()
@@ -337,6 +352,7 @@ func (s *MemoryService) ClearCompressedContext(sessionID string) error {
 	return err2
 }
 
+// clearFromMongo 异步清理 MongoDB 中的 Agent 压缩上下文
 func (s *MemoryService) clearFromMongo(sessionID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -346,6 +362,7 @@ func (s *MemoryService) clearFromMongo(sessionID string) {
 	}
 }
 
+// GetCompressionThreshold 获取当前 Agent 压缩阈值
 func (s *MemoryService) GetCompressionThreshold() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -355,6 +372,7 @@ func (s *MemoryService) GetCompressionThreshold() int {
 	return s.threshold
 }
 
+// SetCompressionThreshold 设置 Agent 压缩阈值（带范围校验 1024~32768）
 func (s *MemoryService) SetCompressionThreshold(threshold int) error {
 	if threshold < MIN_COMPRESSION_THRESHOLD || threshold > MAX_COMPRESSION_THRESHOLD {
 		return fmt.Errorf("threshold must be between %d and %d", MIN_COMPRESSION_THRESHOLD, MAX_COMPRESSION_THRESHOLD)
@@ -366,10 +384,12 @@ func (s *MemoryService) SetCompressionThreshold(threshold int) error {
 	return nil
 }
 
+// GetCompressionThresholdConfig 返回 Agent 阈值配置（当前值、最小值、最大值、触发偏移）
 func (s *MemoryService) GetCompressionThresholdConfig() (int, int, int, int) {
 	return s.GetCompressionThreshold(), MIN_COMPRESSION_THRESHOLD, MAX_COMPRESSION_THRESHOLD, COMPRESSION_TRIGGER_OFFSET
 }
 
+// normalizeThreshold 规范化阈值到合法范围
 func (s *MemoryService) normalizeThreshold(threshold int) int {
 	if threshold == 0 {
 		return s.GetCompressionThreshold()
@@ -383,10 +403,12 @@ func (s *MemoryService) normalizeThreshold(threshold int) int {
 	return threshold
 }
 
+// compressedContextKey 生成 Agent 压缩摘要的 Redis key（直接用 sessionId）
 func compressedContextKey(sessionID string) string {
 	return sessionID
 }
 
+// compressedContextIndexKey 生成 Agent 压缩索引的 Redis key（sessionId + "index"）
 func compressedContextIndexKey(sessionID string) string {
 	return sessionID + COMPRESSED_CONTEXT_INDEX_SUFFIX
 }

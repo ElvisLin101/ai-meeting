@@ -8,6 +8,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// InterviewSessionFacade 面试会话门面服务，封装面试会话相关的业务逻辑
 type InterviewSessionFacade struct{}
 
 // CreateSession 创建面试会话
@@ -112,6 +113,7 @@ func GetInterviewSessionFacade() *InterviewSessionFacade {
 	return interviewSessionFacadeInstance
 }
 
+// InterviewRecordService 面试记录服务，负责面试记录的保存与查询
 type InterviewRecordService struct{}
 
 // SaveInterviewRecord 保存面试记录

@@ -17,6 +17,7 @@ type AgentPropertiesLoader struct {
 var agentPropertiesLoaderInstance *AgentPropertiesLoader
 var agentPropertiesLoaderOnce sync.Once
 
+// GetAgentPropertiesLoader 获取智能体配置加载器单例
 func GetAgentPropertiesLoader() *AgentPropertiesLoader {
 	agentPropertiesLoaderOnce.Do(func() {
 		agentPropertiesLoaderInstance = &AgentPropertiesLoader{}

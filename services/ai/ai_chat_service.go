@@ -18,6 +18,7 @@ var (
 	ErrEmptyAiMessageContent  = errors.New("ai message content is required")
 )
 
+// AiChatStreamChunk 表示流式聊天返回的单个数据块
 type AiChatStreamChunk struct {
 	Content          string
 	ReasoningContent string
@@ -30,6 +31,7 @@ type aiChatRequestContext struct {
 	threshold     int
 }
 
+// Chat AI 非流式聊天：准备上下文 → 调用 DeepSeek → 保存回复 → 触发记忆压缩
 func (s *AiMessageService) Chat(ctx context.Context, sessionID, userID, content string) (*dto.AiChatRespDTO, error) {
 	chatCtx, content, err := s.prepareAiChat(ctx, sessionID, userID, content)
 	if err != nil {
@@ -44,6 +46,7 @@ func (s *AiMessageService) Chat(ctx context.Context, sessionID, userID, content 
 	return s.finishAiChat(ctx, sessionID, userID, chatCtx.userMessage, reply, chatCtx.threshold)
 }
 
+// ChatStream AI SSE 流式聊天：流式调用 DeepSeek，逐 chunk 回调，最后保存完整回复
 func (s *AiMessageService) ChatStream(ctx context.Context, sessionID, userID, content string, onChunk func(AiChatStreamChunk) error) (*dto.AiChatRespDTO, error) {
 	chatCtx, content, err := s.prepareAiChat(ctx, sessionID, userID, content)
 	if err != nil {
@@ -77,6 +80,7 @@ func (s *AiMessageService) ChatStream(ctx context.Context, sessionID, userID, co
 	return s.finishAiChat(ctx, sessionID, userID, chatCtx.userMessage, reply, chatCtx.threshold)
 }
 
+// prepareAiChat 准备聊天上下文：校验内容非空 → 校验会话存在 → 加载记忆上下文 → 保存用户消息
 func (s *AiMessageService) prepareAiChat(ctx context.Context, sessionID, userID, content string) (*aiChatRequestContext, string, error) {
 	content = strings.TrimSpace(content)
 	if content == "" {
@@ -111,6 +115,7 @@ func (s *AiMessageService) prepareAiChat(ctx context.Context, sessionID, userID,
 	}, content, nil
 }
 
+// finishAiChat 完成聊天：保存 assistant 消息 → 更新会话消息数 → 异步触发记忆压缩 → 返回响应 DTO
 func (s *AiMessageService) finishAiChat(ctx context.Context, sessionID, userID string, userMessage *models.AiMessage, reply string, threshold int) (*dto.AiChatRespDTO, error) {
 	assistantMessage, err := mongorepo.SaveAiMessage(ctx, sessionID, userID, "assistant", reply)
 	if err != nil {
@@ -135,6 +140,7 @@ func (s *AiMessageService) finishAiChat(ctx context.Context, sessionID, userID s
 	}, nil
 }
 
+// buildAiChatPromptMessages 构建含 system 防注入提示 + 记忆上下文 + 用户消息的 prompt
 func buildAiChatPromptMessages(memoryContext, latestUserMessage string) []clients.PromptMessage {
 	messages := []clients.PromptMessage{
 		{
