@@ -54,6 +54,8 @@
 | GET | `/ai/memory/threshold` | `AiMessageController.GetMemoryThreshold` | `AiMemoryService.GetCompressionThresholdConfig` |
 | PUT | `/ai/memory/threshold` | `AiMessageController.SetMemoryThreshold` | `AiMemoryService.SetCompressionThreshold` |
 | GET | `/ai-properties/options` | `AiPropertiesController.GetAvailableAiModels` | `AiPropertiesService.GetAvailableAiModels` |
+| GET | `/ai-properties/presets` | `AiPropertiesController.GetPresetModels` | `clients.PresetModels` |
+| POST | `/ai-properties/preset` | `AiPropertiesController.CreateFromPreset` | `AiPropertiesService.CreateAiProperties` |
 | POST | `/ai-properties` | `AiPropertiesController.CreateAiProperties` | `AiPropertiesService.CreateAiProperties` |
 | PUT | `/ai-properties` | `AiPropertiesController.UpdateAiProperties` | `AiPropertiesService.UpdateAiProperties` |
 | DELETE | `/ai-properties/:id` | `AiPropertiesController.DeleteAiProperties` | `AiPropertiesService.DeleteAiProperties` |

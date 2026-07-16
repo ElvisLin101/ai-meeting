@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"ai-meeting/clients"
 	"ai-meeting/dto"
 	"ai-meeting/services/ai"
 	"errors"
@@ -397,6 +398,57 @@ func (c *AiPropertiesController) CreateAiProperties(ctx *gin.Context) {
 	}
 
 	if err := c.propertiesService.CreateAiProperties(req); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "Create success"})
+}
+
+// GetPresetModels 返回预设模型模板列表
+func (c *AiPropertiesController) GetPresetModels(ctx *gin.Context) {
+	ctx.JSON(http.StatusOK, clients.PresetModels)
+}
+
+// CreateFromPreset 按预设模板创建 AI 配置（用户只需填 apiKey）
+func (c *AiPropertiesController) CreateFromPreset(ctx *gin.Context) {
+	var req dto.AiPropertiesCreateFromPresetReqDTO
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 查找预设模板
+	preset := clients.GetPresetByProvider(req.Provider)
+	if preset == nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "不支持的 provider: " + req.Provider})
+		return
+	}
+
+	// 用户没填的用预设默认值填充
+	endpoint := req.Endpoint
+	if endpoint == "" {
+		endpoint = preset.Endpoint
+	}
+	modelType := req.ModelType
+	if modelType == "" {
+		modelType = preset.ModelType
+	}
+	config := req.Config
+	if config == "" {
+		config = preset.ConfigHint
+	}
+
+	createReq := dto.AiPropertiesCreateReqDTO{
+		Name:      req.Name,
+		ModelType: modelType,
+		ApiKey:    req.ApiKey,
+		ApiSecret: req.ApiSecret,
+		Endpoint:  endpoint,
+		Config:    config,
+	}
+
+	if err := c.propertiesService.CreateAiProperties(createReq); err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

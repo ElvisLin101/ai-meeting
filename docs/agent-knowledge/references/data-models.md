@@ -13,8 +13,12 @@
 `models/agent.go`
 
 - `AgentProperties` -> `agent_properties`
+  - 关键字段: `ID`, `Name`, `Description`, `Config`, `IsEnabled`, `ApiKey`, `ApiSecret`, `ApiFlowId`, `CreatedAt`, `UpdatedAt`
+  - `ApiKey`/`ApiSecret`/`ApiFlowId` 用于讯飞星辰工作流鉴权和指定工作流。
+  - 启动时全量加载到 `AgentPropertiesLoader` 的 sync.Map 缓存。
 - `AgentConversation` -> `agent_conversations`
 - `AgentMessage` -> MongoDB `agent_messages`
+  - 关键字段含 `ResponseTime`(int64, 毫秒, assistant 消息专用) 和 `ErrorMessage`(string, 出错时记录)
 - `AgentFileAsset` -> `agent_file_assets`
 
 关键关系:

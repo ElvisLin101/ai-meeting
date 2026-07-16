@@ -48,11 +48,22 @@ type AiChatRespDTO struct {
 
 type AiPropertiesCreateReqDTO struct {
 	Name      string `json:"name" binding:"required"`
-	ModelType string `json:"model_type" binding:"required"`
+	ModelType string `json:"model_type"`
 	ApiKey    string `json:"api_key"`
 	ApiSecret string `json:"api_secret"`
 	Endpoint  string `json:"endpoint"`
 	Config    string `json:"config"`
+}
+
+// AiPropertiesCreateFromPresetReqDTO 按预设模板创建（用户只需填 apiKey）
+type AiPropertiesCreateFromPresetReqDTO struct {
+	Provider string `json:"provider" binding:"required"` // deepseek/doubao/glm/qwen/moonshot/openai/custom
+	Name     string `json:"name" binding:"required"`     // 用户自定义名称
+	ApiKey   string `json:"api_key" binding:"required"`  // 用户填入的 API Key
+	ApiSecret string `json:"api_secret"`                 // 可选
+	ModelType string `json:"model_type"`                 // 可选，不填用预设默认
+	Endpoint  string `json:"endpoint"`                   // 可选，不填用预设默认
+	Config    string `json:"config"`                     // 可选，配置 JSON
 }
 
 type AiPropertiesUpdateReqDTO struct {

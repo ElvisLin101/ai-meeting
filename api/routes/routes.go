@@ -90,6 +90,8 @@ func setupAiRoutes(api *gin.RouterGroup) {
 
 	aiProperties := api.Group("/ai-properties")
 	aiProperties.GET("/options", aiPropertiesController.GetAvailableAiModels)
+	aiProperties.GET("/presets", aiPropertiesController.GetPresetModels)
+	aiProperties.POST("/preset", aiPropertiesController.CreateFromPreset)
 	aiProperties.POST("", aiPropertiesController.CreateAiProperties)
 	aiProperties.PUT("", aiPropertiesController.UpdateAiProperties)
 	aiProperties.DELETE("/:id", aiPropertiesController.DeleteAiProperties)
