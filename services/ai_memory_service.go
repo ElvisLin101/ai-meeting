@@ -3,6 +3,7 @@ package services
 import (
 	"ai-meeting/clients"
 	"ai-meeting/models"
+	"ai-meeting/pkg/singleflight"
 	"ai-meeting/repositories"
 	mongorepo "ai-meeting/repositories/mongo"
 	"context"
@@ -24,9 +25,8 @@ const (
 )
 
 type AiMemoryService struct {
-	mu          sync.RWMutex
-	threshold   int
-	compressing sync.Map
+	mu        sync.RWMutex
+	threshold int
 }
 
 var aiMemoryServiceInstance *AiMemoryService
@@ -52,57 +52,63 @@ func (s *AiMemoryService) GetContext(ctx context.Context, sessionID, userID stri
 
 func (s *AiMemoryService) CompressContext(sessionID, userID string, threshold int) {
 	threshold = s.normalizeThreshold(threshold)
-	compressKey := sessionID + ":" + userID
-	if _, loaded := s.compressing.LoadOrStore(compressKey, struct{}{}); loaded {
-		return
-	}
 
+	// 使用分布式 singleflight 去重，全集群同一 session 只压缩一次
 	go func() {
-		defer s.compressing.Delete(compressKey)
-
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		sfKey := "compress:ai:" + sessionID + ":" + userID
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		defer cancel()
 
-		messages, err := mongorepo.ListAiMessagesDesc(ctx, sessionID, userID)
+		result, err := repositories.SingleFlight.Do(ctx, sfKey, func(ctx context.Context, writer *singleflight.StreamWriter) (interface{}, error) {
+			return s.doCompressAiContext(ctx, sessionID, userID, threshold)
+		})
 		if err != nil {
-			logrus.Error("Failed to get AI messages for compression:", err)
+			logrus.Errorf("AI context compression singleflight failed for session %s: %v", sessionID, err)
 			return
 		}
-		if len(messages) < 2 {
-			return
-		}
-
-		totalLength := aiMessagesLength(messages)
-		if totalLength < threshold-COMPRESSION_TRIGGER_OFFSET {
-			return
-		}
-
-		recentCount := int(float64(len(messages)) * (1 - COMPRESSION_RATIO))
-		if recentCount < 1 {
-			recentCount = 1
-		}
-		if recentCount >= len(messages) {
-			return
-		}
-
-		compressMessages := messages[recentCount:]
-		contextToCompress := buildAiChronologicalContext(compressMessages)
-		compressedText, err := s.callAIForCompression(ctx, contextToCompress)
-		if err != nil {
-			logrus.Error("Failed to compress AI context:", err)
-			return
-		}
-
-		compressIndex := compressMessages[0].Sequence
-		if err := s.saveCompressedContextToRedis(ctx, sessionID, compressedText, compressIndex); err != nil {
-			logrus.Error("Failed to save AI compressed context to Redis:", err)
-			return
-		}
-
-		go s.persistToMongo(sessionID, compressedText, compressIndex, totalLength, len(messages))
-		logrus.Infof("AI context compressed for session %s, index: %d, recent count: %d",
-			sessionID, compressIndex, recentCount)
+		_ = result
 	}()
+}
+
+// doCompressAiContext 执行实际的 AI 上下文压缩逻辑
+func (s *AiMemoryService) doCompressAiContext(ctx context.Context, sessionID, userID string, threshold int) (interface{}, error) {
+	messages, err := mongorepo.ListAiMessagesDesc(ctx, sessionID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get AI messages: %w", err)
+	}
+	if len(messages) < 2 {
+		return nil, nil
+	}
+
+	totalLength := aiMessagesLength(messages)
+	if totalLength < threshold-COMPRESSION_TRIGGER_OFFSET {
+		return nil, nil
+	}
+
+	recentCount := int(float64(len(messages)) * (1 - COMPRESSION_RATIO))
+	if recentCount < 1 {
+		recentCount = 1
+	}
+	if recentCount >= len(messages) {
+		return nil, nil
+	}
+
+	compressMessages := messages[recentCount:]
+	contextToCompress := buildAiChronologicalContext(compressMessages)
+	compressedText, err := s.callAIForCompression(ctx, contextToCompress)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compress AI context: %w", err)
+	}
+
+	compressIndex := compressMessages[0].Sequence
+	if err := s.saveCompressedContextToRedis(ctx, sessionID, compressedText, compressIndex); err != nil {
+		return nil, fmt.Errorf("failed to save AI compressed context to Redis: %w", err)
+	}
+
+	go s.persistToMongo(sessionID, compressedText, compressIndex, totalLength, len(messages))
+	logrus.Infof("AI context compressed for session %s, index: %d, recent count: %d",
+		sessionID, compressIndex, recentCount)
+	return nil, nil
 }
 
 func (s *AiMemoryService) loadCompressedContext(ctx context.Context, sessionID string) (string, int) {

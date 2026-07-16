@@ -3,6 +3,7 @@ package services
 import (
 	"ai-meeting/clients"
 	"ai-meeting/models"
+	"ai-meeting/pkg/singleflight"
 	"ai-meeting/repositories"
 	mongorepo "ai-meeting/repositories/mongo"
 	"context"
@@ -143,56 +144,67 @@ func (s *MemoryService) buildContextWithWindow(compressedCtx string, messages []
 func (s *MemoryService) CompressContext(sessionID, userID string, threshold int) {
 	threshold = s.normalizeThreshold(threshold)
 
+	// 使用分布式 singleflight 去重，全集群同一 session 只压缩一次
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		sfKey := "compress:agent:" + sessionID + ":" + userID
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		defer cancel()
 
-		messages, err := mongorepo.ListAgentMessagesDesc(ctx, sessionID, userID)
+		result, err := repositories.SingleFlight.Do(ctx, sfKey, func(ctx context.Context, writer *singleflight.StreamWriter) (interface{}, error) {
+			return s.doCompressContext(ctx, sessionID, userID, threshold)
+		})
 		if err != nil {
-			logrus.Error("Failed to get messages for compression:", err)
+			logrus.Errorf("Context compression singleflight failed for session %s: %v", sessionID, err)
 			return
 		}
-		if len(messages) == 0 {
-			return
-		}
-
-		totalLength := messagesLength(messages)
-		if totalLength < threshold-COMPRESSION_TRIGGER_OFFSET {
-			return
-		}
-
-		recentCount := int(float64(len(messages)) * (1 - COMPRESSION_RATIO))
-		if recentCount < 1 {
-			recentCount = 1
-		}
-		if recentCount >= len(messages) {
-			recentCount = len(messages) - 1
-		}
-
-		compressMessages := messages[recentCount:]
-		if len(compressMessages) == 0 {
-			return
-		}
-
-		contextToCompress := buildChronologicalContext(compressMessages)
-		compressedText, err := s.callAIForCompression(ctx, contextToCompress)
-		if err != nil {
-			logrus.Error("Failed to compress context:", err)
-			return
-		}
-
-		// messages 为倒序，compressMessages[0] 是已压缩部分中最新的一条。
-		compressIndex := compressMessages[0].Sequence
-		if err := s.saveCompressedContextToRedis(ctx, sessionID, compressedText, compressIndex); err != nil {
-			logrus.Error("Failed to save compressed context to Redis:", err)
-			return
-		}
-
-		go s.persistToMongo(sessionID, compressedText, compressIndex, totalLength, len(messages))
-
-		logrus.Infof("Context compressed for session %s, index: %d, recent count: %d",
-			sessionID, compressIndex, recentCount)
+		_ = result
 	}()
+}
+
+// doCompressContext 执行实际的上下文压缩逻辑
+func (s *MemoryService) doCompressContext(ctx context.Context, sessionID, userID string, threshold int) (interface{}, error) {
+	messages, err := mongorepo.ListAgentMessagesDesc(ctx, sessionID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get messages: %w", err)
+	}
+	if len(messages) == 0 {
+		return nil, nil
+	}
+
+	totalLength := messagesLength(messages)
+	if totalLength < threshold-COMPRESSION_TRIGGER_OFFSET {
+		return nil, nil
+	}
+
+	recentCount := int(float64(len(messages)) * (1 - COMPRESSION_RATIO))
+	if recentCount < 1 {
+		recentCount = 1
+	}
+	if recentCount >= len(messages) {
+		recentCount = len(messages) - 1
+	}
+
+	compressMessages := messages[recentCount:]
+	if len(compressMessages) == 0 {
+		return nil, nil
+	}
+
+	contextToCompress := buildChronologicalContext(compressMessages)
+	compressedText, err := s.callAIForCompression(ctx, contextToCompress)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compress context: %w", err)
+	}
+
+	compressIndex := compressMessages[0].Sequence
+	if err := s.saveCompressedContextToRedis(ctx, sessionID, compressedText, compressIndex); err != nil {
+		return nil, fmt.Errorf("failed to save compressed context to Redis: %w", err)
+	}
+
+	go s.persistToMongo(sessionID, compressedText, compressIndex, totalLength, len(messages))
+
+	logrus.Infof("Context compressed for session %s, index: %d, recent count: %d",
+		sessionID, compressIndex, recentCount)
+	return nil, nil
 }
 
 func (s *MemoryService) saveCompressedContextToRedis(ctx context.Context, sessionID, compressedContent string, index int) error {

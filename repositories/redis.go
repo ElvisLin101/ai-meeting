@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"ai-meeting/config"
+	"ai-meeting/pkg/singleflight"
 	"fmt"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 )
 
 var RedisClient *redis.Client
+var SingleFlight *singleflight.DistributedGroup
 
 func InitRedis() {
 	cfg := config.GetConfig()
@@ -28,4 +30,7 @@ func InitRedis() {
 		logrus.Fatalf("Failed to connect to Redis: %v", err)
 	}
 	logrus.Info("Redis connection established")
+
+	// 初始化分布式 singleflight
+	SingleFlight = singleflight.NewDistributedGroup(RedisClient)
 }
