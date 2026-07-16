@@ -65,21 +65,28 @@ func (c *AgentController) Chat(ctx *gin.Context) {
 		return
 	}
 
-	req.SessionID = sessionID
-	req.UserName = username.(string)
+	// 设置 SSE 响应头
+	ctx.Header("Content-Type", "text/event-stream")
+	ctx.Header("Cache-Control", "no-cache")
+	ctx.Header("Connection", "keep-alive")
+	ctx.Header("X-Accel-Buffering", "no")
 
-	if err := c.agentMessageService.SaveMessage(sessionID, username.(string), "user", req.Content); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+	// 调用 Agent Chat SSE，通过 onChunk 回调实时推送 chunk 给前端
+	_, err := c.agentMessageService.AgentChatSSE(sessionID, username.(string), req.Content, func(chunk string) {
+		ctx.SSEvent("message", chunk)
+		ctx.Writer.Flush()
+	})
+
+	if err != nil {
+		// SSE 模式下错误也通过 event 推送
+		ctx.SSEvent("error", err.Error())
+		ctx.Writer.Flush()
+		logrus.Errorf("Agent chat SSE failed, session=%s, err=%v", sessionID, err)
 	}
 
-	go func() {
-		if _, err := c.agentMessageService.GetConversationHistoryWithContext(sessionID, username.(string)); err != nil {
-			logrus.Warnf("Failed to build memory context, session=%s, err=%v", sessionID, err)
-		}
-	}()
-
-	ctx.JSON(http.StatusOK, gin.H{"message": "Message received"})
+	// 发送结束标记
+	ctx.SSEvent("end", "[DONE]")
+	ctx.Writer.Flush()
 }
 
 func (c *AgentController) PageConversations(ctx *gin.Context) {

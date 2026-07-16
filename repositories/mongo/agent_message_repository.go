@@ -121,3 +121,32 @@ func nextAgentMessageSequence(ctx context.Context, collection *drivermongo.Colle
 	}
 	return latest.Sequence + 1, nil
 }
+
+// SaveAgentMessageWithDetail 保存消息（含 responseTime 和 errorMessage，用于 assistant 消息）
+func SaveAgentMessageWithDetail(ctx context.Context, sessionID, userID, role, content string, responseTime int64, errorMessage string) (int, error) {
+	collection, err := GetCollection(agentMessagesCollection)
+	if err != nil {
+		return 0, err
+	}
+
+	maxSeq, err := nextAgentMessageSequence(ctx, collection, sessionID, userID)
+	if err != nil {
+		return 0, err
+	}
+
+	message := models.AgentMessage{
+		SessionID:    sessionID,
+		UserID:       userID,
+		Role:         role,
+		Content:      content,
+		Sequence:     maxSeq,
+		ResponseTime: responseTime,
+		ErrorMessage: errorMessage,
+		CreatedAt:    time.Now(),
+	}
+	_, err = collection.InsertOne(ctx, message)
+	if err != nil {
+		return 0, err
+	}
+	return maxSeq, nil
+}

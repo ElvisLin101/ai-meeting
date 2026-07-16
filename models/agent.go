@@ -12,6 +12,9 @@ type AgentProperties struct {
 	Description string    `gorm:"size:500" json:"description"`
 	Config      string    `gorm:"type:text" json:"config"`
 	IsEnabled   bool      `gorm:"default:true" json:"is_enabled"`
+	ApiKey      string    `gorm:"size:255" json:"api_key"`
+	ApiSecret   string    `gorm:"size:255" json:"api_secret"`
+	ApiFlowId   string    `gorm:"size:255" json:"api_flow_id"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
@@ -37,14 +40,16 @@ func (AgentConversation) TableName() string {
 }
 
 type AgentMessage struct {
-	ID        uint               `gorm:"primaryKey" json:"id" bson:"-"`
-	MongoID   primitive.ObjectID `gorm:"-" json:"-" bson:"_id,omitempty"`
-	SessionID string             `gorm:"size:64;index;not null" json:"session_id" bson:"session_id"`
-	UserID    string             `gorm:"size:64;not null" json:"user_id" bson:"user_id"`
-	Role      string             `gorm:"size:20;not null" json:"role" bson:"role"`
-	Content   string             `gorm:"type:text;not null" json:"content" bson:"content"`
-	Sequence  int                `json:"sequence" bson:"sequence"`
-	CreatedAt time.Time          `json:"created_at" bson:"created_at"`
+	ID           uint               `gorm:"primaryKey" json:"id" bson:"-"`
+	MongoID      primitive.ObjectID `gorm:"-" json:"-" bson:"_id,omitempty"`
+	SessionID    string             `gorm:"size:64;index;not null" json:"session_id" bson:"session_id"`
+	UserID       string             `gorm:"size:64;not null" json:"user_id" bson:"user_id"`
+	Role         string             `gorm:"size:20;not null" json:"role" bson:"role"`
+	Content      string             `gorm:"type:text;not null" json:"content" bson:"content"`
+	Sequence     int                `json:"sequence" bson:"sequence"`
+	ResponseTime int64              `json:"response_time,omitempty" bson:"response_time,omitempty"`
+	ErrorMessage string             `gorm:"type:text" json:"error_message,omitempty" bson:"error_message,omitempty"`
+	CreatedAt    time.Time          `json:"created_at" bson:"created_at"`
 }
 
 func (AgentMessage) TableName() string {

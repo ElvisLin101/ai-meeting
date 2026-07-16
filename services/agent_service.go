@@ -1,6 +1,7 @@
 package services
 
 import (
+	"ai-meeting/clients"
 	"ai-meeting/dto"
 	"ai-meeting/models"
 	mongorepo "ai-meeting/repositories/mongo"
@@ -89,6 +90,111 @@ func (s *AgentMessageService) GetConversationHistoryWithContext(sessionID, userI
 	}
 
 	return context, nil
+}
+
+// AgentChatSSE Agent SSE 流式聊天
+// onChunk 回调用于实时推送 chunk 给前端
+// 返回完整回复内容
+func (s *AgentMessageService) AgentChatSSE(sessionID, userID, content string, onChunk func(chunk string)) (string, error) {
+	// 1. 会话归属校验
+	conv, err := mysqlrepo.GetAgentConversationBySessionId(sessionID, userID)
+	if err != nil || conv == nil {
+		return "", fmt.Errorf("会话不存在或无权限: %w", err)
+	}
+
+	// 2. 解析智能体配置
+	agentProps := GetAgentPropertiesLoader().GetByAgentID(conv.AgentID)
+	if agentProps == nil {
+		return "", fmt.Errorf("智能体配置不存在, agentID=%d", conv.AgentID)
+	}
+	if agentProps.ApiKey == "" || agentProps.ApiSecret == "" || agentProps.ApiFlowId == "" {
+		return "", fmt.Errorf("智能体配置不完整, 缺少 apiKey/apiSecret/apiFlowId")
+	}
+
+	// 3. 保存用户消息
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := mongorepo.SaveAgentMessage(ctx, sessionID, userID, "user", content); err != nil {
+		return "", fmt.Errorf("保存用户消息失败: %w", err)
+	}
+
+	// 4. 加载历史消息构建 history
+	historyCtx, historyCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer historyCancel()
+	messages, err := mongorepo.ListAgentMessagesAsc(historyCtx, sessionID, userID)
+	if err != nil {
+		return "", fmt.Errorf("加载历史消息失败: %w", err)
+	}
+	history := buildXingChenHistory(messages)
+
+	// 5. 调用讯飞星辰工作流流式聊天
+	startTime := time.Now()
+	xingChenClient := clients.GetXingChenClient()
+	fullContent, err := xingChenClient.ChatStream(
+		content, sessionID, history,
+		agentProps.ApiFlowId, agentProps.ApiKey, agentProps.ApiSecret,
+		onChunk,
+	)
+	responseTime := time.Since(startTime).Milliseconds()
+
+	if err != nil {
+		// 6a. 出错也保存一条错误 assistant 消息
+		errorMsg := ""
+		if err != nil {
+			errorMsg = err.Error()
+		}
+		saveCtx, saveCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer saveCancel()
+		mongorepo.SaveAgentMessageWithDetail(saveCtx, sessionID, userID, "assistant", "Sorry, an error occurred while processing your request.", responseTime, errorMsg)
+		logrus.Errorf("Agent chat failed, session=%s, err=%v", sessionID, err)
+		return "", fmt.Errorf("调用工作流失败: %w", err)
+	}
+
+	// 6b. 保存 assistant 回复
+	saveCtx, saveCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer saveCancel()
+	assistantSeq, err := mongorepo.SaveAgentMessageWithDetail(saveCtx, sessionID, userID, "assistant", fullContent, responseTime, "")
+	if err != nil {
+		logrus.Errorf("Failed to save assistant message, session=%s, err=%v", sessionID, err)
+	}
+
+	// 7. 更新会话消息计数
+	if err := mysqlrepo.UpdateAgentConversationMessageCount(sessionID, assistantSeq); err != nil {
+		logrus.Errorf("Failed to update conversation message count, session=%s, err=%v", sessionID, err)
+	}
+
+	// 8. 异步触发记忆压缩
+	go func() {
+		memoryService := GetMemoryService()
+		threshold := memoryService.GetCompressionThreshold()
+		memoryService.CompressContext(sessionID, userID, threshold)
+	}()
+
+	logrus.Infof("Agent chat completed, session=%s, responseTime=%dms, contentLen=%d",
+		sessionID, responseTime, len(fullContent))
+	return fullContent, nil
+}
+
+// buildXingChenHistory 将历史消息转为讯飞星辰需要的格式
+func buildXingChenHistory(messages []models.AgentMessage) []clients.XingChenHistoryItem {
+	// 排除最后一条（当前用户消息，已经作为 input 传入）
+	if len(messages) > 0 {
+		messages = messages[:len(messages)-1]
+	}
+
+	history := make([]clients.XingChenHistoryItem, 0, len(messages))
+	for _, msg := range messages {
+		role := "user"
+		if msg.Role == "assistant" {
+			role = "assistant"
+		}
+		history = append(history, clients.XingChenHistoryItem{
+			Role:        role,
+			ContentType: "text",
+			Content:     msg.Content,
+		})
+	}
+	return history
 }
 
 var agentMessageServiceInstance *AgentMessageService
