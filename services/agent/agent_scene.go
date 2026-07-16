@@ -1,4 +1,4 @@
-package services
+package agent
 
 // BusinessAgentScene 业务智能体场景枚举
 // 每个场景对应一个讯飞星辰工作流，通过场景名称解析到具体的 AgentProperties

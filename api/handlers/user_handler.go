@@ -3,7 +3,7 @@ package handlers
 import (
 	"ai-meeting/api/middleware"
 	"ai-meeting/dto"
-	"ai-meeting/services"
+	"ai-meeting/services/user"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -11,12 +11,12 @@ import (
 )
 
 type UserHandler struct {
-	userService *services.UserService
+	userService *user.UserService
 }
 
 func NewUserHandler() *UserHandler {
 	return &UserHandler{
-		userService: services.GetUserService(),
+		userService: user.GetUserService(),
 	}
 }
 

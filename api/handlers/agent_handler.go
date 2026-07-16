@@ -3,7 +3,8 @@ package handlers
 import (
 	"ai-meeting/dto"
 	"ai-meeting/models"
-	"ai-meeting/services"
+	agent "ai-meeting/services/agent"
+	common "ai-meeting/services/common"
 	"net/http"
 	"strconv"
 
@@ -12,16 +13,16 @@ import (
 )
 
 type AgentController struct {
-	agentConversationService *services.AgentConversationService
-	agentMessageService      *services.AgentMessageService
-	memoryService            *services.MemoryService
+	agentConversationService *agent.AgentConversationService
+	agentMessageService      *agent.AgentMessageService
+	memoryService            *common.MemoryService
 }
 
 func NewAgentController() *AgentController {
 	return &AgentController{
-		agentConversationService: services.GetAgentConversationService(),
-		agentMessageService:      services.GetAgentMessageService(),
-		memoryService:            services.GetMemoryService(),
+		agentConversationService: agent.GetAgentConversationService(),
+		agentMessageService:      agent.GetAgentMessageService(),
+		memoryService:            common.GetMemoryService(),
 	}
 }
 
@@ -255,12 +256,12 @@ func toAgentMessageHistoryResp(msg models.AgentMessage) dto.AgentMessageHistoryR
 }
 
 type AgentFileController struct {
-	fileAssetService *services.AgentFileAssetService
+	fileAssetService *agent.AgentFileAssetService
 }
 
 func NewAgentFileController() *AgentFileController {
 	return &AgentFileController{
-		fileAssetService: services.GetAgentFileAssetService(),
+		fileAssetService: agent.GetAgentFileAssetService(),
 	}
 }
 
@@ -295,12 +296,12 @@ func (c *AgentFileController) Upload(ctx *gin.Context) {
 }
 
 type AgentPropertiesController struct {
-	propertiesService *services.AgentPropertiesService
+	propertiesService *agent.AgentPropertiesService
 }
 
 func NewAgentPropertiesController() *AgentPropertiesController {
 	return &AgentPropertiesController{
-		propertiesService: services.GetAgentPropertiesService(),
+		propertiesService: agent.GetAgentPropertiesService(),
 	}
 }
 

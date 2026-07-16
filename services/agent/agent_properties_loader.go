@@ -1,4 +1,4 @@
-package services
+package agent
 
 import (
 	"ai-meeting/models"

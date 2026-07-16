@@ -2,7 +2,7 @@ package handlers
 
 import (
 	"ai-meeting/dto"
-	"ai-meeting/services"
+	"ai-meeting/services/interview"
 	"net/http"
 	"strconv"
 
@@ -10,12 +10,12 @@ import (
 )
 
 type InterviewSessionController struct {
-	sessionFacade *services.InterviewSessionFacade
+	sessionFacade *interview.InterviewSessionFacade
 }
 
 func NewInterviewSessionController() *InterviewSessionController {
 	return &InterviewSessionController{
-		sessionFacade: services.GetInterviewSessionFacade(),
+		sessionFacade: interview.GetInterviewSessionFacade(),
 	}
 }
 
@@ -394,12 +394,12 @@ func (c *InterviewSessionController) EvaluateDemeanor(ctx *gin.Context) {
 }
 
 type InterviewRecordController struct {
-	recordService *services.InterviewRecordService
+	recordService *interview.InterviewRecordService
 }
 
 func NewInterviewRecordController() *InterviewRecordController {
 	return &InterviewRecordController{
-		recordService: services.GetInterviewRecordService(),
+		recordService: interview.GetInterviewRecordService(),
 	}
 }
 

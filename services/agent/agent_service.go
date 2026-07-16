@@ -1,9 +1,10 @@
-package services
+package agent
 
 import (
 	"ai-meeting/clients"
 	"ai-meeting/dto"
 	"ai-meeting/models"
+	"ai-meeting/services/common"
 	mongorepo "ai-meeting/repositories/mongo"
 	mysqlrepo "ai-meeting/repositories/mysql"
 	"context"
@@ -80,7 +81,7 @@ func (s *AgentMessageService) SaveMessage(sessionID, userID, role, content strin
 
 // GetConversationHistoryWithContext 获取带上下文的历史消息
 func (s *AgentMessageService) GetConversationHistoryWithContext(sessionID, userID string) (string, error) {
-	memoryService := GetMemoryService()
+	memoryService := common.GetMemoryService()
 	threshold := memoryService.GetCompressionThreshold()
 
 	// 获取上下文
@@ -165,7 +166,7 @@ func (s *AgentMessageService) AgentChatSSE(sessionID, userID, content string, on
 
 	// 8. 异步触发记忆压缩
 	go func() {
-		memoryService := GetMemoryService()
+		memoryService := common.GetMemoryService()
 		threshold := memoryService.GetCompressionThreshold()
 		memoryService.CompressContext(sessionID, userID, threshold)
 	}()

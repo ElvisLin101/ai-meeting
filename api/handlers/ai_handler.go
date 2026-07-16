@@ -2,7 +2,7 @@ package handlers
 
 import (
 	"ai-meeting/dto"
-	"ai-meeting/services"
+	"ai-meeting/services/ai"
 	"errors"
 	"net/http"
 	"strconv"
@@ -12,12 +12,12 @@ import (
 )
 
 type AiConversationController struct {
-	conversationService *services.AiConversationService
+	conversationService *ai.AiConversationService
 }
 
 func NewAiConversationController() *AiConversationController {
 	return &AiConversationController{
-		conversationService: services.GetAiConversationService(),
+		conversationService: ai.GetAiConversationService(),
 	}
 }
 
@@ -160,14 +160,14 @@ func (c *AiConversationController) GetConversationById(ctx *gin.Context) {
 }
 
 type AiMessageController struct {
-	messageService *services.AiMessageService
-	memoryService  *services.AiMemoryService
+	messageService *ai.AiMessageService
+	memoryService  *ai.AiMemoryService
 }
 
 func NewAiMessageController() *AiMessageController {
 	return &AiMessageController{
-		messageService: services.GetAiMessageService(),
-		memoryService:  services.GetAiMemoryService(),
+		messageService: ai.GetAiMessageService(),
+		memoryService:  ai.GetAiMemoryService(),
 	}
 }
 
@@ -189,11 +189,11 @@ func (c *AiMessageController) Chat(ctx *gin.Context) {
 
 	resp, err := c.messageService.Chat(ctx.Request.Context(), sessionID, username.(string), req.Content)
 	if err != nil {
-		if errors.Is(err, services.ErrEmptyAiMessageContent) {
+		if errors.Is(err, ai.ErrEmptyAiMessageContent) {
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if errors.Is(err, services.ErrAiConversationNotFound) {
+		if errors.Is(err, ai.ErrAiConversationNotFound) {
 			ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			return
 		}
@@ -212,7 +212,7 @@ func (c *AiMessageController) ChatStream(ctx *gin.Context) {
 		return
 	}
 	if strings.TrimSpace(req.Content) == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": services.ErrEmptyAiMessageContent.Error()})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": ai.ErrEmptyAiMessageContent.Error()})
 		return
 	}
 
@@ -229,7 +229,7 @@ func (c *AiMessageController) ChatStream(ctx *gin.Context) {
 	ctx.Status(http.StatusOK)
 	ctx.Writer.Flush()
 
-	resp, err := c.messageService.ChatStream(ctx.Request.Context(), sessionID, username.(string), req.Content, func(chunk services.AiChatStreamChunk) error {
+	resp, err := c.messageService.ChatStream(ctx.Request.Context(), sessionID, username.(string), req.Content, func(chunk ai.AiChatStreamChunk) error {
 		if err := ctx.Request.Context().Err(); err != nil {
 			return err
 		}
@@ -362,12 +362,12 @@ func (c *AiMessageController) SetMemoryThreshold(ctx *gin.Context) {
 }
 
 type AiPropertiesController struct {
-	propertiesService *services.AiPropertiesService
+	propertiesService *ai.AiPropertiesService
 }
 
 func NewAiPropertiesController() *AiPropertiesController {
 	return &AiPropertiesController{
-		propertiesService: services.GetAiPropertiesService(),
+		propertiesService: ai.GetAiPropertiesService(),
 	}
 }
 

@@ -1,4 +1,4 @@
-package services
+package interview
 
 import (
 	"ai-meeting/dto"

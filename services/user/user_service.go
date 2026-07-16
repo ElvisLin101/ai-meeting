@@ -1,4 +1,4 @@
-package services
+package user
 
 import (
 	"ai-meeting/dto"
