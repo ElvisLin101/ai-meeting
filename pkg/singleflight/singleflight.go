@@ -32,21 +32,23 @@ const (
 	FollowerPoll    = 10 * time.Second  // 从节点检查间隔
 )
 
-// StreamWriter 主节点用它把 AI 流式输出写入 Redis
+// StreamWriter 主节点用它把 AI 流式输出进度写入 Redis 作为心跳。
+// 只刷新进度时间戳,不写流内容——follower 仅靠 progressKey 判停滞,不消费流数据。
 type StreamWriter struct {
-	redis     *redis.Client
-	ctx       context.Context
-	streamKey string // sf:stream:{key}，存增量输出（List）
-	progressKey string // sf:progress:{key}，存最新内容摘要 + 时间戳
-	totalBytes int
+	redis       *redis.Client
+	ctx         context.Context
+	progressKey string // sf:progress:{key}，存累计字节数 + 当前时间戳
+	totalBytes  int
 }
 
-// Write 每收到一段 AI 输出就调用，写入 Redis 作为心跳
+// Write 每收到一段 AI 输出就调用,刷新 progressKey 作为心跳。
+// redis 为 nil 时(本地降级路径的 dummyWriter)直接 no-op,避免 panic。
 func (w *StreamWriter) Write(chunk []byte) (int, error) {
-	// 1. 追加写入流内容（从节点可以读这个做实时展示，也可以不读只看心跳）
-	w.redis.RPush(w.ctx, w.streamKey, string(chunk))
+	if w.redis == nil {
+		return len(chunk), nil
+	}
 
-	// 2. 更新进度：内容长度 + 当前时间戳，从节点用这个判断主节点是否卡死
+	// 更新进度:累计字节数 + 当前时间戳,从节点用这个判断主节点是否卡死
 	w.totalBytes += len(chunk)
 	progress := fmt.Sprintf("%d:%d", w.totalBytes, time.Now().UnixMilli())
 	w.redis.Set(w.ctx, w.progressKey, progress, LockTTL*2)
@@ -103,7 +105,6 @@ func (g *DistributedGroup) Do(ctx context.Context, key string, fn StreamFn) (int
 		lockKey := "sf:lock:" + key
 		resultKey := "sf:result:" + key
 		channel := "sf:channel:" + key
-		streamKey := "sf:stream:" + key
 		progressKey := "sf:progress:" + key
 		cancelKey := "sf:cancel:" + key // 换主时写入，通知旧主停止
 
@@ -119,7 +120,7 @@ func (g *DistributedGroup) Do(ctx context.Context, key string, fn StreamFn) (int
 
 		if acquired {
 			// 3. 我是主节点 → 执行 fn
-			return g.runAsLeader(ctx, key, lockKey, resultKey, channel, streamKey, progressKey, cancelKey, nodeID, fn)
+			return g.runAsLeader(ctx, key, lockKey, resultKey, channel, progressKey, cancelKey, nodeID, fn)
 		}
 
 		// 4. 我是从节点 → 等待结果
@@ -144,7 +145,7 @@ func (g *DistributedGroup) Do(ctx context.Context, key string, fn StreamFn) (int
 // ============================================================
 
 func (g *DistributedGroup) runAsLeader(
-	ctx context.Context, key, lockKey, resultKey, channel, streamKey, progressKey, cancelKey, nodeID string,
+	ctx context.Context, key, lockKey, resultKey, channel, progressKey, cancelKey, nodeID string,
 	fn StreamFn,
 ) (interface{}, error) {
 	execCtx, cancel := context.WithTimeout(ctx, g.maxExec)
@@ -158,14 +159,13 @@ func (g *DistributedGroup) runAsLeader(
 	// 取消监听协程：被换主时 cancel execCtx，DeepSeek SDK 自动断开
 	go g.watchCancel(execCtx, cancelKey, cancel, key)
 
-	// 清理上一次可能残留的流数据和取消标记（换主场景）
-	g.redis.Del(execCtx, streamKey, progressKey, cancelKey)
+	// 清理上一次可能残留的进度数据和取消标记（换主场景）
+	g.redis.Del(execCtx, progressKey, cancelKey)
 
-	// 创建流式写入器，主节点每收到一段 AI 输出就写入 Redis
+	// 创建流式写入器，主节点每收到一段 AI 输出就刷新 progressKey 作心跳
 	writer := &StreamWriter{
 		redis:       g.redis,
 		ctx:         execCtx,
-		streamKey:   streamKey,
 		progressKey: progressKey,
 	}
 
@@ -190,8 +190,8 @@ func (g *DistributedGroup) runAsLeader(
 	}
 	pipe.Exec(execCtx)
 
-	// 清理流数据
-	g.redis.Del(context.Background(), streamKey, progressKey)
+	// 清理进度数据
+	g.redis.Del(context.Background(), progressKey)
 
 	// 释放锁
 	g.releaseLock(context.Background(), lockKey, nodeID)

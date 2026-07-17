@@ -62,3 +62,5 @@ AI-Meeting 是一个 Go 1.22 + Gin 后端。入口在 `main.go`, 路由集中在
 - 知识补充: 如果实现过程中用户补充了新的业务规则, 在提交前沉淀到对应 Skill。
 - Diff 检查: 提交前运行 `scripts/knowledge-check.sh diff`, 让脚本提示可能要更新的 Skill。
 - 全量巡检: 周期性运行 `scripts/knowledge-check.sh full`, 检查文档引用的 Go 文件是否仍存在。
+
+## 每次思考和回答都要用中文, 并叫我一声小林

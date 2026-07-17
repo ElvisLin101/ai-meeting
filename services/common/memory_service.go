@@ -155,7 +155,7 @@ func (s *MemoryService) CompressContext(sessionID, userID string, threshold int)
 		defer cancel()
 
 		result, err := repositories.SingleFlight.Do(ctx, sfKey, func(ctx context.Context, writer *singleflight.StreamWriter) (interface{}, error) {
-			return s.doCompressContext(ctx, sessionID, userID, threshold)
+			return s.doCompressContext(ctx, writer, sessionID, userID, threshold)
 		})
 		if err != nil {
 			logrus.Errorf("Context compression singleflight failed for session %s: %v", sessionID, err)
@@ -166,7 +166,8 @@ func (s *MemoryService) CompressContext(sessionID, userID string, threshold int)
 }
 
 // doCompressContext 执行实际的上下文压缩逻辑
-func (s *MemoryService) doCompressContext(ctx context.Context, sessionID, userID string, threshold int) (interface{}, error) {
+// writer 用于在流式压缩过程中刷新 singleflight 心跳进度。
+func (s *MemoryService) doCompressContext(ctx context.Context, writer *singleflight.StreamWriter, sessionID, userID string, threshold int) (interface{}, error) {
 	messages, err := mongorepo.ListAgentMessagesDesc(ctx, sessionID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get messages: %w", err)
@@ -194,7 +195,7 @@ func (s *MemoryService) doCompressContext(ctx context.Context, sessionID, userID
 	}
 
 	contextToCompress := buildChronologicalContext(compressMessages)
-	compressedText, err := s.callAIForCompression(ctx, contextToCompress)
+	compressedText, err := s.callAIForCompression(ctx, writer, contextToCompress)
 	if err != nil {
 		return nil, fmt.Errorf("failed to compress context: %w", err)
 	}
@@ -266,18 +267,32 @@ func (s *MemoryService) syncToRedis(sessionID, compressedContent string, index i
 	logrus.Infof("Compressed context synced to Redis for session %s", sessionID)
 }
 
-// callAIForCompression 调用 AI 生成 Agent 上下文摘要，失败时回退本地截断
-func (s *MemoryService) callAIForCompression(ctx context.Context, contextText string) (string, error) {
+// callAIForCompression 调用 AI 流式生成 Agent 上下文摘要，每段 chunk 刷新 singleflight 心跳；失败时回退本地截断
+func (s *MemoryService) callAIForCompression(ctx context.Context, writer *singleflight.StreamWriter, contextText string) (string, error) {
 	prompt := buildCompressionPrompt(contextText)
-	compressed, err := clients.CallConfiguredAIChat(ctx, 0, []clients.PromptMessage{
+
+	var replyBuilder strings.Builder
+	err := clients.CallConfiguredAIChatStream(ctx, 0, []clients.PromptMessage{
 		{Role: "system", Content: "你是一个会话记忆压缩器。只输出压缩后的中文记忆摘要，不要解释过程。"},
 		{Role: "user", Content: prompt},
-	}, 0.2)
-	if err == nil && strings.TrimSpace(compressed) != "" {
-		return strings.TrimSpace(compressed), nil
+	}, 0.2, func(chunk clients.ChatStreamChunk) error {
+		// 累积完整压缩结果用于落库
+		if chunk.Content != "" {
+			replyBuilder.WriteString(chunk.Content)
+		}
+		// 每收到一段输出就刷新 progressKey 作心跳，让 follower 知道 leader 还在干活
+		if _, werr := writer.Write([]byte(chunk.Content)); werr != nil {
+			return werr
+		}
+		return nil
+	})
+	if err == nil {
+		if compressed := strings.TrimSpace(replyBuilder.String()); compressed != "" {
+			return compressed, nil
+		}
 	}
 	if err != nil {
-		logrus.Warnf("AI compression request failed, falling back to local summary: %v", err)
+		logrus.Warnf("AI compression stream request failed, falling back to local summary: %v", err)
 	}
 	return fallbackCompressedSummary(contextText), nil
 }
