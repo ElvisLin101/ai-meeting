@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"ai-meeting/dto"
+	"ai-meeting/models"
 	"ai-meeting/services/interview"
 	"net/http"
 	"strconv"
@@ -87,14 +88,7 @@ func (c *InterviewSessionController) GetConversationHistory(ctx *gin.Context) {
 
 	var resp []dto.AgentMessageHistoryRespDTO
 	for _, msg := range messages {
-		resp = append(resp, dto.AgentMessageHistoryRespDTO{
-			ID:        msg.ID,
-			SessionID: msg.SessionID,
-			Role:      msg.Role,
-			Content:   msg.Content,
-			Sequence:  msg.Sequence,
-			CreatedAt: msg.CreatedAt.Format("2006-01-02 15:04:05"),
-		})
+		resp = append(resp, toInterviewMessageHistoryResp(msg))
 	}
 
 	ctx.JSON(http.StatusOK, resp)
@@ -119,14 +113,7 @@ func (c *InterviewSessionController) PageHistoryMessages(ctx *gin.Context) {
 
 	var resp []dto.AgentMessageHistoryRespDTO
 	for _, msg := range messages {
-		resp = append(resp, dto.AgentMessageHistoryRespDTO{
-			ID:        msg.ID,
-			SessionID: msg.SessionID,
-			Role:      msg.Role,
-			Content:   msg.Content,
-			Sequence:  msg.Sequence,
-			CreatedAt: msg.CreatedAt.Format("2006-01-02 15:04:05"),
-		})
+		resp = append(resp, toInterviewMessageHistoryResp(msg))
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{
@@ -445,15 +432,7 @@ func (c *InterviewRecordController) PageInterviewRecords(ctx *gin.Context) {
 
 	var resp []dto.InterviewRecordRespDTO
 	for _, record := range records {
-		resp = append(resp, dto.InterviewRecordRespDTO{
-			ID:          record.ID,
-			SessionID:   record.SessionID,
-			QuestionNum: record.QuestionNum,
-			Question:    record.Question,
-			Answer:      record.Answer,
-			Score:       record.Score,
-			Suggestions: record.Suggestions,
-		})
+		resp = append(resp, toInterviewRecordResp(record))
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{
@@ -476,15 +455,7 @@ func (c *InterviewRecordController) GetInterviewRecordBySessionId(ctx *gin.Conte
 		return
 	}
 
-	ctx.JSON(http.StatusOK, dto.InterviewRecordRespDTO{
-		ID:          record.ID,
-		SessionID:   record.SessionID,
-		QuestionNum: record.QuestionNum,
-		Question:    record.Question,
-		Answer:      record.Answer,
-		Score:       record.Score,
-		Suggestions: record.Suggestions,
-	})
+	ctx.JSON(http.StatusOK, toInterviewRecordResp(*record))
 }
 
 func (c *InterviewRecordController) SaveInterviewRecordFromRedis(ctx *gin.Context) {
@@ -513,4 +484,33 @@ func (c *InterviewResumeController) PreviewResume(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
 	_ = sessionID
 	ctx.JSON(http.StatusOK, gin.H{"message": "Resume preview endpoint"})
+}
+
+func toInterviewMessageHistoryResp(msg models.AgentMessage) dto.AgentMessageHistoryRespDTO {
+	resp := dto.AgentMessageHistoryRespDTO{
+		SessionID: msg.SessionID,
+		Role:      msg.Role,
+		Content:   msg.Content,
+		Sequence:  msg.Sequence,
+		CreatedAt: msg.CreatedAt.Format("2006-01-02 15:04:05"),
+	}
+	if !msg.MongoID.IsZero() {
+		resp.MessageID = msg.MongoID.Hex()
+	}
+	return resp
+}
+
+func toInterviewRecordResp(record models.InterviewRecord) dto.InterviewRecordRespDTO {
+	resp := dto.InterviewRecordRespDTO{
+		SessionID:   record.SessionID,
+		QuestionNum: record.QuestionNum,
+		Question:    record.Question,
+		Answer:      record.Answer,
+		Score:       record.Score,
+		Suggestions: record.Suggestions,
+	}
+	if !record.MongoID.IsZero() {
+		resp.RecordID = record.MongoID.Hex()
+	}
+	return resp
 }

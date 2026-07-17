@@ -24,36 +24,26 @@ func (AgentProperties) TableName() string {
 }
 
 type AgentConversation struct {
-	ID         uint      `gorm:"primaryKey" json:"id"`
-	SessionID  string    `gorm:"unique;size:64;not null" json:"session_id"`
-	UserID     string    `gorm:"size:64;not null" json:"user_id"`
-	AgentID    uint      `json:"agent_id"`
-	Title      string    `gorm:"size:200" json:"title"`
-	Status     int       `gorm:"default:1" json:"status"`
-	MessageCnt int       `gorm:"default:0" json:"message_cnt"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
-}
-
-func (AgentConversation) TableName() string {
-	return "agent_conversations"
+	SessionID  string    `bson:"_id" json:"session_id"`
+	UserID     string    `bson:"user_id" json:"user_id"`
+	AgentID    uint      `bson:"agent_id" json:"agent_id"`
+	Title      string    `bson:"title" json:"title"`
+	Status     int       `bson:"status" json:"status"`
+	MessageCnt int       `bson:"message_cnt" json:"message_cnt"`
+	CreatedAt  time.Time `bson:"created_at" json:"created_at"`
+	UpdatedAt  time.Time `bson:"updated_at" json:"updated_at"`
 }
 
 type AgentMessage struct {
-	ID           uint               `gorm:"primaryKey" json:"id" bson:"-"`
-	MongoID      primitive.ObjectID `gorm:"-" json:"-" bson:"_id,omitempty"`
-	SessionID    string             `gorm:"size:64;index;not null" json:"session_id" bson:"session_id"`
-	UserID       string             `gorm:"size:64;not null" json:"user_id" bson:"user_id"`
-	Role         string             `gorm:"size:20;not null" json:"role" bson:"role"`
-	Content      string             `gorm:"type:text;not null" json:"content" bson:"content"`
+	MongoID      primitive.ObjectID `json:"-" bson:"_id,omitempty"`
+	SessionID    string             `json:"session_id" bson:"session_id"`
+	UserID       string             `json:"user_id" bson:"user_id"`
+	Role         string             `json:"role" bson:"role"`
+	Content      string             `json:"content" bson:"content"`
 	Sequence     int                `json:"sequence" bson:"sequence"`
 	ResponseTime int64              `json:"response_time,omitempty" bson:"response_time,omitempty"`
-	ErrorMessage string             `gorm:"type:text" json:"error_message,omitempty" bson:"error_message,omitempty"`
+	ErrorMessage string             `json:"error_message,omitempty" bson:"error_message,omitempty"`
 	CreatedAt    time.Time          `json:"created_at" bson:"created_at"`
-}
-
-func (AgentMessage) TableName() string {
-	return "agent_messages"
 }
 
 type AgentFileAsset struct {

@@ -12,18 +12,18 @@
 
 `models/agent.go`
 
-- `AgentProperties` -> `agent_properties`
+- `AgentProperties` -> MySQL `agent_properties`（留 MySQL, 配置元数据）
   - 关键字段: `ID`, `Name`, `Description`, `Config`, `IsEnabled`, `ApiKey`, `ApiSecret`, `ApiFlowId`, `CreatedAt`, `UpdatedAt`
   - `ApiKey`/`ApiSecret`/`ApiFlowId` 用于讯飞星辰工作流鉴权和指定工作流。
   - 启动时全量加载到 `AgentPropertiesLoader` 的 sync.Map 缓存。
-- `AgentConversation` -> `agent_conversations`
-- `AgentMessage` -> MongoDB `agent_messages`
+- `AgentConversation` -> MongoDB `agent_conversations`（_id=SessionID）
+- `AgentMessage` -> MongoDB `agent_messages`（_id=ObjectID）
   - 关键字段含 `ResponseTime`(int64, 毫秒, assistant 消息专用) 和 `ErrorMessage`(string, 出错时记录)
-- `AgentFileAsset` -> `agent_file_assets`
+- `AgentFileAsset` -> MySQL `agent_file_assets`（留 MySQL, 文件资产）
 
 关键关系:
 
-- `AgentConversation.SessionID` 是唯一业务会话 ID。
+- `AgentConversation.SessionID` 是 Mongo `_id`, 也是唯一业务会话 ID。
 - `AgentMessage.MongoID` 映射 Mongo `_id`, HTTP 响应通过 `message_id` 暴露。
 - `AgentMessage.SessionID` + `AgentMessage.UserID` 用于历史查询。Agent 侧不压缩。
 - `AgentMessage.Sequence` 用于会话内消息顺序。
@@ -32,17 +32,16 @@
 
 `models/ai.go`
 
-- `AiProperties` -> `ai_properties`
-- `AiConversation` -> `ai_conversations`
-- `AiMessage` -> MongoDB `ai_messages`
+- `AiProperties` -> MySQL `ai_properties`（留 MySQL, 配置元数据）
+- `AiConversation` -> MongoDB `ai_conversations`（_id=SessionID）
+- `AiMessage` -> MongoDB `ai_messages`（_id=ObjectID）
 
 关键关系:
 
-- `AiConversation.UserID` 当前存 JWT `username`。
+- `AiConversation.SessionID` 是 Mongo `_id`。`AiConversation.UserID` 当前存 JWT `username`。
 - `AiMessage.MongoID` 映射 Mongo `_id`, HTTP 响应通过 `message_id` 暴露。
 - `AiMessage.SessionID` + `AiMessage.UserID` 用于历史查询和 AI memory 压缩。
 - `AiMessage.Sequence` 用于消息顺序。
-- `AiMessage` 的 GORM 字段保留兼容旧表结构, 当前 AI 消息读写走 MongoDB。
 - `AiProperties.ApiKey` 和 `AiProperties.ApiSecret` 当前是普通字符串字段。
 - 默认 DeepSeek 模型配置不建表, 读取 `config.AppConfig.AI.DeepSeek`; `ai.deepseek.api_key` 留空时不会启用 config fallback。
 
@@ -50,13 +49,14 @@
 
 `models/interview.go`
 
-- `InterviewSession` -> `interview_sessions`
-- `InterviewRecord` -> `interview_records`
+- `InterviewSession` -> MongoDB `interview_sessions`（_id=SessionID）
+- `InterviewRecord` -> MongoDB `interview_records`（_id=ObjectID, 按 session_id 索引）
+- `InterviewQuestion` -> MongoDB `interview_questions`（_id=ObjectID, 按 session_id 索引, 为状态机准备）
 
 当前注意点:
 
-- `InterviewSessionFacade.PageConversations` 查询 `AgentConversation`, 不查询 `InterviewSession`。
-- `InterviewSessionFacade.GetConversationHistory` 查询 `AgentMessage`, 不查询面试专属消息表。
+- `InterviewSessionFacade.PageConversations` 查询 Mongo `agent_conversations`, 不查询 `interview_sessions`。
+- `InterviewSessionFacade.GetConversationHistory` 查询 Mongo `agent_messages`, 不查询面试专属消息表。
 
 ## Compressed Context
 

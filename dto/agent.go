@@ -23,7 +23,6 @@ type AgentConversationRespDTO struct {
 }
 
 type AgentMessageHistoryRespDTO struct {
-	ID        uint   `json:"id"`
 	MessageID string `json:"message_id,omitempty"`
 	SessionID string `json:"session_id"`
 	Role      string `json:"role"`

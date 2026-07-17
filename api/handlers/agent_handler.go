@@ -194,7 +194,6 @@ func (c *AgentController) EndConversation(ctx *gin.Context) {
 
 func toAgentMessageHistoryResp(msg models.AgentMessage) dto.AgentMessageHistoryRespDTO {
 	resp := dto.AgentMessageHistoryRespDTO{
-		ID:        msg.ID,
 		SessionID: msg.SessionID,
 		Role:      msg.Role,
 		Content:   msg.Content,

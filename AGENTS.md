@@ -20,7 +20,7 @@ AI-Meeting 是一个 Go 1.22 + Gin 后端。入口在 `main.go`, 路由集中在
 - `services`: 业务流程和跨仓储编排。
 - `models`: GORM 模型和 Mongo 模型。
 - `dto`: HTTP 请求/响应结构。
-- `repositories/mysql`: MySQL 初始化与表级读写。
+- `repositories/mysql`: MySQL 初始化与用户/AI配置/Agent配置/文件资产读写(会话/消息/面试数据已迁 Mongo)。
 - `repositories/mongo`: MongoDB 初始化与集合级读写。
 - `repositories`: 其他基础设施客户端, 当前包含 Redis。
 - `clients`: 外部 HTTP/API 客户端, 例如 OpenAI-compatible 模型调用。
@@ -30,11 +30,11 @@ AI-Meeting 是一个 Go 1.22 + Gin 后端。入口在 `main.go`, 路由集中在
 
 | 需求关键词 | 先读 Skill | 典型代码锚点 |
 | --- | --- | --- |
-| Agent 聊天、Agent 会话、Agent 配置、文件上传 | `skills/ai-meeting-agent/SKILL.md` | `api/handlers/agent_handler.go`, `services/agent_service.go`, `models/agent.go` |
+| Agent 聊天、Agent 会话、Agent 配置、文件上传 | `skills/ai-meeting-agent/SKILL.md` | `api/handlers/agent_handler.go`, `services/agent/agent_service.go`, `models/agent.go` |
 | 长上下文、压缩摘要、Redis/Mongo 恢复、历史窗口 | `skills/ai-meeting-memory/SKILL.md` | `services/ai/ai_memory_service.go`, `models/compressed_context.go`, `repositories/redis.go`, `repositories/mongo/*.go` |
-| 面试会话、题目、评分、建议、简历预览、面试记录 | `skills/ai-meeting-interview/SKILL.md` | `api/handlers/interview_handler.go`, `services/interview_service.go`, `models/interview.go` |
-| 登录、注册、JWT、用户资料、管理员 | `skills/ai-meeting-user-auth/SKILL.md` | `api/middleware/auth.go`, `api/handlers/user_handler.go`, `services/user_service.go`, `models/user.go` |
-| AI 会话、AI 消息、AI 模型配置 | `skills/ai-meeting-ai/SKILL.md` | `api/handlers/ai_handler.go`, `services/ai_service.go`, `models/ai.go` |
+| 面试会话、题目、评分、建议、简历预览、面试记录 | `skills/ai-meeting-interview/SKILL.md` | `api/handlers/interview_handler.go`, `services/interview/interview_service.go`, `models/interview.go` |
+| 登录、注册、JWT、用户资料、管理员 | `skills/ai-meeting-user-auth/SKILL.md` | `api/middleware/auth.go`, `api/handlers/user_handler.go`, `services/user/user_service.go`, `models/user.go` |
+| AI 会话、AI 消息、AI 模型配置 | `skills/ai-meeting-ai/SKILL.md` | `api/handlers/ai_handler.go`, `services/ai/ai_service.go`, `models/ai.go` |
 | 路由、模型、跨模块影响 | `docs/agent-knowledge/references/routes-map.md`, `docs/agent-knowledge/references/data-models.md` | `api/routes/routes.go`, `models/*.go` |
 | 对照 Java 参考项目、判断功能缺口 | `docs/agent-knowledge/references/reference-project-gap-summary.md` | `/Users/mac/develop/projects/AI-Meeting` |
 

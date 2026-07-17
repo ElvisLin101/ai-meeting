@@ -8,8 +8,8 @@ AI 面试平台后端，基于 Go + Gin 构建，对接 DeepSeek 和讯飞星辰
 |------|------|
 | 语言 | Go 1.22 |
 | Web 框架 | Gin |
-| ORM | GORM（MySQL） |
-| 文档存储 | MongoDB（消息持久化、压缩上下文快照） |
+| ORM | GORM（MySQL：用户、AI/Agent 配置、文件资产、面试报告） |
+| 文档存储 | MongoDB（会话、消息、压缩上下文、面试运行态） |
 | 缓存 | Redis（热缓存、分布式锁、SingleFlight） |
 | 配置 | Viper |
 | 认证 | JWT |

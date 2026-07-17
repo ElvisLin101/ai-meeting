@@ -22,7 +22,9 @@ func (s *AiConversationService) CreateConversationWithTitle(username string, aiI
 		title = firstMessage[:50] + "..."
 	}
 	conversation := models.AiConversation{SessionID: sessionID, UserID: username, AiID: aiID, Title: title, Status: 1, MessageCnt: 0}
-	if err := mysqlrepo.CreateAiConversation(&conversation); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := mongorepo.CreateAiConversation(ctx, &conversation); err != nil {
 		return nil, err
 	}
 	return &dto.AiSessionCreateRespDTO{SessionID: sessionID, Title: title}, nil
@@ -31,7 +33,9 @@ func (s *AiConversationService) CreateConversationWithTitle(username string, aiI
 // PageConversations 分页查询用户的AI会话列表
 func (s *AiConversationService) PageConversations(username string, req dto.AiConversationPageReqDTO) ([]models.AiConversation, int64, error) {
 	offset := (req.Page - 1) * req.Size
-	return mysqlrepo.PageAiConversations(username, offset, req.Size)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return mongorepo.PageAiConversations(ctx, username, offset, req.Size)
 }
 
 // UpdateConversation 更新会话信息
@@ -43,31 +47,36 @@ func (s *AiConversationService) UpdateConversation(sessionID string, messageCoun
 	if title != "" {
 		updates["title"] = title
 	}
-	return mysqlrepo.UpdateAiConversation(sessionID, username, updates)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return mongorepo.UpdateAiConversation(ctx, sessionID, username, updates)
 }
 
 // UpdateConversationMessageCount 仅更新会话消息计数
 func (s *AiConversationService) UpdateConversationMessageCount(sessionID, username string, messageCount int) error {
 	updates := map[string]interface{}{
 		"message_cnt": messageCount,
-		"updated_at":  time.Now(),
 	}
-	return mysqlrepo.UpdateAiConversation(sessionID, username, updates)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return mongorepo.UpdateAiConversation(ctx, sessionID, username, updates)
 }
 
 // EndConversation 结束会话
 func (s *AiConversationService) EndConversation(sessionID, username string) error {
-	return mysqlrepo.EndAiConversation(sessionID, username)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return mongorepo.EndAiConversation(ctx, sessionID, username)
 }
 
 // DeleteConversation 删除会话
 func (s *AiConversationService) DeleteConversation(sessionID, username string) error {
-	if err := mysqlrepo.DeleteAiConversation(sessionID, username); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := mongorepo.DeleteAiConversation(ctx, sessionID, username); err != nil {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 	if err := mongorepo.DeleteAiMessagesBySession(ctx, sessionID, username); err != nil {
 		return err
 	}
@@ -76,7 +85,9 @@ func (s *AiConversationService) DeleteConversation(sessionID, username string) e
 
 // GetConversationBySessionId 根据会话ID查询会话
 func (s *AiConversationService) GetConversationBySessionId(sessionID, username string) (*models.AiConversation, error) {
-	return mysqlrepo.FindAiConversationBySessionID(sessionID, username)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return mongorepo.FindAiConversationBySessionID(ctx, sessionID, username)
 }
 
 var aiConversationServiceInstance *AiConversationService

@@ -3,7 +3,10 @@ package interview
 import (
 	"ai-meeting/dto"
 	"ai-meeting/models"
-	mysqlrepo "ai-meeting/repositories/mysql"
+	mongorepo "ai-meeting/repositories/mongo"
+	"context"
+	"time"
+
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 )
@@ -15,7 +18,9 @@ type InterviewSessionFacade struct{}
 func (s *InterviewSessionFacade) CreateSession(userID string) (*dto.InterviewSessionCreateRespDTO, error) {
 	sessionID := uuid.New().String()
 	session := models.InterviewSession{SessionID: sessionID, UserID: userID, Status: 1}
-	if err := mysqlrepo.CreateInterviewSession(&session); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := mongorepo.CreateInterviewSession(ctx, &session); err != nil {
 		return nil, err
 	}
 	return &dto.InterviewSessionCreateRespDTO{SessionID: sessionID}, nil
@@ -24,27 +29,37 @@ func (s *InterviewSessionFacade) CreateSession(userID string) (*dto.InterviewSes
 // PageConversations 分页查询面试会话列表
 func (s *InterviewSessionFacade) PageConversations(userID string, req dto.InterviewConversationPageReqDTO) ([]models.AgentConversation, int64, error) {
 	offset := (req.Page - 1) * req.Size
-	return mysqlrepo.PageAgentConversations(userID, offset, req.Size)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return mongorepo.PageAgentConversations(ctx, userID, offset, req.Size)
 }
 
 // GetConversationHistory 获取会话历史消息
 func (s *InterviewSessionFacade) GetConversationHistory(sessionID, userID string) ([]models.AgentMessage, error) {
-	return mysqlrepo.ListInterviewAgentMessagesAsc(sessionID, userID)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return mongorepo.ListAgentMessagesAsc(ctx, sessionID, userID)
 }
 
 // PageHistoryMessages 分页查询历史消息
 func (s *InterviewSessionFacade) PageHistoryMessages(sessionID string, page, size int, userID string) ([]models.AgentMessage, int64, error) {
-	return mysqlrepo.PageInterviewAgentMessages(sessionID, page, size, userID)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return mongorepo.PageAgentMessages(ctx, sessionID, page, size, userID)
 }
 
 // FinishSession 完成面试会话
 func (s *InterviewSessionFacade) FinishSession(sessionID, userID string) error {
-	return mysqlrepo.EndInterviewSession(sessionID, userID)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return mongorepo.EndInterviewSession(ctx, sessionID, userID)
 }
 
 // EndConversation 结束会话
 func (s *InterviewSessionFacade) EndConversation(sessionID, userID string) error {
-	return mysqlrepo.EndAgentConversation(sessionID, userID)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return mongorepo.EndAgentConversation(ctx, sessionID, userID)
 }
 
 // ExtractInterviewQuestions 从简历提取面试问题
@@ -119,17 +134,23 @@ type InterviewRecordService struct{}
 // SaveInterviewRecord 保存面试记录
 func (s *InterviewRecordService) SaveInterviewRecord(sessionID, userID string, req dto.InterviewRecordSaveReqDTO) error {
 	record := models.InterviewRecord{SessionID: sessionID, UserID: userID, QuestionNum: req.QuestionNum, Question: req.Question, Answer: req.Answer, Score: req.Score, Suggestions: req.Suggestions}
-	return mysqlrepo.CreateInterviewRecord(&record)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return mongorepo.CreateInterviewRecord(ctx, &record)
 }
 
 // PageInterviewRecords 分页查询面试记录
 func (s *InterviewRecordService) PageInterviewRecords(userID string, req dto.InterviewRecordPageReqDTO) ([]models.InterviewRecord, int64, error) {
-	return mysqlrepo.PageInterviewRecords(userID, req.SessionID, req.Page, req.Size)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return mongorepo.PageInterviewRecords(ctx, userID, req.SessionID, req.Page, req.Size)
 }
 
 // GetBySessionId 根据会话ID查询面试记录
 func (s *InterviewRecordService) GetBySessionId(sessionID, userID string) (*models.InterviewRecord, error) {
-	return mysqlrepo.FindInterviewRecordBySessionID(sessionID, userID)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return mongorepo.FindInterviewRecordBySessionID(ctx, sessionID, userID)
 }
 
 // SaveInterviewRecordFromRedis 从Redis保存面试记录

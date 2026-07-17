@@ -2,48 +2,37 @@ package models
 
 import (
 	"time"
+
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 type InterviewSession struct {
-	ID         uint      `gorm:"primaryKey" json:"id"`
-	SessionID  string    `gorm:"unique;size:64;not null" json:"session_id"`
-	UserID     string    `gorm:"size:64;not null" json:"user_id"`
-	Status     int       `gorm:"default:1" json:"status"`
-	ResumePath string    `gorm:"size:500" json:"resume_path"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
-}
-
-func (InterviewSession) TableName() string {
-	return "interview_sessions"
+	SessionID  string    `bson:"_id" json:"session_id"`
+	UserID     string    `bson:"user_id" json:"user_id"`
+	Status     int       `bson:"status" json:"status"`
+	ResumePath string    `bson:"resume_path" json:"resume_path"`
+	CreatedAt  time.Time `bson:"created_at" json:"created_at"`
+	UpdatedAt  time.Time `bson:"updated_at" json:"updated_at"`
 }
 
 type InterviewRecord struct {
-	ID          uint      `gorm:"primaryKey" json:"id"`
-	SessionID   string    `gorm:"size:64;index;not null" json:"session_id"`
-	UserID      string    `gorm:"size:64;not null" json:"user_id"`
-	QuestionNum string    `gorm:"size:32" json:"question_num"`
-	Question    string    `gorm:"type:text" json:"question"`
-	Answer      string    `gorm:"type:text" json:"answer"`
-	Score       int       `json:"score"`
-	Suggestions string    `gorm:"type:text" json:"suggestions"`
-	CreatedAt   time.Time `json:"created_at"`
-}
-
-func (InterviewRecord) TableName() string {
-	return "interview_records"
+	MongoID     primitive.ObjectID `json:"-" bson:"_id,omitempty"`
+	SessionID   string             `bson:"session_id" json:"session_id"`
+	UserID      string             `bson:"user_id" json:"user_id"`
+	QuestionNum string             `bson:"question_num" json:"question_num"`
+	Question    string             `bson:"question" json:"question"`
+	Answer      string             `bson:"answer" json:"answer"`
+	Score       int                `bson:"score" json:"score"`
+	Suggestions string             `bson:"suggestions" json:"suggestions"`
+	CreatedAt   time.Time          `bson:"created_at" json:"created_at"`
 }
 
 type InterviewQuestion struct {
-	ID         uint      `gorm:"primaryKey" json:"id"`
-	SessionID  string    `gorm:"size:64;index;not null" json:"session_id"`
-	Question   string    `gorm:"type:text;not null" json:"question"`
-	QuestionNo string    `gorm:"size:32;not null" json:"question_no"`
-	OrderNum   int       `json:"order_num"`
-	Status     int       `gorm:"default:0" json:"status"`
-	CreatedAt  time.Time `json:"created_at"`
-}
-
-func (InterviewQuestion) TableName() string {
-	return "interview_questions"
+	MongoID    primitive.ObjectID `json:"-" bson:"_id,omitempty"`
+	SessionID  string             `bson:"session_id" json:"session_id"`
+	Question   string             `bson:"question" json:"question"`
+	QuestionNo string             `bson:"question_no" json:"question_no"`
+	OrderNum   int                `bson:"order_num" json:"order_num"`
+	Status     int                `bson:"status" json:"status"`
+	CreatedAt  time.Time          `bson:"created_at" json:"created_at"`
 }

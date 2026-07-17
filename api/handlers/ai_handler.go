@@ -278,7 +278,6 @@ func (c *AiMessageController) GetConversationHistory(ctx *gin.Context) {
 			messageID = msg.MongoID.Hex()
 		}
 		resp = append(resp, dto.AiMessageHistoryRespDTO{
-			ID:        msg.ID,
 			MessageID: messageID,
 			SessionID: msg.SessionID,
 			Role:      msg.Role,
@@ -315,7 +314,6 @@ func (c *AiMessageController) PageHistoryMessages(ctx *gin.Context) {
 			messageID = msg.MongoID.Hex()
 		}
 		resp = append(resp, dto.AiMessageHistoryRespDTO{
-			ID:        msg.ID,
 			MessageID: messageID,
 			SessionID: msg.SessionID,
 			Role:      msg.Role,

@@ -24,7 +24,9 @@ func (s *AgentConversationService) CreateConversationWithTitle(username, agentID
 		title = firstMessage[:50] + "..."
 	}
 	conversation := models.AgentConversation{SessionID: sessionID, UserID: username, AgentID: 1, Title: title, Status: 1, MessageCnt: 0}
-	if err := mysqlrepo.CreateAgentConversation(&conversation); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := mongorepo.CreateAgentConversation(ctx, &conversation); err != nil {
 		return nil, err
 	}
 	return &dto.AgentSessionCreateRespDTO{SessionID: sessionID, Title: title}, nil
@@ -33,12 +35,16 @@ func (s *AgentConversationService) CreateConversationWithTitle(username, agentID
 // PageConversations 分页查询用户的Agent会话列表
 func (s *AgentConversationService) PageConversations(username string, req dto.AgentConversationPageReqDTO) ([]models.AgentConversation, int64, error) {
 	offset := (req.Page - 1) * req.Size
-	return mysqlrepo.PageAgentConversations(username, offset, req.Size)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return mongorepo.PageAgentConversations(ctx, username, offset, req.Size)
 }
 
 // EndConversation 结束会话
 func (s *AgentConversationService) EndConversation(sessionID, userID string) error {
-	return mysqlrepo.EndAgentConversation(sessionID, userID)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return mongorepo.EndAgentConversation(ctx, sessionID, userID)
 }
 
 var agentConversationServiceInstance *AgentConversationService
@@ -86,7 +92,9 @@ func (s *AgentMessageService) SaveMessage(sessionID, userID, role, content strin
 // 返回完整回复内容
 func (s *AgentMessageService) AgentChatSSE(sessionID, userID, content string, onChunk func(chunk string)) (string, error) {
 	// 1. 会话归属校验
-	conv, err := mysqlrepo.GetAgentConversationBySessionId(sessionID, userID)
+	convCtx, convCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	conv, err := mongorepo.GetAgentConversationBySessionId(convCtx, sessionID, userID)
+	convCancel()
 	if err != nil || conv == nil {
 		return "", fmt.Errorf("会话不存在或无权限: %w", err)
 	}
@@ -148,7 +156,7 @@ func (s *AgentMessageService) AgentChatSSE(sessionID, userID, content string, on
 	}
 
 	// 7. 更新会话消息计数
-	if err := mysqlrepo.UpdateAgentConversationMessageCount(sessionID, assistantSeq); err != nil {
+	if err := mongorepo.UpdateAgentConversationMessageCount(saveCtx, sessionID, assistantSeq); err != nil {
 		logrus.Errorf("Failed to update conversation message count, session=%s, err=%v", sessionID, err)
 	}
 

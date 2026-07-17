@@ -23,8 +23,8 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 - 场景枚举: `services/agent/agent_scene.go`（5 个 BusinessAgentScene + 候选名称）。
 - 启动缓存 + 场景解析器: `services/agent/agent_properties_loader.go`（sync.Map 内存缓存 + miss 查库 + ResolveRequired）。
 - 讯飞星辰客户端: `clients/xingchen_client.go`（ChatStream + ChatSync + UploadFile）。
-- MySQL 仓储: `repositories/mysql/agent_conversation_repository.go`, `repositories/mysql/agent_properties_repository.go`, `repositories/mysql/agent_file_asset_repository.go`。
-- Mongo 消息仓储: `repositories/mongo/agent_message_repository.go`。
+- MySQL 仓储: `repositories/mysql/agent_properties_repository.go`, `repositories/mysql/agent_file_asset_repository.go`。
+- Mongo 仓储: `repositories/mongo/agent_conversation_repository.go`(会话), `repositories/mongo/agent_message_repository.go`(消息)。
 - DTO: `dto/agent.go`。
 - 模型: `models/agent.go`（AgentProperties 含 ApiKey/ApiSecret/ApiFlowId；AgentMessage 含 ResponseTime/ErrorMessage）。
 - 记忆: Agent 侧**不使用压缩记忆**。长对话压缩能力仅属 AI 侧（`services/ai/ai_memory_service.go`）。Agent 侧上下文未来由面试工作流状态机结构化状态管理, 不走压缩摘要。

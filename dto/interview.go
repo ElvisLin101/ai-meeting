@@ -64,7 +64,7 @@ type InterviewRecordSaveReqDTO struct {
 }
 
 type InterviewRecordRespDTO struct {
-	ID          uint   `json:"id"`
+	RecordID    string `json:"record_id,omitempty"`
 	SessionID   string `json:"session_id"`
 	QuestionNum string `json:"question_num"`
 	Question    string `json:"question"`
