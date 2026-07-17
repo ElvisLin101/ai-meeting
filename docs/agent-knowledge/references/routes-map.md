@@ -28,8 +28,6 @@
 | GET | `/agents/conversations/:sessionId/messages` | `AgentController.GetConversationHistory` | `AgentMessageService.GetConversationHistory` |
 | GET | `/agents/messages/history` | `AgentController.PageHistoryMessages` | `AgentMessageService.PageHistoryMessages` |
 | PUT | `/agents/conversations/:sessionId/end` | `AgentController.EndConversation` | `AgentConversationService.EndConversation` |
-| GET | `/agents/memory/threshold` | `AgentController.GetMemoryThreshold` | `MemoryService.GetCompressionThresholdConfig` |
-| PUT | `/agents/memory/threshold` | `AgentController.SetMemoryThreshold` | `MemoryService.SetCompressionThreshold` |
 | POST | `/agents/files/upload` | `AgentFileController.Upload` | `AgentFileAssetService.UploadAndPersist` |
 | POST | `/agent-properties` | `AgentPropertiesController.Create` | `AgentPropertiesService.Create` |
 | DELETE | `/agent-properties/:id` | `AgentPropertiesController.Delete` | `AgentPropertiesService.Delete` |

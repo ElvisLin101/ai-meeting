@@ -25,7 +25,7 @@
 
 - `AgentConversation.SessionID` 是唯一业务会话 ID。
 - `AgentMessage.MongoID` 映射 Mongo `_id`, HTTP 响应通过 `message_id` 暴露。
-- `AgentMessage.SessionID` + `AgentMessage.UserID` 用于历史查询和 memory 压缩。
+- `AgentMessage.SessionID` + `AgentMessage.UserID` 用于历史查询。Agent 侧不压缩。
 - `AgentMessage.Sequence` 用于会话内消息顺序。
 
 ## AI
@@ -63,12 +63,11 @@
 `models/compressed_context.go`
 
 - Mongo 集合: `compressed_contexts`
-- Agent 压缩快照 `_id` 固定为 `sessionId`, 用于覆盖写入同一 Agent 会话的最新压缩快照。
 - AI 压缩快照 `_id` 固定为 `ai:{sessionId}`, 用于覆盖写入同一 AI 会话的最新压缩快照。
 - 关键字段: `_id`, `session_id`, `memory_scope`, `compressed_content`, `index`, `total_token_count`, `message_count`, `created_at`, `updated_at`
 - AI 压缩快照额外写入 `memory_scope=ai`, 用于排查共享集合中的来源。
-- Agent Redis key: 压缩摘要为 `sessionId`, 压缩索引为 `sessionId + "index"`。
 - AI Redis key: 压缩摘要为 `memory:ai:{sessionId}:summary`, 压缩索引为 `memory:ai:{sessionId}:index`。
+- 仅 AI 侧使用压缩; Agent 侧不写压缩快照、不占 Redis 压缩 key。
 
 ## Repository Clients
 

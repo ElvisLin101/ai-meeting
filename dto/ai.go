@@ -94,3 +94,14 @@ type AiModelOptionRespDTO struct {
 	ID   uint   `json:"id"`
 	Name string `json:"name"`
 }
+
+type MemoryThresholdReqDTO struct {
+	Threshold int `json:"threshold" binding:"required"`
+}
+
+type MemoryThresholdRespDTO struct {
+	Threshold     int `json:"threshold"`
+	MinThreshold  int `json:"min_threshold"`
+	MaxThreshold  int `json:"max_threshold"`
+	TriggerOffset int `json:"trigger_offset"`
+}

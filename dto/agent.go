@@ -59,14 +59,3 @@ type AgentFileUploadRespDTO struct {
 	Filename string `json:"filename"`
 	Path     string `json:"path"`
 }
-
-type MemoryThresholdReqDTO struct {
-	Threshold int `json:"threshold" binding:"required"`
-}
-
-type MemoryThresholdRespDTO struct {
-	Threshold     int `json:"threshold"`
-	MinThreshold  int `json:"min_threshold"`
-	MaxThreshold  int `json:"max_threshold"`
-	TriggerOffset int `json:"trigger_offset"`
-}

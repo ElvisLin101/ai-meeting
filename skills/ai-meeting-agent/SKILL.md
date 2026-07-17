@@ -27,7 +27,7 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 - Mongo 消息仓储: `repositories/mongo/agent_message_repository.go`。
 - DTO: `dto/agent.go`。
 - 模型: `models/agent.go`（AgentProperties 含 ApiKey/ApiSecret/ApiFlowId；AgentMessage 含 ResponseTime/ErrorMessage）。
-- 长上下文: `services/common/memory_service.go`, 需要时再读 `ai-meeting-memory`。
+- 记忆: Agent 侧**不使用压缩记忆**。长对话压缩能力仅属 AI 侧（`services/ai/ai_memory_service.go`）。Agent 侧上下文未来由面试工作流状态机结构化状态管理, 不走压缩摘要。
 
 ## 核心流程
 
@@ -52,7 +52,6 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
   6. 调用 `XingChenClient.ChatStream`（讯飞星辰工作流 SSE 流式），通过 `onChunk` 回调 `ctx.SSEvent("message", chunk)` 推送前端。
   7. 保存 assistant 回复（`SaveAgentMessageWithDetail`，含 responseTime 和 errorMessage）。
   8. 更新会话消息计数（`UpdateAgentConversationMessageCount`）。
-  9. 异步触发记忆压缩（`MemoryService.CompressContext`）。
 - 出错时也保存一条错误 assistant 消息（content="Sorry, an error occurred..."，errorMessage=err.Error()）。
 - 最终发送 `ctx.SSEvent("end", "[DONE]")`。
 
@@ -61,12 +60,6 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 - `GET /agents/conversations/:sessionId/messages` 从 Mongo 按 `sequence ASC` 返回完整历史。
 - `GET /agents/messages/history` 从 Mongo 按 `created_at DESC` 分页。
 - 两个查询都必须保留用户隔离条件。
-
-`AgentMemoryThreshold`
-
-- `GET /agents/memory/threshold` 查询当前压缩阈值、最小值、最大值和触发偏移。
-- `PUT /agents/memory/threshold` 通过 JSON `{"threshold":4096}` 修改运行时阈值。
-- 阈值限制在 `1024 <= threshold <= 32768`, 且当前为内存态配置。
 
 `AgentProperties`
 
@@ -91,9 +84,9 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 
 ## 影响检查
 
-- 修改 Agent Chat 时, 同步检查 memory 上下文、消息计数、会话标题、错误重试和 assistant 消息落库。
-- 修改 `AgentMessage.Sequence` 时, 必须读 `ai-meeting-memory`。
-- 修改 Agent 消息存储时, 同时检查 `repositories/mongo/agent_message_repository.go` 和 memory Skill。
+- 修改 Agent Chat 时, 同步检查消息计数、会话标题、错误重试和 assistant 消息落库。
+- 修改 `AgentMessage.Sequence` 时, 检查 `repositories/mongo/agent_message_repository.go`。
+- 修改 Agent 消息存储时, 同时检查 `repositories/mongo/agent_message_repository.go`。
 - 修改 Agent 表字段时, 更新 `docs/agent-knowledge/references/data-models.md`。
 - 修改路由时, 更新 `docs/agent-knowledge/references/routes-map.md`。
 - 修改场景枚举或解析器时, 更新本 Skill 的 BusinessAgentScene 部分。

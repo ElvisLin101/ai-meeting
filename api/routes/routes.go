@@ -53,8 +53,6 @@ func setupAgentRoutes(api *gin.RouterGroup) {
 	agents.GET("/conversations/:sessionId/messages", agentController.GetConversationHistory)
 	agents.GET("/messages/history", agentController.PageHistoryMessages)
 	agents.PUT("/conversations/:sessionId/end", agentController.EndConversation)
-	agents.GET("/memory/threshold", agentController.GetMemoryThreshold)
-	agents.PUT("/memory/threshold", agentController.SetMemoryThreshold)
 
 	agentFiles := api.Group("/agents/files")
 	agentFiles.POST("/upload", agentFileController.Upload)

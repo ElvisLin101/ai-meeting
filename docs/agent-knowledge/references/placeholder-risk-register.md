@@ -24,10 +24,9 @@
 
 ## Memory
 
-- `services/common/memory_service.go`: `SetCompressionThreshold` 是运行时内存配置, 服务重启后恢复默认阈值。
 - `services/ai/ai_memory_service.go`: `SetCompressionThreshold` 是运行时内存配置, 服务重启后恢复默认阈值。
 - ~~`services/ai/ai_memory_service.go`: 只做当前进程内 `sync.Map` 防重复压缩, 多实例部署时仍可能并发压缩同一 AI 会话。~~ **已完成: 已接入分布式 SingleFlight, 全集群同一 session 只压缩一次。**
-- ~~`services/common/memory_service.go`: Agent 压缩无并发控制。~~ **已完成: 已接入分布式 SingleFlight。**
+- Agent 侧已移除压缩机制, 不再涉及压缩并发或阈值风险; 上下文未来由状态机管理。
 
 ## User/Auth
 
@@ -41,7 +40,7 @@
   - `ChatSync` 和 `UploadFile` 已实现但尚未被面试模块调用。
 - `services/agent/agent_scene.go`: 5 个业务场景枚举, 已完整实现, 尚未被面试模块使用。
 - `services/agent/agent_properties_loader.go`: 启动缓存 + 场景解析器, 已完整实现。
-- `pkg/singleflight/singleflight.go`: 分布式 SingleFlight, 已完整实现; 流式心跳已接入记忆压缩路径（压缩走 `CallConfiguredAIChatStream`, `onChunk` 内调 `writer.Write` 刷新 `progressKey` 时间戳, follower 据此判停滞换主）。
+- `pkg/singleflight/singleflight.go`: 分布式 SingleFlight, 已完整实现; 流式心跳已接入 AI 侧压缩路径（`AiMemoryService` 压缩走 `CallConfiguredAIChatStream`, `onChunk` 内调 `writer.Write` 刷新 `progressKey` 时间戳, follower 据此判停滞换主）。Agent 侧不压缩, 不走 SingleFlight。
 - `repositories/redis.go`: 全局 `SingleFlight` 实例, 在 `InitRedis` 中初始化。
 
 替换任意占位逻辑后, 从本文件移除或改写对应条目。

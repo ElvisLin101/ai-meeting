@@ -5,7 +5,6 @@ import (
 	"ai-meeting/models"
 	"ai-meeting/pkg/singleflight"
 	"ai-meeting/repositories"
-	"ai-meeting/services/common"
 	mongorepo "ai-meeting/repositories/mongo"
 	"context"
 	"errors"
@@ -23,6 +22,13 @@ const (
 	aiMemoryScope                 = "ai"
 	aiCompressedContextIDPrefix   = "ai:"
 	aiCompressedContextRedisScope = "memory:ai:"
+
+	MIN_COMPRESSION_THRESHOLD  = 1024
+	COMPRESSION_THRESHOLD      = 4096
+	MAX_COMPRESSION_THRESHOLD  = 32768
+	COMPRESSION_TRIGGER_OFFSET = 500
+	COMPRESSION_RATIO          = 0.8
+	REDIS_EXPIRE_DURATION      = 7 * 24 * time.Hour
 )
 
 type AiMemoryService struct {
@@ -35,7 +41,7 @@ var aiMemoryServiceInstance *AiMemoryService
 // GetAiMemoryService 获取 AI 记忆服务单例
 func GetAiMemoryService() *AiMemoryService {
 	if aiMemoryServiceInstance == nil {
-		aiMemoryServiceInstance = &AiMemoryService{threshold: common.COMPRESSION_THRESHOLD}
+		aiMemoryServiceInstance = &AiMemoryService{threshold: COMPRESSION_THRESHOLD}
 	}
 	return aiMemoryServiceInstance
 }
@@ -87,11 +93,11 @@ func (s *AiMemoryService) doCompressAiContext(ctx context.Context, writer *singl
 	}
 
 	totalLength := aiMessagesLength(messages)
-	if totalLength < threshold-common.COMPRESSION_TRIGGER_OFFSET {
+	if totalLength < threshold-COMPRESSION_TRIGGER_OFFSET {
 		return nil, nil
 	}
 
-	recentCount := int(float64(len(messages)) * (1 - common.COMPRESSION_RATIO))
+	recentCount := int(float64(len(messages)) * (1 - COMPRESSION_RATIO))
 	if recentCount < 1 {
 		recentCount = 1
 	}
@@ -163,10 +169,10 @@ func (s *AiMemoryService) getCompressedContextFromRedis(ctx context.Context, ses
 
 // saveCompressedContextToRedis 将压缩摘要和索引写入 Redis（TTL 7 天）
 func (s *AiMemoryService) saveCompressedContextToRedis(ctx context.Context, sessionID, compressedContent string, index int) error {
-	if err := repositories.RedisClient.Set(ctx, aiCompressedContextSummaryKey(sessionID), compressedContent, common.REDIS_EXPIRE_DURATION).Err(); err != nil {
+	if err := repositories.RedisClient.Set(ctx, aiCompressedContextSummaryKey(sessionID), compressedContent, REDIS_EXPIRE_DURATION).Err(); err != nil {
 		return err
 	}
-	return repositories.RedisClient.Set(ctx, aiCompressedContextIndexKey(sessionID), strconv.Itoa(index), common.REDIS_EXPIRE_DURATION).Err()
+	return repositories.RedisClient.Set(ctx, aiCompressedContextIndexKey(sessionID), strconv.Itoa(index), REDIS_EXPIRE_DURATION).Err()
 }
 
 // syncToRedis 异步将 Mongo 中的压缩上下文同步到 Redis
@@ -220,7 +226,7 @@ func (s *AiMemoryService) buildContextWithWindow(compressedCtx string, messages 
 		baseLength = contextBuilder.Len()
 	}
 
-	windowBudget := threshold - common.COMPRESSION_TRIGGER_OFFSET - baseLength
+	windowBudget := threshold - COMPRESSION_TRIGGER_OFFSET - baseLength
 	if windowBudget < 0 {
 		windowBudget = 0
 	}
@@ -305,15 +311,15 @@ func (s *AiMemoryService) GetCompressionThreshold() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.threshold == 0 {
-		return common.COMPRESSION_THRESHOLD
+		return COMPRESSION_THRESHOLD
 	}
 	return s.threshold
 }
 
 // SetCompressionThreshold 设置压缩阈值（带范围校验 1024~32768）
 func (s *AiMemoryService) SetCompressionThreshold(threshold int) error {
-	if threshold < common.MIN_COMPRESSION_THRESHOLD || threshold > common.MAX_COMPRESSION_THRESHOLD {
-		return fmt.Errorf("threshold must be between %d and %d", common.MIN_COMPRESSION_THRESHOLD, common.MAX_COMPRESSION_THRESHOLD)
+	if threshold < MIN_COMPRESSION_THRESHOLD || threshold > MAX_COMPRESSION_THRESHOLD {
+		return fmt.Errorf("threshold must be between %d and %d", MIN_COMPRESSION_THRESHOLD, MAX_COMPRESSION_THRESHOLD)
 	}
 
 	s.mu.Lock()
@@ -324,7 +330,7 @@ func (s *AiMemoryService) SetCompressionThreshold(threshold int) error {
 
 // GetCompressionThresholdConfig 返回阈值配置（当前值、最小值、最大值、触发偏移）
 func (s *AiMemoryService) GetCompressionThresholdConfig() (int, int, int, int) {
-	return s.GetCompressionThreshold(), common.MIN_COMPRESSION_THRESHOLD, common.MAX_COMPRESSION_THRESHOLD, common.COMPRESSION_TRIGGER_OFFSET
+	return s.GetCompressionThreshold(), MIN_COMPRESSION_THRESHOLD, MAX_COMPRESSION_THRESHOLD, COMPRESSION_TRIGGER_OFFSET
 }
 
 // normalizeThreshold 规范化阈值到合法范围
@@ -332,11 +338,11 @@ func (s *AiMemoryService) normalizeThreshold(threshold int) int {
 	if threshold == 0 {
 		return s.GetCompressionThreshold()
 	}
-	if threshold < common.MIN_COMPRESSION_THRESHOLD {
-		return common.MIN_COMPRESSION_THRESHOLD
+	if threshold < MIN_COMPRESSION_THRESHOLD {
+		return MIN_COMPRESSION_THRESHOLD
 	}
-	if threshold > common.MAX_COMPRESSION_THRESHOLD {
-		return common.MAX_COMPRESSION_THRESHOLD
+	if threshold > MAX_COMPRESSION_THRESHOLD {
+		return MAX_COMPRESSION_THRESHOLD
 	}
 	return threshold
 }

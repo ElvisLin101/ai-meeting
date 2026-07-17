@@ -4,7 +4,6 @@ import (
 	"ai-meeting/dto"
 	"ai-meeting/models"
 	agent "ai-meeting/services/agent"
-	common "ai-meeting/services/common"
 	"net/http"
 	"strconv"
 
@@ -15,14 +14,12 @@ import (
 type AgentController struct {
 	agentConversationService *agent.AgentConversationService
 	agentMessageService      *agent.AgentMessageService
-	memoryService            *common.MemoryService
 }
 
 func NewAgentController() *AgentController {
 	return &AgentController{
 		agentConversationService: agent.GetAgentConversationService(),
 		agentMessageService:      agent.GetAgentMessageService(),
-		memoryService:            common.GetMemoryService(),
 	}
 }
 
@@ -193,51 +190,6 @@ func (c *AgentController) EndConversation(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{"message": "Conversation ended"})
-}
-
-func (c *AgentController) GetMemoryThreshold(ctx *gin.Context) {
-	if !hasUsername(ctx) {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-		return
-	}
-
-	threshold, minThreshold, maxThreshold, triggerOffset := c.memoryService.GetCompressionThresholdConfig()
-	ctx.JSON(http.StatusOK, dto.MemoryThresholdRespDTO{
-		Threshold:     threshold,
-		MinThreshold:  minThreshold,
-		MaxThreshold:  maxThreshold,
-		TriggerOffset: triggerOffset,
-	})
-}
-
-func (c *AgentController) SetMemoryThreshold(ctx *gin.Context) {
-	if !hasUsername(ctx) {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-		return
-	}
-
-	var req dto.MemoryThresholdReqDTO
-	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	if err := c.memoryService.SetCompressionThreshold(req.Threshold); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	threshold, minThreshold, maxThreshold, triggerOffset := c.memoryService.GetCompressionThresholdConfig()
-	ctx.JSON(http.StatusOK, dto.MemoryThresholdRespDTO{
-		Threshold:     threshold,
-		MinThreshold:  minThreshold,
-		MaxThreshold:  maxThreshold,
-		TriggerOffset: triggerOffset,
-	})
-}
-
-func hasUsername(ctx *gin.Context) bool {
-	username, exists := ctx.Get("username")
-	return exists && username != ""
 }
 
 func toAgentMessageHistoryResp(msg models.AgentMessage) dto.AgentMessageHistoryRespDTO {

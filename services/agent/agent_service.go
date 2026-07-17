@@ -4,7 +4,6 @@ import (
 	"ai-meeting/clients"
 	"ai-meeting/dto"
 	"ai-meeting/models"
-	"ai-meeting/services/common"
 	mongorepo "ai-meeting/repositories/mongo"
 	mysqlrepo "ai-meeting/repositories/mysql"
 	"context"
@@ -80,18 +79,7 @@ func (s *AgentMessageService) SaveMessage(sessionID, userID, role, content strin
 }
 
 // GetConversationHistoryWithContext 获取带上下文的历史消息
-func (s *AgentMessageService) GetConversationHistoryWithContext(sessionID, userID string) (string, error) {
-	memoryService := common.GetMemoryService()
-	threshold := memoryService.GetCompressionThreshold()
-
-	// 获取上下文
-	context, err := memoryService.GetContext(sessionID, userID, threshold)
-	if err != nil {
-		return "", err
-	}
-
-	return context, nil
-}
+// 已移除: agent 侧不再使用压缩记忆,上下文未来由状态机结构化状态管理。
 
 // AgentChatSSE Agent SSE 流式聊天
 // onChunk 回调用于实时推送 chunk 给前端
@@ -163,13 +151,6 @@ func (s *AgentMessageService) AgentChatSSE(sessionID, userID, content string, on
 	if err := mysqlrepo.UpdateAgentConversationMessageCount(sessionID, assistantSeq); err != nil {
 		logrus.Errorf("Failed to update conversation message count, session=%s, err=%v", sessionID, err)
 	}
-
-	// 8. 异步触发记忆压缩
-	go func() {
-		memoryService := common.GetMemoryService()
-		threshold := memoryService.GetCompressionThreshold()
-		memoryService.CompressContext(sessionID, userID, threshold)
-	}()
 
 	logrus.Infof("Agent chat completed, session=%s, responseTime=%dms, contentLen=%d",
 		sessionID, responseTime, len(fullContent))
