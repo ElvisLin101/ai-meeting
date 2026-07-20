@@ -157,7 +157,7 @@ func (g *DistributedGroup) runAsLeader(
 	go g.heartbeatLoop(hbCtx, lockKey, nodeID)
 
 	// 取消监听协程：被换主时 cancel execCtx，DeepSeek SDK 自动断开
-	go g.watchCancel(execCtx, cancelKey, cancel, key)
+	go g.watchCancel(execCtx, cancelKey, cancel, key, nodeID)
 
 	// 清理上一次可能残留的进度数据和取消标记（换主场景）
 	g.redis.Del(execCtx, progressKey, cancelKey)
@@ -226,8 +226,9 @@ func (g *DistributedGroup) heartbeatLoop(ctx context.Context, lockKey, nodeID st
 }
 
 // watchCancel 监听取消标记，被换主时 cancel execCtx 停止 AI 调用
+// 只有 cancelKey 的 value 等于自己的 nodeID 才取消——防止新主误读旧主的取消信号
 // DeepSeek SDK 收到 ctx 取消会自动断开 SSE 连接，不浪费 token
-func (g *DistributedGroup) watchCancel(ctx context.Context, cancelKey string, cancel context.CancelFunc, key string) {
+func (g *DistributedGroup) watchCancel(ctx context.Context, cancelKey string, cancel context.CancelFunc, key, nodeID string) {
 	ticker := time.NewTicker(5 * time.Second) // 每 5s 检查一次取消标记
 	defer ticker.Stop()
 
@@ -237,15 +238,16 @@ func (g *DistributedGroup) watchCancel(ctx context.Context, cancelKey string, ca
 			// execCtx 结束（正常完成或超时），停止监听
 			return
 		case <-ticker.C:
-			canceled, err := g.redis.Exists(ctx, cancelKey).Result()
+			val, err := g.redis.Get(ctx, cancelKey).Result()
 			if err != nil {
-				continue
+				continue // key 不存在或 Redis 出错
 			}
-			if canceled > 0 {
+			if val == nodeID {
 				fmt.Printf("[singleflight] 主节点收到取消信号，停止 AI 调用 key=%s\n", key)
 				cancel() // 取消 execCtx，DeepSeek SDK 自动断开
 				return
 			}
+			// value 不等于自己的 nodeID → 这是给别的主的取消信号，忽略
 		}
 	}
 }
@@ -318,19 +320,24 @@ func (g *DistributedGroup) checkLeader(ctx context.Context, lockKey, resultKey, 
 			return followerGotResult
 		}
 		// 锁没了结果也没有，主节点超时了
-		g.notifyCancel(ctx, cancelKey)
+		// 此时拿不到旧主 nodeID，写空串——旧主的 execCtx 也会因超时退出
+		g.notifyCancel(ctx, cancelKey, "")
 		fmt.Printf("[singleflight] 主节点锁已消失，写入取消标记，准备换主\n")
 		return followerLeaderTimeout
 	}
+
+	// 从锁的 value 读取旧主 nodeID（用于精确取消）
+	leaderNodeID, _ := g.redis.Get(ctx, lockKey).Result()
 
 	// 2. 检查 AI 输出是否还在变化（核心：利用流式输出做心跳）
 	currentProgress, err := g.redis.Get(ctx, progressKey).Result()
 	if err != nil {
 		if *lastProgress == "" {
-			*lastProgress = "init" // 标记已检查过，下次再判断
+			*lastProgress = "init" // 第一次检查，跳过一个周期给 leader 启动时间
 			return 0
 		}
-		g.notifyCancel(ctx, cancelKey)
+		// 后续检查 progressKey 仍不存在 → leader 长时间无输出，换主
+		g.notifyCancel(ctx, cancelKey, leaderNodeID)
 		fmt.Printf("[singleflight] 主节点进度信息丢失，写入取消标记，准备换主\n")
 		return followerLeaderTimeout
 	}
@@ -349,7 +356,7 @@ func (g *DistributedGroup) checkLeader(ctx context.Context, lockKey, resultKey, 
 	lastUpdateMs := parts[1]
 	stalledDuration := time.Since(time.UnixMilli(lastUpdateMs))
 	if stalledDuration > StallThreshold {
-		g.notifyCancel(ctx, cancelKey)
+		g.notifyCancel(ctx, cancelKey, leaderNodeID)
 		fmt.Printf("[singleflight] 主节点输出停滞 %v，超过阈值 %v，写入取消标记，准备换主\n",
 			stalledDuration, StallThreshold)
 		return followerLeaderTimeout
@@ -359,8 +366,9 @@ func (g *DistributedGroup) checkLeader(ctx context.Context, lockKey, resultKey, 
 }
 
 // notifyCancel 写入取消标记，通知旧主节点停止 AI 调用
-func (g *DistributedGroup) notifyCancel(ctx context.Context, cancelKey string) {
-	g.redis.Set(ctx, cancelKey, "1", MaxExecTime)
+// targetNodeID 为旧主的 nodeID（锁的 value），watchCancel 只在 value 匹配自己时才 cancel
+func (g *DistributedGroup) notifyCancel(ctx context.Context, cancelKey, targetNodeID string) {
+	g.redis.Set(ctx, cancelKey, targetNodeID, MaxExecTime)
 }
 
 // splitProgress 解析 "totalBytes:timestampMs" 格式
