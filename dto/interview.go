@@ -24,15 +24,28 @@ type InterviewAnswerReqDTO struct {
 }
 
 type InterviewAnswerRespDTO struct {
-	QuestionNumber string `json:"question_number"`
-	Question       string `json:"question"`
-	Answer         string `json:"answer"`
-	Score          int    `json:"score"`
-	Suggestions    string `json:"suggestions"`
-	IsLast         bool   `json:"is_last"`
+	QuestionNumber     string `json:"question_number"`
+	Question           string `json:"question"`           // 当前题面
+	Answer             string `json:"answer"`             // 用户答案
+	Score              int    `json:"score"`              // 本轮得分
+	TotalScore         int    `json:"total_score"`        // 累计平均分
+	Feedback           string `json:"feedback"`           // AI 反馈
+	IsFollowUp         bool   `json:"is_follow_up"`       // 本轮是否追问
+	NextQuestionNumber string `json:"next_question_number"` // 下一题号
+	NextQuestion       string `json:"next_question"`      // 下一题题面
+	Finished           bool   `json:"finished"`           // 面试是否结束
 }
 
-type InterviewQuestionRespDTO struct {
+// InterviewQuestionInfoRespDTO 取题结果（GetNextQuestion/GetCurrentQuestion 用）
+type InterviewQuestionInfoRespDTO struct {
+	QuestionNumber string `json:"question_number"`
+	Question       string `json:"question"`
+	IsFollowUp     bool   `json:"is_follow_up"`
+	Finished       bool   `json:"finished"`
+}
+
+// InterviewExtractionRespDTO 出题结果（ExtractInterviewQuestions 用, 原 InterviewQuestionRespDTO）
+type InterviewExtractionRespDTO struct {
 	SessionID      string `json:"session_id"`
 	Question       string `json:"question"`
 	QuestionNumber string `json:"question_number"`

@@ -1,7 +1,7 @@
 package agent
 
 // BusinessAgentScene 业务智能体场景枚举
-// 每个场景对应一个讯飞星辰工作流，通过场景名称解析到具体的 AgentProperties
+// 每个场景通过场景名称解析到具体的 AgentProperties, 用于 prompt 定制和场景路由
 type BusinessAgentScene int
 
 const (
@@ -11,8 +11,6 @@ const (
 	SceneInterviewQuestionExtraction
 	// SceneInterviewAnswerEvaluation 面试评分
 	SceneInterviewAnswerEvaluation
-	// SceneInterviewDemeanor 神态评估
-	SceneInterviewDemeanor
 	// SceneInterviewQuestionAsking 面试追问
 	SceneInterviewQuestionAsking
 )
@@ -39,11 +37,6 @@ var agentSceneConfigs = map[BusinessAgentScene]agentSceneConfig{
 		code:                "interview-answer-evaluation",
 		defaultAgentName:    "用户答案评分官",
 		candidateAgentNames: []string{"用户答案评分官", "面试答案评分官"},
-	},
-	SceneInterviewDemeanor: {
-		code:                "interview-demeanor",
-		defaultAgentName:    "神态分析官",
-		candidateAgentNames: []string{"神态分析官", "神态评分面试官", "表情分析面试官"},
 	},
 	SceneInterviewQuestionAsking: {
 		code:                "interview-question-asking",

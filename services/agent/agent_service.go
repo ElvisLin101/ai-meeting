@@ -8,6 +8,7 @@ import (
 	mysqlrepo "ai-meeting/repositories/mysql"
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -99,13 +100,10 @@ func (s *AgentMessageService) AgentChatSSE(sessionID, userID, content string, on
 		return "", fmt.Errorf("会话不存在或无权限: %w", err)
 	}
 
-	// 2. 解析智能体配置
+	// 2. 解析智能体配置（用于场景绑定,不再需要星辰凭证）
 	agentProps := GetAgentPropertiesLoader().GetByAgentID(conv.AgentID)
 	if agentProps == nil {
 		return "", fmt.Errorf("智能体配置不存在, agentID=%d", conv.AgentID)
-	}
-	if agentProps.ApiKey == "" || agentProps.ApiSecret == "" || agentProps.ApiFlowId == "" {
-		return "", fmt.Errorf("智能体配置不完整, 缺少 apiKey/apiSecret/apiFlowId")
 	}
 
 	// 3. 保存用户消息
@@ -115,42 +113,42 @@ func (s *AgentMessageService) AgentChatSSE(sessionID, userID, content string, on
 		return "", fmt.Errorf("保存用户消息失败: %w", err)
 	}
 
-	// 4. 加载历史消息构建 history
+	// 4. 加载历史消息构建 prompt messages
 	historyCtx, historyCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer historyCancel()
 	messages, err := mongorepo.ListAgentMessagesAsc(historyCtx, sessionID, userID)
 	if err != nil {
 		return "", fmt.Errorf("加载历史消息失败: %w", err)
 	}
-	history := buildXingChenHistory(messages)
+	promptMessages := buildAgentPromptMessages(agentProps, messages, content)
 
-	// 5. 调用讯飞星辰工作流流式聊天
+	// 5. 调用 DeepSeek 流式聊天（aiID=0 走 config.ai.deepseek fallback）
 	startTime := time.Now()
-	xingChenClient := clients.GetXingChenClient()
-	fullContent, err := xingChenClient.ChatStream(
-		content, sessionID, history,
-		agentProps.ApiFlowId, agentProps.ApiKey, agentProps.ApiSecret,
-		onChunk,
-	)
+	var fullContent strings.Builder
+	err = clients.CallConfiguredAIChatStream(ctx, 0, promptMessages, 0.7, func(chunk clients.ChatStreamChunk) error {
+		if chunk.Content != "" {
+			fullContent.WriteString(chunk.Content)
+			if onChunk != nil {
+				onChunk(chunk.Content)
+			}
+		}
+		return nil
+	})
 	responseTime := time.Since(startTime).Milliseconds()
 
 	if err != nil {
 		// 6a. 出错也保存一条错误 assistant 消息
-		errorMsg := ""
-		if err != nil {
-			errorMsg = err.Error()
-		}
 		saveCtx, saveCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer saveCancel()
-		mongorepo.SaveAgentMessageWithDetail(saveCtx, sessionID, userID, "assistant", "Sorry, an error occurred while processing your request.", responseTime, errorMsg)
+		mongorepo.SaveAgentMessageWithDetail(saveCtx, sessionID, userID, "assistant", "Sorry, an error occurred while processing your request.", responseTime, err.Error())
 		logrus.Errorf("Agent chat failed, session=%s, err=%v", sessionID, err)
-		return "", fmt.Errorf("调用工作流失败: %w", err)
+		return "", fmt.Errorf("调用 DeepSeek 失败: %w", err)
 	}
 
 	// 6b. 保存 assistant 回复
 	saveCtx, saveCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer saveCancel()
-	assistantSeq, err := mongorepo.SaveAgentMessageWithDetail(saveCtx, sessionID, userID, "assistant", fullContent, responseTime, "")
+	assistantSeq, err := mongorepo.SaveAgentMessageWithDetail(saveCtx, sessionID, userID, "assistant", fullContent.String(), responseTime, "")
 	if err != nil {
 		logrus.Errorf("Failed to save assistant message, session=%s, err=%v", sessionID, err)
 	}
@@ -161,30 +159,41 @@ func (s *AgentMessageService) AgentChatSSE(sessionID, userID, content string, on
 	}
 
 	logrus.Infof("Agent chat completed, session=%s, responseTime=%dms, contentLen=%d",
-		sessionID, responseTime, len(fullContent))
-	return fullContent, nil
+		sessionID, responseTime, fullContent.Len())
+	return fullContent.String(), nil
 }
 
-// buildXingChenHistory 将历史消息转为讯飞星辰需要的格式
-func buildXingChenHistory(messages []models.AgentMessage) []clients.XingChenHistoryItem {
-	// 排除最后一条（当前用户消息，已经作为 input 传入）
-	if len(messages) > 0 {
-		messages = messages[:len(messages)-1]
+// buildAgentPromptMessages 构建 DeepSeek 的 prompt messages
+// 包含 system prompt（智能体描述）+ 历史对话 + 当前用户消息
+func buildAgentPromptMessages(agentProps *models.AgentProperties, history []models.AgentMessage, currentContent string) []clients.PromptMessage {
+	messages := []clients.PromptMessage{
+		{
+			Role: "system",
+			Content: fmt.Sprintf("你是一个智能助手。%s。根据可用历史上下文回答用户当前问题。",
+				agentProps.Description),
+		},
 	}
 
-	history := make([]clients.XingChenHistoryItem, 0, len(messages))
-	for _, msg := range messages {
+	// 历史消息（排除最后一条当前用户消息,它作为 user message 单独传）
+	if len(history) > 0 {
+		history = history[:len(history)-1]
+	}
+	for _, msg := range history {
 		role := "user"
 		if msg.Role == "assistant" {
 			role = "assistant"
 		}
-		history = append(history, clients.XingChenHistoryItem{
-			Role:        role,
-			ContentType: "text",
-			Content:     msg.Content,
+		messages = append(messages, clients.PromptMessage{
+			Role:    role,
+			Content: msg.Content,
 		})
 	}
-	return history
+
+	messages = append(messages, clients.PromptMessage{
+		Role:    "user",
+		Content: currentContent,
+	})
+	return messages
 }
 
 var agentMessageServiceInstance *AgentMessageService

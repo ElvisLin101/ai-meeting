@@ -51,3 +51,33 @@ func EndInterviewSession(ctx context.Context, sessionID, userID string) error {
 	_, err = collection.UpdateOne(ctx, bson.M{"_id": sessionID, "user_id": userID}, update)
 	return err
 }
+
+// UpdateResumePath 更新面试会话的简历路径
+func UpdateResumePath(ctx context.Context, sessionID, userID, resumePath string) error {
+	collection, err := GetCollection(interviewSessionsCollection)
+	if err != nil {
+		return err
+	}
+	update := bson.M{
+		"$set": bson.M{
+			"resume_path": resumePath,
+			"updated_at":  time.Now(),
+		},
+	}
+	_, err = collection.UpdateOne(ctx, bson.M{"_id": sessionID, "user_id": userID}, update)
+	return err
+}
+
+// FindInterviewSession 按 sessionID 查询面试会话
+func FindInterviewSession(ctx context.Context, sessionID, userID string) (*models.InterviewSession, error) {
+	collection, err := GetCollection(interviewSessionsCollection)
+	if err != nil {
+		return nil, err
+	}
+	var session models.InterviewSession
+	err = collection.FindOne(ctx, bson.M{"_id": sessionID, "user_id": userID}).Decode(&session)
+	if err != nil {
+		return nil, err
+	}
+	return &session, nil
+}
