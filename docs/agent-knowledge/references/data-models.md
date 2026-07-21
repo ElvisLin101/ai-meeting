@@ -14,7 +14,7 @@
 
 - `AgentProperties` -> MySQL `agent_properties`（留 MySQL, 配置元数据）
   - 关键字段: `ID`, `Name`, `Description`, `Config`, `IsEnabled`, `ApiKey`, `ApiSecret`, `ApiFlowId`, `CreatedAt`, `UpdatedAt`
-  - `ApiKey`/`ApiSecret`/`ApiFlowId` 用于讯飞星辰工作流鉴权和指定工作流。
+  - `ApiKey`/`ApiSecret`/`ApiFlowId` 为历史星辰工作流凭证, 已废弃保留字段（Agent 对话改用 DeepSeek, 走 `config.ai.deepseek`）。
   - 启动时全量加载到 `AgentPropertiesLoader` 的 sync.Map 缓存。
 - `AgentConversation` -> MongoDB `agent_conversations`（_id=SessionID）
 - `AgentMessage` -> MongoDB `agent_messages`（_id=ObjectID）

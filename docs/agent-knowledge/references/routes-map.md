@@ -73,6 +73,7 @@
 | PUT | `/interview/sessions/:sessionId/finish` | `InterviewSessionController.FinishSession` | `InterviewSessionFacade.FinishSession` |
 | PUT | `/interview/conversations/:sessionId/end` | `InterviewSessionController.EndConversation` | `InterviewSessionFacade.EndConversation` |
 | POST | `/interview/sessions/:sessionId/interview-questions` | `InterviewSessionController.ExtractInterviewQuestions` | `InterviewSessionFacade.ExtractInterviewQuestions` |
+| POST | `/interview/sessions/:sessionId/resume/upload` | `InterviewSessionController.UploadResume` | `InterviewSessionFacade.UploadResume`(PDF解析+出题) |
 | POST | `/interview/sessions/:sessionId/interview/answer` | `InterviewSessionController.AnswerInterviewQuestion` | `InterviewSessionFacade.AnswerInterviewQuestion` |
 | POST | `/interview/sessions/:sessionId/interview/answer-json` | `InterviewSessionController.AnswerInterviewQuestionJson` | `InterviewSessionFacade.AnswerInterviewQuestion` |
 | GET | `/interview/sessions/:sessionId/next-question` | `InterviewSessionController.GetNextQuestion` | `InterviewSessionFacade.GetNextQuestion` |
@@ -83,7 +84,6 @@
 | GET | `/interview/sessions/:sessionId/interview/suggestions` | `InterviewSessionController.GetSessionInterviewSuggestions` | `InterviewSessionFacade.GetSessionInterviewSuggestions` |
 | GET | `/interview/sessions/:sessionId/resume/score` | `InterviewSessionController.GetSessionResumeScore` | `InterviewSessionFacade.GetSessionResumeScore` |
 | GET | `/interview/sessions/:sessionId/radar-chart` | `InterviewSessionController.GetRadarChartData` | `InterviewSessionFacade.GetRadarChartData` |
-| POST | `/interview/sessions/:sessionId/demeanor-evaluation` | `InterviewSessionController.EvaluateDemeanor` | `InterviewSessionFacade.EvaluateDemeanor` |
 | POST | `/interview/interview/record` | `InterviewRecordController.SaveInterviewRecord` | `InterviewRecordService.SaveInterviewRecord` |
 | GET | `/interview/interview/records` | `InterviewRecordController.PageInterviewRecords` | `InterviewRecordService.PageInterviewRecords` |
 | GET | `/interview/interview/record/:sessionId` | `InterviewRecordController.GetInterviewRecordBySessionId` | `InterviewRecordService.GetBySessionId` |

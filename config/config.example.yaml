@@ -1,0 +1,35 @@
+server:
+  port: "8080"
+
+database:
+  host: "localhost"
+  port: "3306"
+  username: "root"
+  password: "your-password"
+  dbname: "ai_meeting"
+
+redis:
+  host: "localhost"
+  port: 6379
+  password: "your-password"
+  db: 0
+
+mongodb:
+  host: "localhost"
+  port: 27017
+  username: "root"
+  password: "your-password"
+  dbname: "ai_meeting"
+
+jwt:
+  secret: "your-secret-key-here"
+  expire: 7200
+
+ai:
+  provider: "deepseek"
+  deepseek:
+    enabled: true
+    endpoint: "https://api.deepseek.com/chat/completions"
+    model: "deepseek-chat"
+    api_key: "your-api-key"
+    api_secret: ""

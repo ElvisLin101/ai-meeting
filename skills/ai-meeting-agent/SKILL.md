@@ -11,7 +11,7 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 
 - `/agents/**` 接口变更。
 - Agent 会话创建、结束、分页、历史消息查询。
-- Agent Chat SSE 流式聊天、接入讯飞星辰工作流、双消息持久化。
+- Agent Chat SSE 流式聊天、接入 DeepSeek、双消息持久化。
 - Agent 配置 CRUD、启动缓存、场景绑定热插拔。
 - Agent 文件上传和 `AgentFileAsset` 持久化。
 
@@ -22,7 +22,7 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 - Service: `services/agent/agent_service.go`。
 - 场景枚举: `services/agent/agent_scene.go`（5 个 BusinessAgentScene + 候选名称）。
 - 启动缓存 + 场景解析器: `services/agent/agent_properties_loader.go`（sync.Map 内存缓存 + miss 查库 + ResolveRequired）。
-- 讯飞星辰客户端: `clients/xingchen_client.go`（ChatStream + ChatSync + UploadFile）。
+- 模型客户端: `clients/ai_model_client.go`（CallConfiguredAIChatStream, DeepSeek/OpenAI 兼容）。
 - MySQL 仓储: `repositories/mysql/agent_properties_repository.go`, `repositories/mysql/agent_file_asset_repository.go`。
 - Mongo 仓储: `repositories/mongo/agent_conversation_repository.go`(会话), `repositories/mongo/agent_message_repository.go`(消息)。
 - DTO: `dto/agent.go`。
@@ -48,8 +48,8 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
   2. 解析智能体配置（`AgentPropertiesLoader.GetByAgentID`，先查 sync.Map 缓存 miss 查库）。
   3. 校验 apiKey/apiSecret/apiFlowId 非空。
   4. 保存用户消息到 MongoDB（`SaveAgentMessage`）。
-  5. 加载历史消息 → 构建 `XingChenHistoryItem` 数组（排除最后一条当前消息）。
-  6. 调用 `XingChenClient.ChatStream`（讯飞星辰工作流 SSE 流式），通过 `onChunk` 回调 `ctx.SSEvent("message", chunk)` 推送前端。
+  5. 加载历史消息 → 构建 `PromptMessage` 数组（system prompt + 历史对话 + 当前用户消息）。
+  6. 调用 `clients.CallConfiguredAIChatStream`（DeepSeek SSE 流式, aiID=0 走 config fallback），通过 `onChunk` 回调 `ctx.SSEvent("message", chunk)` 推送前端。
   7. 保存 assistant 回复（`SaveAgentMessageWithDetail`，含 responseTime 和 errorMessage）。
   8. 更新会话消息计数（`UpdateAgentConversationMessageCount`）。
 - 出错时也保存一条错误 assistant 消息（content="Sorry, an error occurred..."，errorMessage=err.Error()）。
@@ -71,7 +71,7 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 
 `BusinessAgentScene`（场景枚举）
 
-- 5 个场景: GeneralAgentChat / InterviewQuestionExtraction / InterviewAnswerEvaluation / InterviewDemeanor / InterviewQuestionAsking。
+- 4 个场景: GeneralAgentChat / InterviewQuestionExtraction / InterviewAnswerEvaluation / InterviewQuestionAsking。
 - 每个场景有默认名称 + 别名列表（如评分官: "用户答案评分官" / "面试答案评分官"）。
 - `ResolveRequired` 按候选名称顺序从缓存查找，支持运营改数据库不改代码。
 
@@ -79,7 +79,7 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 
 - 路由: `POST /api/xunzhi/v1/agents/files/upload`。
 - 当前保存路径为 `./uploads/` + 原始文件名, 然后写入 `agent_file_assets`。
-- `XingChenClient.UploadFile` 已实现但未接入此流程（后续面试简历/照片上传使用）。
+- 文件上传后续面试简历/照片上传使用, 当前保存路径未净化。
 - 改动时检查目录存在、文件名净化、重名覆盖和大小限制。
 
 ## 影响检查

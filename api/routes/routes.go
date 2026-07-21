@@ -10,6 +10,9 @@ import (
 func SetupRouter() *gin.Engine {
 	r := gin.Default()
 
+	// 静态前端页面
+	r.StaticFile("/", "./static/index.html")
+
 	r.Use(middleware.CORSMiddleware())
 	r.Use(middleware.AuthMiddleware())
 
@@ -113,6 +116,7 @@ func setupInterviewRoutes(api *gin.RouterGroup) {
 	interview.PUT("/sessions/:sessionId/finish", sessionController.FinishSession)
 	interview.PUT("/conversations/:sessionId/end", sessionController.EndConversation)
 	interview.POST("/sessions/:sessionId/interview-questions", sessionController.ExtractInterviewQuestions)
+	interview.POST("/sessions/:sessionId/resume/upload", sessionController.UploadResume)
 	interview.POST("/sessions/:sessionId/interview/answer", sessionController.AnswerInterviewQuestion)
 	interview.POST("/sessions/:sessionId/interview/answer-json", sessionController.AnswerInterviewQuestionJson)
 	interview.GET("/sessions/:sessionId/next-question", sessionController.GetNextQuestion)
@@ -123,7 +127,6 @@ func setupInterviewRoutes(api *gin.RouterGroup) {
 	interview.GET("/sessions/:sessionId/interview/suggestions", sessionController.GetSessionInterviewSuggestions)
 	interview.GET("/sessions/:sessionId/resume/score", sessionController.GetSessionResumeScore)
 	interview.GET("/sessions/:sessionId/radar-chart", sessionController.GetRadarChartData)
-	interview.POST("/sessions/:sessionId/demeanor-evaluation", sessionController.EvaluateDemeanor)
 
 	interview.POST("/interview/record", recordController.SaveInterviewRecord)
 	interview.GET("/interview/records", recordController.PageInterviewRecords)

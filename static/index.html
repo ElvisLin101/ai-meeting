@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI-Meeting 面试平台</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; }
+.container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+h1 { text-align: center; margin-bottom: 20px; color: #1a1a1a; }
+.panel { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.panel h2 { font-size: 16px; margin-bottom: 15px; color: #666; border-bottom: 1px solid #eee; padding-bottom: 8px; }
+.row { display: flex; gap: 10px; margin-bottom: 10px; align-items: center; flex-wrap: wrap; }
+input, textarea, select { padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
+input[type="text"], input[type="password"] { width: 200px; }
+textarea { width: 100%; min-height: 80px; resize: vertical; }
+button { padding: 8px 16px; background: #1890ff; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; transition: background 0.2s; }
+button:hover { background: #40a9ff; }
+button:disabled { background: #ccc; cursor: not-allowed; }
+button.success { background: #52c41a; }
+button.success:hover { background: #73d13d; }
+button.danger { background: #ff4d4f; }
+button.danger:hover { background: #ff7875; }
+button.warn { background: #faad14; }
+button.warn:hover { background: #ffc53d; }
+.chat-area { max-height: 500px; overflow-y: auto; padding: 10px; background: #fafafa; border-radius: 4px; border: 1px solid #eee; }
+.msg { margin-bottom: 12px; padding: 10px 14px; border-radius: 8px; max-width: 80%; }
+.msg.user { background: #1890ff; color: #fff; margin-left: auto; }
+.msg.bot { background: #f0f0f0; color: #333; }
+.msg.system { background: #fff7e6; color: #d46b08; text-align: center; max-width: 100%; font-size: 13px; }
+.msg .meta { font-size: 12px; opacity: 0.7; margin-top: 4px; }
+.msg .score { display: inline-block; background: #52c41a; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 12px; margin-left: 8px; }
+.msg .followup { display: inline-block; background: #faad14; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 12px; margin-left: 8px; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; margin-left: 6px; }
+.badge.green { background: #d9f7be; color: #389e0d; }
+.badge.blue { background: #e6f7ff; color: #1890ff; }
+.badge.orange { background: #fff7e6; color: #d46b08; }
+.stats { display: flex; gap: 15px; flex-wrap: wrap; }
+.stat-card { flex: 1; min-width: 150px; background: #fafafa; padding: 15px; border-radius: 6px; text-align: center; }
+.stat-card .value { font-size: 24px; font-weight: bold; color: #1890ff; }
+.stat-card .label { font-size: 12px; color: #999; margin-top: 4px; }
+.tab-bar { display: flex; gap: 0; margin-bottom: 20px; }
+.tab { padding: 10px 20px; cursor: pointer; border-bottom: 2px solid transparent; color: #666; }
+.tab.active { color: #1890ff; border-bottom-color: #1890ff; font-weight: 500; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+pre { background: #f5f5f5; padding: 10px; border-radius: 4px; font-size: 12px; overflow-x: auto; max-height: 300px; }
+.radar-chart { display: flex; gap: 20px; align-items: center; }
+.radar-bars { flex: 1; }
+.radar-bar { margin-bottom: 8px; }
+.radar-bar .bar-label { font-size: 13px; margin-bottom: 2px; }
+.radar-bar .bar-track { background: #f0f0f0; border-radius: 4px; height: 20px; overflow: hidden; }
+.radar-bar .bar-fill { height: 100%; background: linear-gradient(90deg, #1890ff, #52c41a); border-radius: 4px; transition: width 0.5s; }
+</style>
+</head>
+<body>
+<div class="container">
+<h1>🤖 AI-Meeting 面试平台</h1>
+
+<!-- 登录区 -->
+<div class="panel">
+  <h2>1. 用户登录</h2>
+  <div class="row">
+    <input type="text" id="username" placeholder="用户名" value="testuser">
+    <input type="password" id="password" placeholder="密码" value="123456">
+    <button onclick="login()">登录</button>
+    <button class="warn" onclick="register()">注册</button>
+    <span id="loginStatus" style="font-size:13px;color:#999;"></span>
+  </div>
+</div>
+
+<!-- Tab 切换 -->
+<div class="tab-bar">
+  <div class="tab active" onclick="switchTab('interview')">📝 模拟面试</div>
+  <div class="tab" onclick="switchTab('ai')">💬 AI 对话</div>
+  <div class="tab" onclick="switchTab('metrics')">📊 指标监控</div>
+</div>
+
+<!-- 面试 Tab -->
+<div id="tab-interview" class="tab-content active">
+
+<!-- 创建会话 + 出题 -->
+<div class="panel">
+  <h2>2. 创建面试会话 & 出题</h2>
+  <div class="row">
+    <button class="success" onclick="createSession()">创建面试会话</button>
+    <span id="sessionInfo" style="font-size:13px;color:#999;"></span>
+  </div>
+  <div class="row">
+    <textarea id="resumeContent" placeholder="粘贴简历内容（文本）...">张三，3年Go后端开发经验，熟悉Gin/GORM/MySQL/Redis，做过电商订单系统和支付系统，熟悉微服务架构和Kafka消息队列。</textarea>
+  </div>
+  <div class="row">
+    <button onclick="extractQuestions()">📄 文本出题</button>
+    <button onclick="document.getElementById('pdfUpload').click()">📎 PDF上传出题</button>
+    <input type="file" id="pdfUpload" accept=".pdf" style="display:none" onchange="uploadResumePDF(this)">
+  </div>
+</div>
+
+<!-- 面试对话区 -->
+<div class="panel">
+  <h2>3. 面试对话</h2>
+  <div class="chat-area" id="interviewChat">
+    <div class="msg system">请先创建会话并出题</div>
+  </div>
+  <div class="row" style="margin-top:10px;">
+    <input type="text" id="questionNumber" placeholder="题号 (如 1 或 1-F1)" style="width:120px;">
+    <textarea id="answerContent" placeholder="输入你的答案..." style="flex:1;min-height:40px;"></textarea>
+    <button class="success" onclick="answerQuestion()">提交答案</button>
+  </div>
+  <div class="row">
+    <button onclick="getCurrentQuestion()">获取当前题</button>
+    <button onclick="restoreSession()">恢复会话</button>
+    <button class="danger" onclick="finishSession()">结束面试</button>
+    <button class="warn" onclick="generateReport()">生成报告</button>
+  </div>
+</div>
+
+<!-- 面试状态 -->
+<div class="panel">
+  <h2>4. 面试状态</h2>
+  <div class="stats">
+    <div class="stat-card"><div class="value" id="statScore">-</div><div class="label">总分</div></div>
+    <div class="stat-card"><div class="value" id="statResumeScore">-</div><div class="label">简历分</div></div>
+    <div class="stat-card"><div class="value" id="statQuestions">-</div><div class="label">题目数</div></div>
+    <div class="stat-card"><div class="value" id="statStatus">-</div><div class="label">状态</div></div>
+  </div>
+  <div class="row" style="margin-top:10px;">
+    <button onclick="getScore()">刷新分数</button>
+    <button onclick="getQuestions()">查看题目</button>
+    <button onclick="getSuggestions()">查看建议</button>
+    <button onclick="getRadar()">雷达图</button>
+  </div>
+  <div id="radarArea" style="margin-top:10px;display:none;">
+    <div class="radar-bars" id="radarBars"></div>
+  </div>
+</div>
+
+</div><!-- /interview tab -->
+
+<!-- AI 对话 Tab -->
+<div id="tab-ai" class="tab-content">
+  <div class="panel">
+    <h2>AI 对话</h2>
+    <div class="row">
+      <button class="success" onclick="createAIConversation()">创建AI会话</button>
+      <span id="aiSessionInfo" style="font-size:13px;color:#999;"></span>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="chat-area" id="aiChat" style="min-height:300px;">
+      <div class="msg system">创建AI会话后开始对话</div>
+    </div>
+    <div class="row" style="margin-top:10px;">
+      <input type="text" id="aiMessage" placeholder="输入消息..." style="flex:1;">
+      <button class="success" onclick="aiChat()">发送</button>
+    </div>
+  </div>
+</div>
+
+<!-- 指标 Tab -->
+<div id="tab-metrics" class="tab-content">
+  <div class="panel">
+    <h2>系统指标</h2>
+    <button onclick="loadMetrics()">刷新指标</button>
+    <div id="metricsArea" style="margin-top:15px;"></div>
+  </div>
+</div>
+
+</div>
+
+<script>
+const BASE = '/api/xunzhi/v1';
+let token = '';
+let interviewSessionId = '';
+let aiSessionId = '';
+
+function api(method, path, body, isForm) {
+  const opts = { method, headers: {} };
+  if (token) opts.headers['Authorization'] = 'Bearer ' + token;
+  if (body) {
+    if (isForm) { opts.body = body; }
+    else { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+  }
+  return fetch(BASE + path, opts).then(r => r.json().catch(() => ({ error: r.statusText })));
+}
+
+// === 登录 ===
+async function login() {
+  const r = await api('POST', '/users/login', { username: username.value, password: password.value });
+  if (r.token) { token = r.token; loginStatus.textContent = '✅ 已登录: ' + r.username; }
+  else { loginStatus.textContent = '❌ ' + (r.error || '登录失败'); }
+}
+async function register() {
+  const r = await api('POST', '/users/register', { username: username.value, password: password.value, email: 'test@test.com' });
+  alert(r.message || r.error);
+}
+
+// === Tab 切换 ===
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', t.textContent.includes(name==='interview'?'面试':name==='ai'?'AI':'指标')));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+}
+
+// === 面试 ===
+async function createSession() {
+  const r = await api('POST', '/interview/sessions');
+  if (r.session_id) { interviewSessionId = r.session_id; sessionInfo.textContent = '✅ Session: ' + interviewSessionId; addMsg('interviewChat','system','面试会话已创建: ' + interviewSessionId); }
+}
+async function extractQuestions() {
+  if (!interviewSessionId) { alert('请先创建会话'); return; }
+  addMsg('interviewChat','system','正在出题...');
+  const r = await api('POST', `/interview/sessions/${interviewSessionId}/interview-questions`, { resume_content: resumeContent.value });
+  if (r.question) { addMsg('interviewChat','bot','📋 第' + r.question_number + '题: ' + r.question); questionNumber.value = r.question_number; statStatus.textContent = 'ASKING'; statQuestions.textContent = '?'; }
+  else { addMsg('interviewChat','system','❌ 出题失败: ' + (r.error||'')); }
+}
+async function uploadResumePDF(file) {
+  if (!interviewSessionId) { alert('请先创建会话'); return; }
+  const fd = new FormData(); fd.append('file', file.files[0]);
+  addMsg('interviewChat','system','正在上传PDF并出题...');
+  const r = await api('POST', `/interview/sessions/${interviewSessionId}/resume/upload`, fd, true);
+  if (r.question) { addMsg('interviewChat','bot','📋 第' + r.question_number + '题: ' + r.question); questionNumber.value = r.question_number; }
+  else { addMsg('interviewChat','system','❌ 出题失败: ' + (r.error||'')); }
+}
+async function answerQuestion() {
+  if (!interviewSessionId) { alert('请先创建会话'); return; }
+  const qn = questionNumber.value; const ans = answerContent.value;
+  if (!qn || !ans) { alert('请输入题号和答案'); return; }
+  addMsg('interviewChat','user', '题' + qn + ': ' + ans);
+  addMsg('interviewChat','system','⏳ AI评分中...');
+  const r = await api('POST', `/interview/sessions/${interviewSessionId}/interview/answer-json`, { question_number: qn, answer_content: ans, request_id: 'web-' + Date.now() });
+  if (r.error) { addMsg('interviewChat','system','❌ ' + r.error); return; }
+  let botMsg = '📊 得分: ' + r.score + ' / 总分: ' + r.total_score;
+  if (r.is_follow_up) botMsg += ' <span class="followup">追问</span>';
+  botMsg += '\n💬 反馈: ' + r.feedback;
+  if (r.next_question) botMsg += '\n➡️ 下一题(' + r.next_question_number + '): ' + r.next_question;
+  if (r.finished) botMsg += '\n🏁 面试结束!';
+  addMsg('interviewChat','bot', botMsg);
+  if (r.next_question_number) questionNumber.value = r.next_question_number;
+  answerContent.value = '';
+  statScore.textContent = r.total_score;
+}
+async function getCurrentQuestion() {
+  const r = await api('GET', `/interview/sessions/${interviewSessionId}/current-question`);
+  if (r.question_number) { addMsg('interviewChat','system','当前题: ' + r.question_number + ' - ' + r.question + (r.is_follow_up?' (追问)':'') + (r.finished?' [已结束]':'')); questionNumber.value = r.question_number; }
+  else { addMsg('interviewChat','system','❌ ' + (r.error||'')); }
+}
+async function restoreSession() {
+  const r = await api('GET', `/interview/sessions/${interviewSessionId}/restore`);
+  if (r.question_number) { addMsg('interviewChat','system','恢复成功: 题' + r.question_number + ' 分数:' + r.score); questionNumber.value = r.question_number; statScore.textContent = r.score; }
+  else { addMsg('interviewChat','system','❌ ' + (r.error||'')); }
+}
+async function finishSession() {
+  await api('PUT', `/interview/sessions/${interviewSessionId}/finish`);
+  addMsg('interviewChat','system','面试已结束'); statStatus.textContent = 'COMPLETED';
+}
+async function generateReport() {
+  const r = await api('POST', `/interview/interview/record/save-from-redis/${interviewSessionId}`);
+  addMsg('interviewChat','system', r.error ? '❌ ' + r.error : '✅ 报告已生成');
+}
+async function getScore() { const r = await api('GET', `/interview/sessions/${interviewSessionId}/interview/score`); statScore.textContent = r; }
+async function getQuestions() { const r = await api('GET', `/interview/sessions/${interviewSessionId}/interview/questions`); addMsg('interviewChat','system','题目列表: ' + JSON.stringify(r)); statQuestions.textContent = Object.keys(r).length; }
+async function getSuggestions() { const r = await api('GET', `/interview/sessions/${interviewSessionId}/interview/suggestions`); addMsg('interviewChat','system','建议: ' + JSON.stringify(r)); }
+async function getRadar() {
+  const r = await api('GET', `/interview/sessions/${interviewSessionId}/radar-chart`);
+  if (!r.dimensions) { addMsg('interviewChat','system','❌ 雷达图数据获取失败'); return; }
+  radarArea.style.display = 'block';
+  radarBars.innerHTML = r.dimensions.map(d => `<div class="radar-bar"><div class="bar-label">${d.dimension}: ${d.value}</div><div class="bar-track"><div class="bar-fill" style="width:${d.value}%"></div></div></div>`).join('');
+}
+
+// === AI 对话 ===
+async function createAIConversation() {
+  const r = await api('POST', '/ai/conversations', { first_message: '你好' });
+  if (r.session_id) { aiSessionId = r.session_id; aiSessionInfo.textContent = '✅ Session: ' + aiSessionId; addMsg('aiChat','system','AI会话已创建'); }
+}
+async function aiChat() {
+  if (!aiSessionId) { alert('请先创建AI会话'); return; }
+  const msg = aiMessage.value; if (!msg) return;
+  addMsg('aiChat','user', msg); aiMessage.value = '';
+  addMsg('aiChat','system','⏳ 思考中...');
+  const r = await api('POST', `/ai/sessions/${aiSessionId}/chat`, { content: msg });
+  if (r.content) addMsg('aiChat','bot', r.content);
+  else addMsg('aiChat','system','❌ ' + (r.error||''));
+}
+
+// === 指标 ===
+async function loadMetrics() {
+  // metric_logs 是 MySQL 表，没有 API，这里显示提示
+  metricsArea.innerHTML = '<p>指标存储在 MySQL metric_logs 表，请用 SQL 查询:</p><pre>SELECT module, event, success, COUNT(*) FROM metric_logs GROUP BY module, event, success;</pre>';
+}
+
+// === 工具 ===
+function addMsg(areaId, type, text) {
+  const area = document.getElementById(areaId);
+  const div = document.createElement('div');
+  div.className = 'msg ' + type;
+  div.innerHTML = text.replace(/\n/g, '<br>');
+  area.appendChild(div);
+  area.scrollTop = area.scrollHeight;
+}
+</script>
+</body>
+</html>

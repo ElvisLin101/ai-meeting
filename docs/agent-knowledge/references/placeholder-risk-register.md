@@ -4,7 +4,7 @@
 
 ## Agent
 
-- ~~`api/handlers/agent_handler.go`: `AgentController.Chat` 保存用户消息并异步触发 memory 压缩判断, 但不调用模型, 不保存 assistant 回复。~~ **已完成: Agent Chat SSE 闭环, 对接讯飞星辰工作流, 双消息持久化。**
+- ~~`api/handlers/agent_handler.go`: `AgentController.Chat` 保存用户消息并异步触发 memory 压缩判断, 但不调用模型, 不保存 assistant 回复。~~ **已完成: Agent Chat SSE 闭环, 对接 DeepSeek, 双消息持久化。**
 - `services/agent/agent_service.go`: `CreateConversationWithTitle` 入参有 `agentID`, 但当前 `AgentID` 固定为 1。
 - ~~`services/agent/agent_service.go`: `GetConversationHistoryWithContext` 已接 memory, 但 handler 未使用。~~ **已完成: AgentChatSSE 中已接入记忆压缩。**
 
@@ -17,7 +17,7 @@
 
 ## Interview
 
-- `services/interview/interview_service.go`: `ExtractInterviewQuestions`, `AnswerInterviewQuestion`, `GetNextQuestion`, `GetCurrentQuestion`, `RestoreInterviewSession`, `GetSessionInterviewQuestions`, `GetSessionTotalScore`, `GetSessionInterviewSuggestions`, `GetSessionResumeScore`, `GetRadarChartData`, `EvaluateDemeanor` 均返回示例数据。
+- `services/interview/interview_service.go`: `ExtractInterviewQuestions`, `AnswerInterviewQuestion`, `GetNextQuestion`, `GetCurrentQuestion`, `RestoreInterviewSession`, `GetSessionInterviewQuestions`, `GetSessionTotalScore`, `GetSessionInterviewSuggestions`, `GetSessionResumeScore`, `GetRadarChartData` 已接入真实实现。神态评估已移除。
 - `services/interview/interview_service.go`: `SaveInterviewRecordFromRedis` 是空实现。
 - `api/handlers/interview_handler.go`: `PreviewResume` 只返回固定提示。
 - `InterviewSessionFacade.CreateSession` 写 `InterviewSession`, 但 `PageConversations` 读 `AgentConversation`。
@@ -36,8 +36,6 @@
 
 ## 新增基础设施（无占位）
 
-- `clients/xingchen_client.go`: 讯飞星辰工作流客户端（ChatStream/ChatSync/UploadFile）, 已完整实现。
-  - `ChatSync` 和 `UploadFile` 已实现但尚未被面试模块调用。
 - `services/agent/agent_scene.go`: 5 个业务场景枚举, 已完整实现, 尚未被面试模块使用。
 - `services/agent/agent_properties_loader.go`: 启动缓存 + 场景解析器, 已完整实现。
 - `pkg/singleflight/singleflight.go`: 分布式 SingleFlight, 已完整实现; 流式心跳已接入 AI 侧压缩路径（`AiMemoryService` 压缩走 `CallConfiguredAIChatStream`, `onChunk` 内调 `writer.Write` 刷新 `progressKey` 时间戳, follower 据此判停滞换主）。Agent 侧不压缩, 不走 SingleFlight。

@@ -163,9 +163,40 @@ func (c *InterviewSessionController) ExtractInterviewQuestions(ctx *gin.Context)
 		return
 	}
 
-	username, _ := ctx.Get("username")
+	var req struct {
+		ResumeContent string `json:"resume_content"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		// body 为空时也允许, 用空串走出题流程(AI 会自行处理)
+		req.ResumeContent = ""
+	}
 
-	result, err := c.sessionFacade.ExtractInterviewQuestions(sessionID, userID.(string), username.(string))
+	result, err := c.sessionFacade.ExtractInterviewQuestions(sessionID, userID.(string), req.ResumeContent)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, result)
+}
+
+// UploadResume 上传 PDF 简历并出题
+func (c *InterviewSessionController) UploadResume(ctx *gin.Context) {
+	sessionID := ctx.Param("sessionId")
+
+	userID, exists := ctx.Get("user_id")
+	if !exists || userID == "" {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	file, err := ctx.FormFile("file")
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "PDF file is required"})
+		return
+	}
+
+	result, err := c.sessionFacade.UploadResume(sessionID, userID.(string), file)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -360,26 +391,6 @@ func (c *InterviewSessionController) GetRadarChartData(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, result)
 }
 
-func (c *InterviewSessionController) EvaluateDemeanor(ctx *gin.Context) {
-	sessionID := ctx.Param("sessionId")
-
-	userID, exists := ctx.Get("user_id")
-	if !exists || userID == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-		return
-	}
-
-	username, _ := ctx.Get("username")
-
-	result, err := c.sessionFacade.EvaluateDemeanor(sessionID, userID.(string), username.(string))
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	ctx.JSON(http.StatusOK, result)
-}
-
 type InterviewRecordController struct {
 	recordService *interview.InterviewRecordService
 }
@@ -474,16 +485,32 @@ func (c *InterviewRecordController) SaveInterviewRecordFromRedis(ctx *gin.Contex
 	ctx.JSON(http.StatusOK, gin.H{"message": "Save success"})
 }
 
-type InterviewResumeController struct{}
+type InterviewResumeController struct {
+	sessionFacade *interview.InterviewSessionFacade
+}
 
 func NewInterviewResumeController() *InterviewResumeController {
-	return &InterviewResumeController{}
+	return &InterviewResumeController{
+		sessionFacade: interview.GetInterviewSessionFacade(),
+	}
 }
 
 func (c *InterviewResumeController) PreviewResume(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
-	_ = sessionID
-	ctx.JSON(http.StatusOK, gin.H{"message": "Resume preview endpoint"})
+
+	userID, exists := ctx.Get("user_id")
+	if !exists || userID == "" {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	content, err := c.sessionFacade.PreviewResume(sessionID, userID.(string))
+	if err != nil {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"session_id": sessionID, "content": content})
 }
 
 func toInterviewMessageHistoryResp(msg models.AgentMessage) dto.AgentMessageHistoryRespDTO {
