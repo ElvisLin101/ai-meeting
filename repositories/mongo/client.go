@@ -22,7 +22,7 @@ func InitMongoDB() error {
 
 	uri := fmt.Sprintf("mongodb://%s:%d", cfg.Host, cfg.Port)
 	if cfg.Username != "" && cfg.Password != "" {
-		uri = fmt.Sprintf("mongodb://%s:%s@%s:%d", cfg.Username, cfg.Password, cfg.Host, cfg.Port)
+		uri = fmt.Sprintf("mongodb://%s:%s@%s:%d/%s?authSource=admin", cfg.Username, cfg.Password, cfg.Host, cfg.Port, cfg.DBName)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

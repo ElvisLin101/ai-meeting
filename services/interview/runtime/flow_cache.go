@@ -65,12 +65,12 @@ func (c *FlowCache) SaveFlow(ctx context.Context, sessionID string, state *model
 	key := flowKey(sessionID)
 	_, err := c.rdb.HSet(ctx, key,
 		"status", string(state.Status),
-		"currentIndex", state.CurrentIndex,
+		"currentIndex", fmt.Sprintf("%d", state.CurrentIndex),
 		"currentQuestionNumber", state.CurrentQuestionNumber,
-		"totalQuestions", state.TotalQuestions,
-		"followUpCount", state.FollowUpCount,
-		"maxFollowUp", state.MaxFollowUp,
-		"version", state.Version,
+		"totalQuestions", fmt.Sprintf("%d", state.TotalQuestions),
+		"followUpCount", fmt.Sprintf("%d", state.FollowUpCount),
+		"maxFollowUp", fmt.Sprintf("%d", state.MaxFollowUp),
+		"version", fmt.Sprintf("%d", state.Version),
 	).Result()
 	if err != nil {
 		return err
@@ -92,13 +92,19 @@ func (c *FlowCache) MutateFlow(ctx context.Context, sessionID string, mutator fu
 			return nil, fmt.Errorf("flow not found for session %s", sessionID)
 		}
 
+		// 调试: 直接从 Redis 读 raw version 对比
+		rawVersion, _ := c.rdb.HGet(ctx, key, "version").Result()
+		fmt.Printf("[flow_cache] MutateFlow attempt %d: parsed_version=%d, raw_version=%q\n", attempt+1, current.Version, rawVersion)
+
 		next, err := mutator(current)
 		if err != nil {
 			return nil, err
 		}
-		next.Version = current.Version + 1
+		// 注意: mutator 可能返回 current 本身（同一指针），所以先存原始 version
+		expectedVersion := current.Version
+		next.Version = expectedVersion + 1
 
-		ok, err := c.casUpdate(ctx, key, current.Version, next)
+		ok, err := c.casUpdate(ctx, key, expectedVersion, next)
 		if err != nil {
 			return nil, err
 		}
@@ -106,31 +112,38 @@ func (c *FlowCache) MutateFlow(ctx context.Context, sessionID string, mutator fu
 			return next, nil
 		}
 		// CAS 失败（版本冲突），退避后重试
+		fmt.Printf("[flow_cache] CAS failed (attempt %d), session=%s, expected_version=%d\n", attempt+1, sessionID, current.Version)
 		time.Sleep(time.Duration(20*(attempt+1)) * time.Millisecond)
 	}
 
-	// 重试用尽，读最新返回
-	return c.GetFlow(ctx, sessionID)
+	// 重试用尽，报错——调用方必须知道 CAS 失败了
+	fmt.Printf("[flow_cache] CAS retries exhausted, session=%s\n", sessionID)
+	return nil, fmt.Errorf("flow CAS failed after %d retries, session=%s", flowCASMaxRetries, sessionID)
 }
 
 // casUpdate 用 Lua 脚本做 CAS 更新
 func (c *FlowCache) casUpdate(ctx context.Context, key string, expectedVersion int, state *models.InterviewFlowState) (bool, error) {
-	result, err := redis.NewScript(flowCASUpdateScript).Run(ctx, c.rdb,
-		[]string{key},
-		expectedVersion,
+	args := []interface{}{
+		fmt.Sprintf("%d", expectedVersion),
 		string(state.Status),
-		state.CurrentIndex,
+		fmt.Sprintf("%d", state.CurrentIndex),
 		state.CurrentQuestionNumber,
-		state.TotalQuestions,
-		state.FollowUpCount,
-		state.MaxFollowUp,
-		state.Version,
-		cacheTTLHours*3600,
-	).Result()
+		fmt.Sprintf("%d", state.TotalQuestions),
+		fmt.Sprintf("%d", state.FollowUpCount),
+		fmt.Sprintf("%d", state.MaxFollowUp),
+		fmt.Sprintf("%d", state.Version),
+		fmt.Sprintf("%d", cacheTTLHours*3600),
+	}
+	fmt.Printf("[flow_cache] CAS update: key=%s, expectedVersion=%d, newVersion=%d, args=%v\n", key, expectedVersion, state.Version, args)
+
+	result, err := redis.NewScript(flowCASUpdateScript).Run(ctx, c.rdb, []string{key}, args...).Result()
 	if err != nil {
+		fmt.Printf("[flow_cache] CAS script error: %v\n", err)
 		return false, err
 	}
-	return result.(int64) == 1, nil
+	r, ok := result.(int64)
+	fmt.Printf("[flow_cache] CAS result: %v (type: %T)\n", result, result)
+	return ok && r == 1, nil
 }
 
 // parseFlowState 从 Redis Hash map 解析 InterviewFlowState
