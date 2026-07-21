@@ -3,6 +3,7 @@ package runtime
 import (
 	"ai-meeting/models"
 	mongorepo "ai-meeting/repositories/mongo"
+	"ai-meeting/services/metric"
 	"context"
 	"fmt"
 	"time"
@@ -98,6 +99,7 @@ func (s *SnapshotService) RefreshAfterAnswerCommitted(ctx context.Context, sessi
 		time.Sleep(time.Duration(casBaseBackoffMs*(attempt+1)) * time.Millisecond)
 	}
 	logrus.Warnf("Hot snapshot CAS retries exhausted, session=%s", sessionID)
+	metric.GetMetricService().Record(models.MetricLog{Module: "snapshot", Event: "cas_exhausted", Success: false, SessionID: sessionID})
 }
 
 // RefreshColdSnapshot 出题后刷新冷快照到 Mongo
@@ -157,6 +159,7 @@ func (s *SnapshotService) EnsureRuntime(ctx context.Context, sessionID string) (
 			s.rdb.HSet(ctx, followUpQuestionsKey(sessionID), args...)
 		}
 		logrus.Infof("Runtime rebuilt from hot snapshot, session=%s", sessionID)
+		metric.GetMetricService().Record(models.MetricLog{Module: "snapshot", Event: "ensure_runtime_rebuilt", Success: true, SessionID: sessionID})
 		return &hot.Flow, nil
 	}
 
@@ -181,6 +184,7 @@ func (s *SnapshotService) EnsureRuntime(ctx context.Context, sessionID string) (
 
 	// 无法恢复 flow（快照和归档都没有 flow 信息）
 	logrus.Warnf("Runtime rebuild failed: no hot snapshot for session=%s", sessionID)
+	metric.GetMetricService().Record(models.MetricLog{Module: "snapshot", Event: "ensure_runtime_failed", Success: false, SessionID: sessionID})
 	return nil, nil
 }
 
