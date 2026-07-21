@@ -62,6 +62,9 @@ type callResult struct {
 	Err string      `json:"err,omitempty"`
 }
 
+// MetricFunc 指标回调，由调用方注入（避免 pkg → services 循环依赖）
+type MetricFunc func(module, event string, success bool, extra string)
+
 // DistributedGroup 分布式 singleflight
 type DistributedGroup struct {
 	redis     *redis.Client
@@ -70,6 +73,7 @@ type DistributedGroup struct {
 	heartbeat time.Duration
 	maxExec   time.Duration
 	resultTTL time.Duration
+	onMetric  MetricFunc
 }
 
 func NewDistributedGroup(rdb *redis.Client) *DistributedGroup {
@@ -80,6 +84,18 @@ func NewDistributedGroup(rdb *redis.Client) *DistributedGroup {
 		heartbeat: Heartbeat,
 		maxExec:   MaxExecTime,
 		resultTTL: ResultTTL,
+	}
+}
+
+// SetMetricFunc 注入指标回调
+func (g *DistributedGroup) SetMetricFunc(fn MetricFunc) {
+	g.onMetric = fn
+}
+
+// record 内部便捷方法
+func (g *DistributedGroup) record(event string, success bool, extra string) {
+	if g.onMetric != nil {
+		g.onMetric("singleflight", event, success, extra)
 	}
 }
 
@@ -120,10 +136,12 @@ func (g *DistributedGroup) Do(ctx context.Context, key string, fn StreamFn) (int
 
 		if acquired {
 			// 3. 我是主节点 → 执行 fn
+			g.record("leader_elected", true, key)
 			return g.runAsLeader(ctx, key, lockKey, resultKey, channel, progressKey, cancelKey, nodeID, fn)
 		}
 
 		// 4. 我是从节点 → 等待结果
+		g.record("follower_waiting", true, key)
 		result, reason, err := g.runAsFollower(ctx, lockKey, resultKey, channel, progressKey, cancelKey)
 		if err != nil {
 			return nil, err
@@ -197,6 +215,7 @@ func (g *DistributedGroup) runAsLeader(
 	g.releaseLock(context.Background(), lockKey, nodeID)
 
 	fmt.Printf("[singleflight] 主节点执行完成 key=%s err=%v\n", key, err)
+	g.record("leader_completed", err == nil, key)
 
 	if err != nil {
 		return nil, err
@@ -322,6 +341,7 @@ func (g *DistributedGroup) checkLeader(ctx context.Context, lockKey, resultKey, 
 		// 锁没了结果也没有，主节点超时了
 		// 此时拿不到旧主 nodeID，写空串——旧主的 execCtx 也会因超时退出
 		g.notifyCancel(ctx, cancelKey, "")
+		g.record("leader_timeout", false, "lock_expired")
 		fmt.Printf("[singleflight] 主节点锁已消失，写入取消标记，准备换主\n")
 		return followerLeaderTimeout
 	}
@@ -338,6 +358,7 @@ func (g *DistributedGroup) checkLeader(ctx context.Context, lockKey, resultKey, 
 		}
 		// 后续检查 progressKey 仍不存在 → leader 长时间无输出，换主
 		g.notifyCancel(ctx, cancelKey, leaderNodeID)
+		g.record("leader_timeout", false, "progress_lost")
 		fmt.Printf("[singleflight] 主节点进度信息丢失，写入取消标记，准备换主\n")
 		return followerLeaderTimeout
 	}
@@ -357,6 +378,7 @@ func (g *DistributedGroup) checkLeader(ctx context.Context, lockKey, resultKey, 
 	stalledDuration := time.Since(time.UnixMilli(lastUpdateMs))
 	if stalledDuration > StallThreshold {
 		g.notifyCancel(ctx, cancelKey, leaderNodeID)
+		g.record("leader_timeout", false, "stalled")
 		fmt.Printf("[singleflight] 主节点输出停滞 %v，超过阈值 %v，写入取消标记，准备换主\n",
 			stalledDuration, StallThreshold)
 		return followerLeaderTimeout
