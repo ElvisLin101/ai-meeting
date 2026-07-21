@@ -4,10 +4,12 @@ import (
 	"ai-meeting/clients"
 	"ai-meeting/pkg/singleflight"
 	"ai-meeting/repositories"
+	"ai-meeting/services/metric"
 	"context"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // ============================================================
@@ -34,32 +36,47 @@ func NewExtractionService() *ExtractionService {
 }
 
 // ExtractQuestions 调 DeepSeek 出题
-// 接入分布式 SingleFlight: 同一简历内容的并发出题只调一次
+// 接入分布式 SingleFlight: 同一简历并发出题只调一次
+// JSON mode + schema 校验，校验失败直接返回 error（重试由客户端发起新 singleflight）
 func (s *ExtractionService) ExtractQuestions(ctx context.Context, resumeContent string) (*ExtractionResult, error) {
-	// 构造 singleflight key: 基于简历内容, 同一简历只出一次题
 	sfKey := fmt.Sprintf("interview:extract:%s", hashContent(resumeContent))
 
 	result, err := repositories.SingleFlight.Do(ctx, sfKey, func(ctx context.Context, writer *singleflight.StreamWriter) (interface{}, error) {
 		messages := buildExtractionPromptMessages(resumeContent)
+		start := time.Now()
 
 		var replyBuilder strings.Builder
-		err := clients.CallConfiguredAIChatStream(ctx, 0, messages, extractionTemperature, func(chunk clients.ChatStreamChunk) error {
+		err := clients.CallConfiguredAIChatStreamWithJSON(ctx, 0, messages, extractionTemperature, func(chunk clients.ChatStreamChunk) error {
 			if chunk.Content != "" {
 				replyBuilder.WriteString(chunk.Content)
 				writer.Write([]byte(chunk.Content))
 			}
 			return nil
 		})
+		durationMs := time.Since(start).Milliseconds()
+
 		if err != nil {
+			metric.GetMetricService().RecordAICall("ai_call", "extract", "", false, "ai_call_fail", false, durationMs, "")
 			return nil, err
 		}
 
 		reply := replyBuilder.String()
 		parsed := ExtractStructuredResult(reply, "questions", "suggestions", "sugest", "type", "resumeScore")
 		if parsed == nil {
-			return nil, errors.New("failed to parse extraction result from AI response")
+			metric.GetMetricService().RecordAICall("ai_call", "extract", "", false, "parse_fail", false, durationMs, "")
+			return nil, errors.New("failed to parse extraction result")
 		}
-		return s.normalizeResult(parsed), nil
+
+		result := s.normalizeResult(parsed)
+
+		// schema 校验: questions 必须非空
+		if len(result.Questions) == 0 {
+			metric.GetMetricService().RecordAICall("ai_call", "extract", "", false, "schema_fail", false, durationMs, "")
+			return nil, errors.New("schema validation failed: questions is empty")
+		}
+
+		metric.GetMetricService().RecordAICall("ai_call", "extract", "", true, "", false, durationMs, "")
+		return result, nil
 	})
 	if err != nil {
 		return nil, err

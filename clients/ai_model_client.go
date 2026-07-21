@@ -67,7 +67,18 @@ func CallConfiguredAIChat(ctx context.Context, aiID uint, messages []PromptMessa
 	return parseAIChatResponse(respBody)
 }
 
+// CallConfiguredAIChatStreamWithJSON 带 JSON mode 的流式调用
+// response_format=json_object 强制模型输出合法 JSON，用于评分/出题/追问等结构化输出场景
+func CallConfiguredAIChatStreamWithJSON(ctx context.Context, aiID uint, messages []PromptMessage, temperature float64, onChunk func(ChatStreamChunk) error) error {
+	return callConfiguredAIChatStream(ctx, aiID, messages, temperature, true, onChunk)
+}
+
+// CallConfiguredAIChatStream 流式调用（不含 JSON mode）
 func CallConfiguredAIChatStream(ctx context.Context, aiID uint, messages []PromptMessage, temperature float64, onChunk func(ChatStreamChunk) error) error {
+	return callConfiguredAIChatStream(ctx, aiID, messages, temperature, false, onChunk)
+}
+
+func callConfiguredAIChatStream(ctx context.Context, aiID uint, messages []PromptMessage, temperature float64, jsonMode bool, onChunk func(ChatStreamChunk) error) error {
 	if onChunk == nil {
 		return errors.New("ai chat stream callback is nil")
 	}
@@ -85,6 +96,9 @@ func CallConfiguredAIChatStream(ctx context.Context, aiID uint, messages []Promp
 		"temperature": temperature,
 		"stream":      true,
 		"messages":    messages,
+	}
+	if jsonMode {
+		payload["response_format"] = map[string]string{"type": "json_object"}
 	}
 
 	req, err := newAIChatRequest(ctx, prop, payload)

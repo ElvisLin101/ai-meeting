@@ -2,10 +2,12 @@ package evaluation
 
 import (
 	"ai-meeting/clients"
+	"ai-meeting/services/metric"
 	"context"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // ============================================================
@@ -34,26 +36,62 @@ func NewEvaluationService() *EvaluationService {
 
 // EvaluateAnswer 调 DeepSeek 流式评分
 // 输入: 题面、候选人答案、简历上下文
+// JSON mode + schema 校验，校验失败重试一次
 func (s *EvaluationService) EvaluateAnswer(ctx context.Context, questionContent, answerContent, resumeContext string) (*EvaluationResult, error) {
 	messages := buildScorePromptMessages(questionContent, answerContent, resumeContext)
 
+	// 第一次尝试（JSON mode）
+	result, parseErr := s.callAndParse(ctx, messages, false)
+	if result != nil {
+		return result, nil
+	}
+
+	// 第一次解析失败，重试一次
+	if parseErr != nil {
+		result, err := s.callAndParse(ctx, messages, true)
+		if err != nil {
+			return nil, fmt.Errorf("评分解析失败(重试后仍失败): %w", parseErr)
+		}
+		return result, nil
+	}
+
+	return nil, errors.New("评分解析失败")
+}
+
+// callAndParse 调 AI + 解析 + schema 校验 + 异步指标埋点
+func (s *EvaluationService) callAndParse(ctx context.Context, messages []clients.PromptMessage, isRetry bool) (*EvaluationResult, error) {
+	start := time.Now()
 	var replyBuilder strings.Builder
-	err := clients.CallConfiguredAIChatStream(ctx, 0, messages, scoreTemperature, func(chunk clients.ChatStreamChunk) error {
+	err := clients.CallConfiguredAIChatStreamWithJSON(ctx, 0, messages, scoreTemperature, func(chunk clients.ChatStreamChunk) error {
 		if chunk.Content != "" {
 			replyBuilder.WriteString(chunk.Content)
 		}
 		return nil
 	})
+	durationMs := time.Since(start).Milliseconds()
+
 	if err != nil {
+		metric.GetMetricService().RecordAICall("ai_call", "eval", "", false, "ai_call_fail", isRetry, durationMs, "")
 		return nil, err
 	}
 
 	reply := replyBuilder.String()
 	parsed := ExtractStructuredResult(reply, "score", "feedback", "follow_up_needed", "missing_points")
 	if parsed == nil {
-		return nil, errors.New("failed to parse evaluation result from AI response")
+		metric.GetMetricService().RecordAICall("ai_call", "eval", "", false, "parse_fail", isRetry, durationMs, "")
+		return nil, errors.New("failed to parse evaluation result")
 	}
-	return s.normalizeResult(parsed), nil
+
+	result := s.normalizeResult(parsed)
+
+	// schema 校验: score 必须在 [0,100] 且非零默认值
+	if result.Score == 0 && extractByAliases(parsed, "score", "total_score", "composite_score") == nil {
+		metric.GetMetricService().RecordAICall("ai_call", "eval", "", false, "schema_fail", isRetry, durationMs, "")
+		return nil, errors.New("schema validation failed: score is missing")
+	}
+
+	metric.GetMetricService().RecordAICall("ai_call", "eval", "", true, "", isRetry, durationMs, "")
+	return result, nil
 }
 
 // normalizeResult 字段别名归一化
