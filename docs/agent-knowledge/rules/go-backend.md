@@ -2,7 +2,7 @@
 
 ## 基本规范
 
-- 使用 Go 1.22, 保持现有 `handlers -> services -> repositories/models` 分层。
+- 使用 Go 1.24.1, 保持现有 `handlers -> services -> repositories/models` 分层。
 - Handler 只处理 HTTP 入参、认证上下文、状态码和 DTO 转换。
 - Service 放业务流程和跨仓储编排, 不直接依赖 Gin, 不直接拼 Mongo/MySQL 查询。
 - MySQL 读写放 `repositories/mysql`, MongoDB 读写放 `repositories/mongo`。

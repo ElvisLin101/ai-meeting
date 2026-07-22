@@ -12,7 +12,7 @@
 
 ## 项目概览
 
-AI-Meeting 是一个 Go 1.22 + Gin 后端。入口在 `main.go`, 路由集中在 `api/routes/routes.go`, 业务主要分为用户认证、Agent 会话、AI 会话、面试流程、上下文压缩和媒体接口。
+AI-Meeting 是一个 Go 1.24.1 + Gin 后端。入口在 `main.go`, 路由集中在 `api/routes/routes.go`, 业务主要分为用户认证、Agent 会话、AI 会话、面试流程、上下文压缩和媒体接口。
 
 核心分层:
 
