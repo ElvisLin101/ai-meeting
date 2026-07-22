@@ -22,3 +22,4 @@ uploads/
 .DS_Store
 .idea/
 .vscode/
+.zcode/
