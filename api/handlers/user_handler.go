@@ -5,6 +5,7 @@ import (
 	"ai-meeting/dto"
 	"ai-meeting/services/user"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
@@ -33,7 +34,7 @@ func (h *UserHandler) Login(c *gin.Context) {
 		return
 	}
 
-	token, err := middleware.GenerateToken(user.Username, string(rune(user.ID)))
+	token, err := middleware.GenerateToken(user.Username, strconv.FormatUint(uint64(user.ID), 10))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
 		return

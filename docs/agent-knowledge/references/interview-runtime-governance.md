@@ -1,7 +1,6 @@
 # Interview Runtime Governance（面试长会话运行态治理）
 
 > 本文档是面试运行态治理的设计知识库, 不是代码流程说明。先理解"为什么会丢状态"和"分层", 再看"恢复"和"更新"两条链路。
-> Java 参考实现位于 `D:\work\AI-Meeting-Java`, Go 侧尚未落地, 本文档同时作为 Go 落地的设计依据。
 
 ## 1. 问题: 为什么会丢状态
 
@@ -59,7 +58,7 @@
 - **热快照**: 高频变化的流程态, 上 CAS 乐观锁(`snapshotVersion`), 有单调性校验(`lastTurnSeq`/`archiveWatermark`/`scoreCount`/`flow.currentIndex` 回退直接抛异常)。只存最近 20 轮窗口, 靠 `archiveWatermark` 水位线衔接 TurnArchive。
 - **冷快照**: 低频变化的材料, **故意不上 CAS**(last-writer-wins), 靠"ACTIVE 阶段跳过冷层刷新"避免每轮重写。高频字段必须防并发覆盖, 低频材料覆盖即可——这个取舍是分层的精髓。
 
-### 2.3 Redis key 命名规则(Java 参考)
+### 2.3 Redis key 命名规则
 
 统一前缀 `interview:` + 业务域 + `:session:` + sessionId:
 
@@ -218,4 +217,3 @@ Go 侧面试模块会话/题目/记录已迁 Mongo, 运行态状态机 P0 骨架
 - 新增 Redis key 时遵循 `interview:` 前缀规范, 同步更新本文档 §2.3。
 - 改热快照字段时同步检查 CAS 条件(`snapshotVersion`)和单调性校验字段。
 - Go 落地每完成一层, 回读 §5 确认复用/新建边界未被违反。
-- Java 参考代码位置见本文档开头注释。

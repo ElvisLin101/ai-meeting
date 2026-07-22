@@ -58,6 +58,33 @@
 - `InterviewSessionFacade.PageConversations` 查询 Mongo `agent_conversations`, 不查询 `interview_sessions`。
 - `InterviewSessionFacade.GetConversationHistory` 查询 Mongo `agent_messages`, 不查询面试专属消息表。
 
+## Interview Runtime
+
+`models/interview_runtime.go`
+
+面试运行态治理的模型层, 详见 `docs/agent-knowledge/references/interview-runtime-governance.md`。
+
+- `InterviewFlowStatus` -> 阶段枚举(INIT/ASKING/EVALUATING/FOLLOW_UP/COMPLETED)
+- `InterviewFlowState` -> Redis Hash `interview:flow:session:{sid}` + Mongo 热快照内嵌
+  - 关键字段: `Status`, `CurrentIndex`, `CurrentQuestionNumber`, `TotalQuestions`, `FollowUpCount`, `MaxFollowUp`, `Version`(CAS 乐观锁)
+- `InterviewTurnLog` -> Redis List `interview:turns:session:{sid}` + Mongo `TurnArchive` 内嵌
+  - 关键字段: `RequestID`(幂等键), `QuestionNumber`, `Score`, `TotalScore`, `FollowUpNeeded`, `IsFollowUp`, `Finished`
+- `InterviewRuntimeHotSnapshot` -> MongoDB `interview_session_runtime_hot_snapshot`(_id=SessionID)
+  - 高频流程态, CAS 乐观锁更新(`SnapshotVersion`), 存最近 20 轮窗口(`RecentTurns`), 靠 `ArchiveWatermark` 衔接归档。
+- `InterviewRuntimeColdSnapshot` -> MongoDB `interview_session_runtime_cold_snapshot`(_id=SessionID)
+  - 低频材料(题目/建议/简历上下文), 无 CAS(last-writer-wins)。
+- `InterviewSessionTurnArchive` -> MongoDB `interview_session_turn_archive`(_id=ObjectID, 按 session_id/seq 索引)
+  - 完整不可变轮次历史, `Seq` 单调递增, `RequestID` 幂等查重。
+
+## MetricLog
+
+`models/metric_log.go`
+
+- `MetricLog` -> MySQL `metric_logs`
+- 所有模块的量化指标异步写入此表, 不阻塞主流程; 通过 `module` + `event` 区分不同指标。
+- 关键字段: `Module`(ai_call/singleflight/state_machine/snapshot/repair/idempotency/lock), `Event`, `SessionID`, `Success`, `ErrorType`, `IsRetry`, `DurationMs`, `Extra`(JSON)
+- 仓储: `repositories/mysql/metric_log_repository.go`
+
 ## Compressed Context
 
 `models/compressed_context.go`

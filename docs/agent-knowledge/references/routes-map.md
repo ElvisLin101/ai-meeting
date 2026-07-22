@@ -23,7 +23,7 @@
 | Method | Path | Handler | Service |
 | --- | --- | --- | --- |
 | POST | `/agents/sessions` | `AgentController.CreateSession` | `AgentConversationService.CreateConversationWithTitle` |
-| POST | `/agents/sessions/:sessionId/chat` | `AgentController.Chat` | `AgentMessageService.SaveMessage` |
+| POST | `/agents/sessions/:sessionId/chat` | `AgentController.Chat` | `AgentMessageService.AgentChatSSE` |
 | GET | `/agents/conversations` | `AgentController.PageConversations` | `AgentConversationService.PageConversations` |
 | GET | `/agents/conversations/:sessionId/messages` | `AgentController.GetConversationHistory` | `AgentMessageService.GetConversationHistory` |
 | GET | `/agents/messages/history` | `AgentController.PageHistoryMessages` | `AgentMessageService.PageHistoryMessages` |
@@ -88,7 +88,7 @@
 | GET | `/interview/interview/records` | `InterviewRecordController.PageInterviewRecords` | `InterviewRecordService.PageInterviewRecords` |
 | GET | `/interview/interview/record/:sessionId` | `InterviewRecordController.GetInterviewRecordBySessionId` | `InterviewRecordService.GetBySessionId` |
 | POST | `/interview/interview/record/save-from-redis/:sessionId` | `InterviewRecordController.SaveInterviewRecordFromRedis` | `InterviewRecordService.SaveInterviewRecordFromRedis` |
-| GET | `/interview/sessions/:sessionId/resume/preview` | `InterviewResumeController.PreviewResume` | none |
+| GET | `/interview/sessions/:sessionId/resume/preview` | `InterviewResumeController.PreviewResume` | `InterviewSessionFacade.PreviewResume` |
 
 ## Media
 

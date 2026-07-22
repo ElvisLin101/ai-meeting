@@ -18,8 +18,8 @@
 ## Interview
 
 - `services/interview/interview_service.go`: `ExtractInterviewQuestions`, `AnswerInterviewQuestion`, `GetNextQuestion`, `GetCurrentQuestion`, `RestoreInterviewSession`, `GetSessionInterviewQuestions`, `GetSessionTotalScore`, `GetSessionInterviewSuggestions`, `GetSessionResumeScore`, `GetRadarChartData` 已接入真实实现。神态评估已移除。
-- `services/interview/interview_service.go`: `SaveInterviewRecordFromRedis` 是空实现。
-- `api/handlers/interview_handler.go`: `PreviewResume` 只返回固定提示。
+- ~~`services/interview/interview_service.go`: `SaveInterviewRecordFromRedis` 是空实现。~~ **已完成: 从 Mongo `TurnArchive` 汇总轮次算平均分, 取最后一轮作报告概要, 写入 `InterviewRecord`。**
+- ~~`api/handlers/interview_handler.go`: `PreviewResume` 只返回固定提示。~~ **已完成: 从 Mongo 读 `ResumePath` → 解析 PDF 返回文本。**
 - `InterviewSessionFacade.CreateSession` 写 `InterviewSession`, 但 `PageConversations` 读 `AgentConversation`。
 
 ## Memory
