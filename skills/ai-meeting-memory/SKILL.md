@@ -70,6 +70,8 @@ description: 当需求涉及 AI 长上下文、历史消息窗口、压缩摘要
 - `SetCompressionThreshold` 是运行时内存配置, 服务重启后恢复默认值。
 - AI 压缩请求默认按 OpenAI-compatible SSE 流式响应解析（`CallConfiguredAIChatStream`）, 当前 config fallback 是 DeepSeek; 如果接入非兼容 provider 需要改 `clients/ai_model_client.go`。流式失败时回退本地截断 `fallbackAiCompressedSummary`。
 - SingleFlight 的 sync.Map 防重复已替换为分布式版本, 但 `localGroup` 降级模式下仍为单进程。
+- 当前记忆仅支持有损压缩摘要, 不支持向量召回, 早期消息的具体细节被压缩后无法精准检索回原文。后续演进方案见 `docs/agent-knowledge/references/ai-memory-evolution.md`。
+- 压缩阈值用字节长度（`len()`）而非 token 数, MongoDB 字段名 `total_token_count` 实际存字节数, 中文场景下与真实 token 数偏差较大。
 
 ## 修改指南
 
@@ -78,4 +80,5 @@ description: 当需求涉及 AI 长上下文、历史消息窗口、压缩摘要
 3. 接入真实摘要模型时, 不要在压缩服务中硬编码 provider, 优先复用 `clients/ai_model_client.go` 和 `config.ai.deepseek` 或新增清晰的 client 边界。
 4. 改 Redis key 或 Mongo 字段时, 同步更新 `models/compressed_context.go` 和 `data-models.md`。
 5. 修改 SingleFlight 逻辑时, 同步检查 `pkg/singleflight/singleflight.go` 和 `repositories/redis.go`。
-6. 完成后运行 `go build ./...` 和 `scripts/knowledge-check.sh diff`。
+6. 规划向量召回等记忆演进时, 先读 `docs/agent-knowledge/references/ai-memory-evolution.md`。
+7. 完成后运行 `go build ./...` 和 `scripts/knowledge-check.sh diff`。
