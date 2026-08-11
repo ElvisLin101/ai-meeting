@@ -5,8 +5,8 @@ type InterviewSessionCreateRespDTO struct {
 }
 
 type InterviewConversationPageReqDTO struct {
-	Page    int `form:"page" default:"1"`
-	Size    int `form:"size" default:"10"`
+	Page int `form:"page" default:"1"`
+	Size int `form:"size" default:"10"`
 }
 
 type InterviewConversationRespDTO struct {
@@ -25,15 +25,15 @@ type InterviewAnswerReqDTO struct {
 
 type InterviewAnswerRespDTO struct {
 	QuestionNumber     string `json:"question_number"`
-	Question           string `json:"question"`           // 当前题面
-	Answer             string `json:"answer"`             // 用户答案
-	Score              int    `json:"score"`              // 本轮得分
-	TotalScore         int    `json:"total_score"`        // 累计平均分
-	Feedback           string `json:"feedback"`           // AI 反馈
-	IsFollowUp         bool   `json:"is_follow_up"`       // 本轮是否追问
+	Question           string `json:"question"`             // 当前题面
+	Answer             string `json:"answer"`               // 用户答案
+	Score              int    `json:"score"`                // 本轮得分
+	TotalScore         int    `json:"total_score"`          // 累计平均分
+	Feedback           string `json:"feedback"`             // AI 反馈
+	IsFollowUp         bool   `json:"is_follow_up"`         // 本轮是否追问
 	NextQuestionNumber string `json:"next_question_number"` // 下一题号
-	NextQuestion       string `json:"next_question"`      // 下一题题面
-	Finished           bool   `json:"finished"`           // 面试是否结束
+	NextQuestion       string `json:"next_question"`        // 下一题题面
+	Finished           bool   `json:"finished"`             // 面试是否结束
 }
 
 // InterviewQuestionInfoRespDTO 取题结果（GetNextQuestion/GetCurrentQuestion 用）
@@ -52,10 +52,10 @@ type InterviewExtractionRespDTO struct {
 }
 
 type InterviewSessionRestoreRespDTO struct {
-	SessionID      string `json:"session_id"`
+	SessionID       string `json:"session_id"`
 	CurrentQuestion string `json:"current_question"`
-	QuestionNumber string `json:"question_number"`
-	Score          int    `json:"score"`
+	QuestionNumber  string `json:"question_number"`
+	Score           int    `json:"score"`
 }
 
 type RadarChartDTO struct {
@@ -87,7 +87,7 @@ type InterviewRecordRespDTO struct {
 }
 
 type InterviewRecordPageReqDTO struct {
-	Page     int    `form:"page" default:"1"`
-	Size     int    `form:"size" default:"10"`
+	Page      int    `form:"page" default:"1"`
+	Size      int    `form:"size" default:"10"`
 	SessionID string `form:"session_id"`
 }

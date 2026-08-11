@@ -26,7 +26,7 @@ import (
 // openAIResponse 用于剥 choices 包络
 type openAIResponse struct {
 	Choices []struct {
-		Delta   struct {
+		Delta struct {
 			Content string `json:"content"`
 		} `json:"delta"`
 		Message struct {

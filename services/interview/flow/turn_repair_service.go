@@ -26,9 +26,9 @@ const (
 
 // turnRepairItem 补偿队列条目
 type turnRepairItem struct {
-	SessionID string                   `json:"session_id"`
-	Turn      models.InterviewTurnLog  `json:"turn"`
-	Retry     int                      `json:"retry"`
+	SessionID string                  `json:"session_id"`
+	Turn      models.InterviewTurnLog `json:"turn"`
+	Retry     int                     `json:"retry"`
 }
 
 // TurnRepairService turn log 补偿服务

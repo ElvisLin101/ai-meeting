@@ -191,40 +191,40 @@ func (p *AnswerPipeline) Execute(ctx context.Context, sessionID string, req dto.
 		// 追问分支
 		followUpResult, err := p.followUpSvc.GenerateFollowUp(ctx, questionContent, req.AnswerContent, evalResult.MissingPoints, flow.FollowUpCount, flow.MaxFollowUp)
 		if err == nil && followUpResult != nil && !followUpResult.EndInterview && followUpResult.Question != "" {
-		nextQuestionNumber = BuildFollowUpQuestionNumber(ResolveMainQuestionNumber(req.QuestionNumber), flow.FollowUpCount+1)
-		nextQuestion = followUpResult.Question
-		followUpFlow, err := p.flowStateMachine.StartFollowUpQuestion(ctx, sessionID, nextQuestionNumber)
-		if err != nil {
-			// MutateFlow 失败 = 推进未发生或已被他人推进: 不回滚(避免覆盖并发进度), 只清幂等标记
-			p.idempotencySvc.ClearProcessing(ctx, sessionID, requestID)
-			return nil, ecode.Wrap(err, "开始追问失败")
-		}
-		// 追问题写入 Redis（否则下次读题面会 miss）
-		if err := p.questionCache.SaveFollowUpQuestion(ctx, sessionID, nextQuestionNumber, nextQuestion); err != nil {
-			logrus.Warnf("Failed to save follow-up question, session=%s, qn=%s, err=%v", sessionID, nextQuestionNumber, err)
-		}
-		// 主问题计分（追问不计分, 但当前答的是主问题, 需要入账）
-		if !isFollowUp {
-			if _, _, _, err := p.scoreCache.AddScore(ctx, sessionID, evalResult.Score); err != nil {
-				// 分数提交失败 → 条件回滚已推进的追问状态
-				p.rollbackFlow(ctx, sessionID, preEvalSnapshot, followUpFlow.Version, requestID)
-				return nil, ecode.Wrap(err, "分数提交失败")
+			nextQuestionNumber = BuildFollowUpQuestionNumber(ResolveMainQuestionNumber(req.QuestionNumber), flow.FollowUpCount+1)
+			nextQuestion = followUpResult.Question
+			followUpFlow, err := p.flowStateMachine.StartFollowUpQuestion(ctx, sessionID, nextQuestionNumber)
+			if err != nil {
+				// MutateFlow 失败 = 推进未发生或已被他人推进: 不回滚(避免覆盖并发进度), 只清幂等标记
+				p.idempotencySvc.ClearProcessing(ctx, sessionID, requestID)
+				return nil, ecode.Wrap(err, "开始追问失败")
+			}
+			// 追问题写入 Redis（否则下次读题面会 miss）
+			if err := p.questionCache.SaveFollowUpQuestion(ctx, sessionID, nextQuestionNumber, nextQuestion); err != nil {
+				logrus.Warnf("Failed to save follow-up question, session=%s, qn=%s, err=%v", sessionID, nextQuestionNumber, err)
+			}
+			// 主问题计分（追问不计分, 但当前答的是主问题, 需要入账）
+			if !isFollowUp {
+				if _, _, _, err := p.scoreCache.AddScore(ctx, sessionID, evalResult.Score); err != nil {
+					// 分数提交失败 → 条件回滚已推进的追问状态
+					p.rollbackFlow(ctx, sessionID, preEvalSnapshot, followUpFlow.Version, requestID)
+					return nil, ecode.Wrap(err, "分数提交失败")
+				}
+			}
+		} else {
+			// 追问生成失败 → 走主问题推进
+			nextQuestionNumber, nextQuestion, finished, err = p.advanceMainQuestion(ctx, sessionID, preEvalSnapshot, requestID, isFollowUp, evalResult.Score)
+			if err != nil {
+				return nil, err
 			}
 		}
 	} else {
-		// 追问生成失败 → 走主问题推进
+		// 主问题推进
 		nextQuestionNumber, nextQuestion, finished, err = p.advanceMainQuestion(ctx, sessionID, preEvalSnapshot, requestID, isFollowUp, evalResult.Score)
 		if err != nil {
 			return nil, err
 		}
 	}
-} else {
-	// 主问题推进
-	nextQuestionNumber, nextQuestion, finished, err = p.advanceMainQuestion(ctx, sessionID, preEvalSnapshot, requestID, isFollowUp, evalResult.Score)
-	if err != nil {
-		return nil, err
-	}
-}
 
 	// 8. 读当前总分
 	totalScore, _ := p.scoreCache.GetTotalScore(ctx, sessionID)

@@ -14,8 +14,10 @@ import (
 
 // 评分温度: 偏低求稳定(和 AI 压缩一致)
 const scoreTemperature = 0.2
+
 // 出题温度: 略高求多样性
 const extractionTemperature = 0.3
+
 // 追问温度: 再略高
 const followUpTemperature = 0.4
 

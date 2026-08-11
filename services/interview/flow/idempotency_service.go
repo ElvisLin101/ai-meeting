@@ -23,8 +23,8 @@ const (
 	processingTTL = 300 * time.Second
 	replayTTL     = 24 * time.Hour
 
-	IdempotencyNew       = "NEW"        // 新请求, 正常处理
-	IdempotencySucceeded = "SUCCEEDED"  // 已成功过, 回放旧结果
+	IdempotencyNew        = "NEW"        // 新请求, 正常处理
+	IdempotencySucceeded  = "SUCCEEDED"  // 已成功过, 回放旧结果
 	IdempotencyProcessing = "PROCESSING" // 别人正在处理, 快速失败
 )
 

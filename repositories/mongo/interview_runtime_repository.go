@@ -17,9 +17,9 @@ import (
 // ============================================================
 
 const (
-	hotSnapshotCollection   = "interview_session_runtime_hot_snapshot"
-	coldSnapshotCollection  = "interview_session_runtime_cold_snapshot"
-	turnArchiveCollection   = "interview_session_turn_archive"
+	hotSnapshotCollection  = "interview_session_runtime_hot_snapshot"
+	coldSnapshotCollection = "interview_session_runtime_cold_snapshot"
+	turnArchiveCollection  = "interview_session_turn_archive"
 )
 
 // ============================================================
@@ -50,22 +50,22 @@ func UpsertHotSnapshot(ctx context.Context, snap *models.InterviewRuntimeHotSnap
 	snap.UpdatedAt = now
 	update := bson.M{
 		"$set": bson.M{
-			"user_id":                     snap.UserID,
-			"session_status":              snap.SessionStatus,
-			"snapshot_version":            snap.SnapshotVersion,
-			"snapshot_level":              snap.SnapshotLevel,
-			"flow":                        snap.Flow,
-			"score_sum":                   snap.ScoreSum,
-			"score_count":                 snap.ScoreCount,
-			"follow_up_questions":         snap.FollowUpQuestions,
-			"recent_turns":                snap.RecentTurns,
-			"recent_turn_count":           snap.RecentTurnCount,
-			"archive_watermark":           snap.ArchiveWatermark,
-			"last_turn_seq":               snap.LastTurnSeq,
-			"last_applied_request_id":     snap.LastAppliedRequestID,
-			"last_mutation_id":            snap.LastMutationID,
+			"user_id":                        snap.UserID,
+			"session_status":                 snap.SessionStatus,
+			"snapshot_version":               snap.SnapshotVersion,
+			"snapshot_level":                 snap.SnapshotLevel,
+			"flow":                           snap.Flow,
+			"score_sum":                      snap.ScoreSum,
+			"score_count":                    snap.ScoreCount,
+			"follow_up_questions":            snap.FollowUpQuestions,
+			"recent_turns":                   snap.RecentTurns,
+			"recent_turn_count":              snap.RecentTurnCount,
+			"archive_watermark":              snap.ArchiveWatermark,
+			"last_turn_seq":                  snap.LastTurnSeq,
+			"last_applied_request_id":        snap.LastAppliedRequestID,
+			"last_mutation_id":               snap.LastMutationID,
 			"last_committed_question_number": snap.LastCommittedQuestionNumber,
-			"updated_at":                  now,
+			"updated_at":                     now,
 		},
 		"$setOnInsert": bson.M{
 			"created_at": now,
@@ -86,26 +86,26 @@ func CompareAndSetHotSnapshot(ctx context.Context, sessionID string, expectedVer
 	now := time.Now()
 	snap.UpdatedAt = now
 	filter := bson.M{
-		"_id":               sessionID,
-		"snapshot_version":  expectedVersion,
+		"_id":              sessionID,
+		"snapshot_version": expectedVersion,
 	}
 	update := bson.M{
 		"$set": bson.M{
-			"session_status":              snap.SessionStatus,
-			"snapshot_version":            snap.SnapshotVersion,
-			"snapshot_level":              snap.SnapshotLevel,
-			"flow":                        snap.Flow,
-			"score_sum":                   snap.ScoreSum,
-			"score_count":                 snap.ScoreCount,
-			"follow_up_questions":         snap.FollowUpQuestions,
-			"recent_turns":                snap.RecentTurns,
-			"recent_turn_count":           snap.RecentTurnCount,
-			"archive_watermark":           snap.ArchiveWatermark,
-			"last_turn_seq":               snap.LastTurnSeq,
-			"last_applied_request_id":     snap.LastAppliedRequestID,
-			"last_mutation_id":            snap.LastMutationID,
+			"session_status":                 snap.SessionStatus,
+			"snapshot_version":               snap.SnapshotVersion,
+			"snapshot_level":                 snap.SnapshotLevel,
+			"flow":                           snap.Flow,
+			"score_sum":                      snap.ScoreSum,
+			"score_count":                    snap.ScoreCount,
+			"follow_up_questions":            snap.FollowUpQuestions,
+			"recent_turns":                   snap.RecentTurns,
+			"recent_turn_count":              snap.RecentTurnCount,
+			"archive_watermark":              snap.ArchiveWatermark,
+			"last_turn_seq":                  snap.LastTurnSeq,
+			"last_applied_request_id":        snap.LastAppliedRequestID,
+			"last_mutation_id":               snap.LastMutationID,
 			"last_committed_question_number": snap.LastCommittedQuestionNumber,
-			"updated_at":                  now,
+			"updated_at":                     now,
 		},
 		"$setOnInsert": bson.M{
 			"created_at": now,

@@ -30,10 +30,10 @@ const (
 
 // SnapshotService 快照服务
 type SnapshotService struct {
-	rdb          *redis.Client
-	flowCache    *FlowCache
-	scoreCache   *ScoreCache
-	turnLogCache *TurnLogCache
+	rdb           *redis.Client
+	flowCache     *FlowCache
+	scoreCache    *ScoreCache
+	turnLogCache  *TurnLogCache
 	questionCache *QuestionCache
 }
 
