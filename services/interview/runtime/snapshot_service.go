@@ -53,7 +53,12 @@ func NewSnapshotService(rdb *redis.Client, flowCache *FlowCache, scoreCache *Sco
 func (s *SnapshotService) RefreshAfterAnswerCommitted(ctx context.Context, sessionID, userID, requestID string, flow *models.InterviewFlowState, turn *models.InterviewTurnLog) {
 	for attempt := 0; attempt < casMaxRetries; attempt++ {
 		// 读当前热快照
-		hot, _ := mongorepo.FindHotSnapshot(ctx, sessionID)
+		hot, err := mongorepo.FindHotSnapshot(ctx, sessionID)
+		if err != nil {
+			// 读快照失败(如 Mongo 抖动): 跳过本轮刷新, 绝不能走 Upsert 把现有快照覆盖成 version=1
+			logrus.Warnf("Failed to read hot snapshot, skip refresh, session=%s, err=%v", sessionID, err)
+			return
+		}
 
 		// 幂等短路: lastMutationId == requestID 说明已落盘
 		if hot != nil && hot.LastMutationID == requestID {
@@ -80,7 +85,6 @@ func (s *SnapshotService) RefreshAfterAnswerCommitted(ctx context.Context, sessi
 
 		// CAS 写入
 		var ok bool
-		var err error
 		if hot != nil {
 			ok, err = mongorepo.CompareAndSetHotSnapshot(ctx, sessionID, hot.SnapshotVersion, newSnap)
 		} else {
@@ -164,8 +168,10 @@ func (s *SnapshotService) EnsureRuntime(ctx context.Context, sessionID string) (
 	}
 
 	// 3. 从冷快照恢复材料
-	cold, _ := mongorepo.FindColdSnapshot(ctx, sessionID)
-	if cold != nil {
+	cold, err := mongorepo.FindColdSnapshot(ctx, sessionID)
+	if err != nil {
+		logrus.Warnf("Failed to read cold snapshot, session=%s, err=%v", sessionID, err)
+	} else if cold != nil {
 		s.questionCache.SaveQuestions(ctx, sessionID, cold.Questions)
 		s.questionCache.SaveSuggestions(ctx, sessionID, cold.Suggestions)
 		s.questionCache.SaveResumeContext(ctx, sessionID, cold.ResumeContext)
@@ -174,8 +180,10 @@ func (s *SnapshotService) EnsureRuntime(ctx context.Context, sessionID string) (
 	}
 
 	// 4. 从 TurnArchive 恢复轮次
-	archives, _ := mongorepo.FindTurnArchives(ctx, sessionID)
-	if len(archives) > 0 {
+	archives, err := mongorepo.FindTurnArchives(ctx, sessionID)
+	if err != nil {
+		logrus.Warnf("Failed to read turn archives, session=%s, err=%v", sessionID, err)
+	} else if len(archives) > 0 {
 		for _, arch := range archives {
 			s.turnLogCache.AppendTurnIfAbsent(ctx, sessionID, &arch.TurnPayload)
 		}

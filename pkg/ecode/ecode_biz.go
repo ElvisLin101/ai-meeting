@@ -37,13 +37,29 @@ const (
 	ErrDeepSeekCall          = -4002 // 调用 DeepSeek 失败
 )
 
-// init 注册业务码的 HTTP 状态码, 保留改造前的语义
+// init 注册业务码的 HTTP 状态码
+// 原则: "预期内的业务失败"(状态/参数/冲突/上游) 映射到语义化 4xx/5xx,
+// 避免全部落到 500 让客户端只能靠 body code 区分。
 func init() {
 	RegisterHTTPStatus(ErrWrongPassword, http.StatusUnauthorized)
 	RegisterHTTPStatus(ErrUserNotFound, http.StatusUnauthorized)
 	RegisterHTTPStatus(ErrUsernameExists, http.StatusBadRequest)
 	RegisterHTTPStatus(ErrEmptyAiMessageContent, http.StatusBadRequest)
+
+	// 面试: 未初始化/已完成/题号过期 → 400; 幂等处理中/题级锁冲突 → 409; 无记录 → 404
+	RegisterHTTPStatus(ErrInterviewNotInitialized, http.StatusBadRequest)
+	RegisterHTTPStatus(ErrInterviewCompleted, http.StatusBadRequest)
+	RegisterHTTPStatus(ErrQuestionExpired, http.StatusBadRequest)
+	RegisterHTTPStatus(ErrIdempotencyProcessing, http.StatusConflict)
+	RegisterHTTPStatus(ErrQuestionLocked, http.StatusConflict)
 	RegisterHTTPStatus(ErrNoResume, http.StatusNotFound)
+	RegisterHTTPStatus(ErrResumeNotPDF, http.StatusBadRequest)
+	RegisterHTTPStatus(ErrNoTurnRecord, http.StatusNotFound)
 	RegisterHTTPStatus(ErrSessionNotFound, http.StatusNotFound)
+
 	RegisterHTTPStatus(ErrAiConversationNotFound, http.StatusNotFound)
+
+	// Agent: 配置不存在 → 404; DeepSeek 上游失败 → 502
+	RegisterHTTPStatus(ErrAgentPropertyNotFound, http.StatusNotFound)
+	RegisterHTTPStatus(ErrDeepSeekCall, http.StatusBadGateway)
 }

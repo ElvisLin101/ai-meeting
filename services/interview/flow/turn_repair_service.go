@@ -95,14 +95,18 @@ func (s *TurnRepairService) processBatch() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	// 本轮失败项收集起来, 循环结束后统一重新入队——避免同轮循环内对同一失败项
+	// 连续重试(自旋), 保留"每 3s 一轮"的重试间隔语义
+	var retryItems []turnRepairItem
+
 	for i := 0; i < 50; i++ { // 每轮最多处理 50 条
 		payload, err := s.rdb.RPop(ctx, turnRepairQueueKey).Result()
 		if err == redis.Nil {
-			return // 队列空
+			break // 队列空
 		}
 		if err != nil {
 			logrus.Warnf("Failed to pop turn repair item: %v", err)
-			return
+			break
 		}
 
 		var item turnRepairItem
@@ -119,13 +123,22 @@ func (s *TurnRepairService) processBatch() {
 				metric.GetMetricService().Record(models.MetricLog{Module: "repair", Event: "max_retries_exceeded", Success: false, SessionID: item.SessionID})
 				continue // 丢弃
 			}
-			// 重新入队
-			retryPayload, _ := json.Marshal(item)
-			s.rdb.LPush(ctx, turnRepairQueueKey, retryPayload)
+			retryItems = append(retryItems, item)
 			logrus.Warnf("Turn repair retry %d/%d, session=%s", item.Retry, turnRepairMaxRetry, item.SessionID)
 		} else {
 			logrus.Infof("Turn repair succeeded, session=%s, requestId=%s", item.SessionID, item.Turn.RequestID)
 			metric.GetMetricService().Record(models.MetricLog{Module: "repair", Event: "repair_succeeded", Success: true, SessionID: item.SessionID})
+		}
+	}
+
+	// 本轮失败项统一重新入队, 下一轮再重试
+	for _, item := range retryItems {
+		retryPayload, err := json.Marshal(item)
+		if err != nil {
+			continue
+		}
+		if err := s.rdb.LPush(ctx, turnRepairQueueKey, retryPayload).Err(); err != nil {
+			logrus.Errorf("Failed to re-enqueue turn repair item, session=%s, err=%v", item.SessionID, err)
 		}
 	}
 }

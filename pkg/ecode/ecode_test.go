@@ -66,13 +66,22 @@ func TestHTTPStatus(t *testing.T) {
 		{"no permission", NoPermission, 403},
 		{"not exist", NotExist, 404},
 		{"request err", RequestErr, 400},
-		{"business default 500", ErrInterviewCompleted, 500},
+		{"interview completed registered 400", ErrInterviewCompleted, 400},
+		{"question expired registered 400", ErrQuestionExpired, 400},
+		{"idempotency processing registered 409", ErrIdempotencyProcessing, 409},
+		{"question locked registered 409", ErrQuestionLocked, 409},
+		{"interview not initialized registered 400", ErrInterviewNotInitialized, 400},
+		{"no turn record registered 404", ErrNoTurnRecord, 404},
+		{"resume not pdf registered 400", ErrResumeNotPDF, 400},
+		{"agent property not found registered 404", ErrAgentPropertyNotFound, 404},
+		{"deepseek call registered 502", ErrDeepSeekCall, 502},
 		{"wrong password registered 401", ErrWrongPassword, 401},
 		{"username exists registered 400", ErrUsernameExists, 400},
 		{"session not found registered 404", ErrSessionNotFound, 404},
 		{"ai conversation not found registered 404", ErrAiConversationNotFound, 404},
 		{"no resume registered 404", ErrNoResume, 404},
 		{"empty message registered 400", ErrEmptyAiMessageContent, 400},
+		{"unregistered business code default 500", ErrQuestionsEmpty, 500},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -287,6 +287,16 @@ func (c *AiMessageController) PageHistoryMessages(ctx *gin.Context) {
 	sessionID := ctx.Query("sessionId")
 	current, _ := strconv.Atoi(ctx.DefaultQuery("current", "1"))
 	size, _ := strconv.Atoi(ctx.DefaultQuery("size", "10"))
+	// 归一化分页参数(与仓储 normalizePage 一致)
+	if current < 1 {
+		current = 1
+	}
+	if size < 1 {
+		size = 10
+	}
+	if size > 100 {
+		size = 100
+	}
 
 	username, exists := ctx.Get("username")
 	if !exists || username == "" {
