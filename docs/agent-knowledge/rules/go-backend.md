@@ -16,8 +16,8 @@
 
 - 用户隔离查询必须带 `username` 或 `user_id`, 不能只按 `session_id` 查询敏感数据。
 - 认证相关改动必须同时检查 `api/middleware/auth.go` 和具体 handler 的上下文键读取方式。
-- 当前密码是明文比较, AI/API 密钥也直接存储在表字段中。修复安全问题时要同步更新 user-auth 和 ai Skill。
-- 上传文件路径当前是 `./uploads/` 拼接原始文件名。改上传逻辑时要检查路径穿越、重名覆盖和目录创建。
+- 密码已 bcrypt 哈希存储与比较（`services/user/user_service.go: verifyPassword`, 旧明文登录成功自动迁移）; AI/API 密钥仍直接存储在表字段中, 修复时同步更新 user-auth 和 ai Skill。
+- 上传文件已做大小限制(10MB, `http.MaxBytesReader`)与 UUID 重命名防路径穿越（`api/handlers/agent_handler.go`/`api/handlers/interview_handler.go`）; 新增上传接口必须同样处理, 并校验类型(magic bytes)。
 
 ## 变更检查
 

@@ -79,16 +79,15 @@ AI 侧有运行时压缩阈值接口:
 
 - 使用自定义 JWT middleware。
 - token 无效或缺失时中间件默认放行，依赖 handler 手动检查。
-- 登录密码明文比较。
+- 密码已 bcrypt 哈希存储与比较（旧明文登录成功自动迁移, `services/user/user_service.go: verifyPassword`）。
 - `GenerateToken` 使用 `strconv.FormatUint(uint64(user.ID), 10)` 生成十进制 `user_id`（已修复）。
-- 管理员设置缺少操作者权限校验。
+- 管理员设置已校验操作者为管理员（`AddAdmin` → `-403`）。
 - 没有独立的会话归属校验服务。
 - 没有 WebSocket token 鉴权体系。
 
 待办:
 
-- P0: 引入强制认证分组或 `RequireAuth`（`user_id` 十进制写法已修复）。
-- P0: 密码哈希和管理员接口权限校验。
+- P0: 引入强制认证分组或 `RequireAuth`（`user_id` 十进制写法已修复; 密码哈希与管理员权限校验已完成）。
 - P1: 抽象 conversation ownership service。
 - P2: WebSocket 鉴权。
 
@@ -113,13 +112,13 @@ AI 侧有运行时压缩阈值接口:
 - 已做上下文压缩记忆系统，Chat 后异步触发压缩判断（Agent 侧当前不压缩，仅 AI 侧压缩）。
 - 没有独立的会话归属服务。
 - `CreateConversationWithTitle` 忽略入参 `agentID`，固定写 1。
-- 文件上传只是保存到 `./uploads/filename`，缺少类型校验、文件名净化、大小限制和消费链路。
+- 文件上传已加 10MB 大小限制 + UUID 重命名防路径穿越（`api/handlers/agent_handler.go: Upload`）；面试简历另有 PDF magic bytes 校验。类型校验(Agent)与消费链路仍未实现。
 
 待办:
 
 - P0: 聊天前校验会话归属。
 - P1: Agent 配置到真实 workflow/provider 调用。
-- P1: 文件上传安全处理。
+- P1: 文件上传类型校验(magic bytes)与消费链路。
 
 ### 3. 普通 AI 对话
 

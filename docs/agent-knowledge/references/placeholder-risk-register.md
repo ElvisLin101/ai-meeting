@@ -30,8 +30,9 @@
 
 ## User/Auth
 
-- `services/user/user_service.go`: 密码明文比较。
+- ~~`services/user/user_service.go`: 密码明文比较。~~ **已完成: 注册 bcrypt 哈希存储; 登录兼容旧明文(`verifyPassword` 检测非 bcrypt 前缀直接比较)并成功后自动迁移为哈希。**
 - `api/middleware/auth.go`: 缺失或无效 token 默认放行。
+- ~~`api/handlers/user_handler.go`: 管理员设置缺少操作者权限校验。~~ **已完成: `AddAdmin` 要求操作者为已登录管理员, 否则 `-403`。**
 
 ## 新增基础设施（无占位）
 

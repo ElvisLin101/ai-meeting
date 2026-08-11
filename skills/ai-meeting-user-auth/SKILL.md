@@ -37,7 +37,7 @@ description: 当需求涉及登录、注册、JWT、用户上下文、用户资�
 
 - 路由: `POST /api/xunzhi/v1/users/login`。
 - `UserService.Login` 按 `username` 和 `status=1` 查询。
-- 当前密码是明文比较。
+- 密码 bcrypt 哈希存储与比较（`services/user/user_service.go: verifyPassword`; 旧明文数据登录成功后自动迁移为哈希）。
 - `GenerateToken` 传入 `strconv.FormatUint(uint64(user.ID), 10)` 作为 `user_id`。
 
 `Register`
@@ -49,7 +49,7 @@ description: 当需求涉及登录、注册、JWT、用户上下文、用户资�
 `UserAdmin`
 
 - `IsAdmin` 根据 JWT 中 `username` 查 `is_admin`。
-- `AddAdmin` 当前用 `ShouldBindJSON(&username)` 绑定原始 JSON 字符串。
+- `AddAdmin` 用 `ShouldBindJSON(&username)` 绑定原始 JSON 字符串, **操作者必须为已登录管理员**(否则 `-403`)。
 
 ## 修改指南
 
@@ -60,6 +60,6 @@ description: 当需求涉及登录、注册、JWT、用户上下文、用户资�
 
 ## 当前风险
 
-- 密码明文存储和比较。
+- ~~密码明文存储和比较。~~ **已完成: bcrypt 哈希 + 旧明文兼容迁移。**
 - 中间件默认放行, 安全边界依赖各 handler 手动检查上下文。
-- 管理员设置缺少操作者权限校验。
+- ~~管理员设置缺少操作者权限校验。~~ **已完成: `AddAdmin` 校验操作者为管理员。**

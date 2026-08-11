@@ -10,8 +10,10 @@ import (
 	"ai-meeting/services/interview/evaluation"
 	"ai-meeting/services/interview/flow"
 	"ai-meeting/services/interview/runtime"
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"os"
 	"path/filepath"
@@ -141,9 +143,18 @@ func (s *InterviewSessionFacade) ExtractInterviewQuestions(sessionID, userID, re
 // UploadResume 上传 PDF 简历并解析出题
 // 保存文件(UUID 文件名) → 解析 PDF 文本 → 回填 ResumePath → 调出题流程
 func (s *InterviewSessionFacade) UploadResume(sessionID, userID string, fileHeader *multipart.FileHeader) (*dto.InterviewExtractionRespDTO, error) {
-	// 1. 校验文件类型
+	// 1. 校验文件类型: 扩展名 + magic bytes(防止仅改后缀的伪装文件)
 	filename := fileHeader.Filename
 	if !strings.HasSuffix(strings.ToLower(filename), ".pdf") {
+		return nil, ecode.New(ecode.ErrResumeNotPDF, "仅支持 PDF 格式简历")
+	}
+	f, err := fileHeader.Open()
+	if err != nil {
+		return nil, ecode.Wrap(err, "读取简历文件失败")
+	}
+	defer f.Close()
+	head := make([]byte, 5)
+	if _, err := io.ReadFull(f, head); err != nil || !bytes.HasPrefix(head, []byte("%PDF-")) {
 		return nil, ecode.New(ecode.ErrResumeNotPDF, "仅支持 PDF 格式简历")
 	}
 

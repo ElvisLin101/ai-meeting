@@ -6,11 +6,18 @@ import (
 	"ai-meeting/models"
 	"ai-meeting/pkg/ecode"
 	agent "ai-meeting/services/agent"
+	"net/http"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 )
+
+// maxAgentUploadSize Agent 文件上传大小上限 10MB
+const maxAgentUploadSize = 10 << 20
 
 type AgentController struct {
 	agentConversationService *agent.AgentConversationService
@@ -218,10 +225,16 @@ func NewAgentFileController() *AgentFileController {
 }
 
 func (c *AgentFileController) Upload(ctx *gin.Context) {
+	// 限制上传大小, 防止大文件耗尽内存/磁盘
+	ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, maxAgentUploadSize)
 	sessionID := ctx.PostForm("sessionId")
 	bizType := ctx.PostForm("bizType")
 	file, err := ctx.FormFile("file")
 	if err != nil {
+		if strings.Contains(err.Error(), "request body too large") {
+			respx.Fail(ctx, ecode.RequestErr, "文件不能超过 10MB")
+			return
+		}
 		respx.Fail(ctx, ecode.RequestErr, "File is required")
 		return
 	}
@@ -232,7 +245,9 @@ func (c *AgentFileController) Upload(ctx *gin.Context) {
 		return
 	}
 
-	savePath := "./uploads/" + file.Filename
+	// 文件名净化: UUID 重命名, 仅保留原扩展名——防止路径穿越(../)和重名覆盖
+	savedName := uuid.New().String() + filepath.Ext(file.Filename)
+	savePath := filepath.Join("./uploads", savedName)
 	if err := ctx.SaveUploadedFile(file, savePath); err != nil {
 		respx.Respond(ctx, err, nil)
 		return

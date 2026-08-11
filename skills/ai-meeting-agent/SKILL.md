@@ -77,9 +77,8 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 `AgentFileUpload`
 
 - 路由: `POST /api/xunzhi/v1/agents/files/upload`。
-- 当前保存路径为 `./uploads/` + 原始文件名, 然后写入 `agent_file_assets`。
-- 文件上传后续面试简历/照片上传使用, 当前保存路径未净化。
-- 改动时检查目录存在、文件名净化、重名覆盖和大小限制。
+- 保存路径: UUID 重命名 + 仅保留原扩展名(`filepath.Ext`), 写入 `./uploads/`, 然后写 `agent_file_assets`——已防路径穿越与重名覆盖。
+- 上传有 10MB 大小限制(`http.MaxBytesReader`)。类型校验(magic bytes)与消费链路仍未实现。
 
 ## 影响检查
 
@@ -93,7 +92,7 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 ## 当前风险
 
 - `CreateConversationWithTitle` 忽略传入的 agentID, 固定写 1。
-- 上传文件路径没有净化。
+- ~~上传文件路径没有净化。~~ **已完成: UUID 重命名防路径穿越 + 10MB 大小限制; 类型校验(magic bytes)未做。**
 - 多个 Service 单例不是并发安全初始化, 当前代码只是简单懒加载。
 - `AgentPropertiesLoader` 使用 sync.Map 单实例缓存, 多实例部署时配置变更需重启或手动刷新。
 - `GetByPage` 固定查 10 条, 未使用分页参数。

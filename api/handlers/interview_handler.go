@@ -6,10 +6,15 @@ import (
 	"ai-meeting/models"
 	"ai-meeting/pkg/ecode"
 	"ai-meeting/services/interview"
+	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
+
+// maxResumeUploadSize 简历上传大小上限 10MB
+const maxResumeUploadSize = 10 << 20
 
 type InterviewSessionController struct {
 	sessionFacade *interview.InterviewSessionFacade
@@ -99,6 +104,16 @@ func (c *InterviewSessionController) PageHistoryMessages(ctx *gin.Context) {
 	sessionID := ctx.Query("sessionId")
 	current, _ := strconv.Atoi(ctx.DefaultQuery("current", "1"))
 	size, _ := strconv.Atoi(ctx.DefaultQuery("size", "10"))
+	// 归一化分页参数(与仓储 normalizePage 一致)
+	if current < 1 {
+		current = 1
+	}
+	if size < 1 {
+		size = 10
+	}
+	if size > 100 {
+		size = 100
+	}
 
 	userID, exists := ctx.Get("user_id")
 	if !exists || userID == "" {
@@ -191,8 +206,14 @@ func (c *InterviewSessionController) UploadResume(ctx *gin.Context) {
 		return
 	}
 
+	// 限制上传大小, 防止大文件耗尽内存/磁盘
+	ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, maxResumeUploadSize)
 	file, err := ctx.FormFile("file")
 	if err != nil {
+		if strings.Contains(err.Error(), "request body too large") {
+			respx.Fail(ctx, ecode.RequestErr, "简历文件不能超过 10MB")
+			return
+		}
 		respx.Fail(ctx, ecode.RequestErr, "PDF file is required")
 		return
 	}

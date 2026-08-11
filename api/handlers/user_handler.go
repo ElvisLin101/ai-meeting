@@ -154,6 +154,22 @@ func (h *UserHandler) IsAdmin(c *gin.Context) {
 }
 
 func (h *UserHandler) AddAdmin(c *gin.Context) {
+	// 操作者必须是已登录的管理员
+	operator, exists := c.Get("username")
+	if !exists || operator == "" {
+		resp.Fail(c, ecode.NotLogin, "Unauthorized")
+		return
+	}
+	isAdmin, err := h.userService.IsAdmin(operator.(string))
+	if err != nil {
+		resp.Respond(c, err, nil)
+		return
+	}
+	if !isAdmin {
+		resp.Fail(c, ecode.NoPermission, "需要管理员权限")
+		return
+	}
+
 	var username string
 	if err := c.ShouldBindJSON(&username); err != nil {
 		resp.Fail(c, ecode.RequestErr, err.Error())

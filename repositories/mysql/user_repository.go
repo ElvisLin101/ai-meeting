@@ -51,3 +51,9 @@ func SetUserAdmin(username string) error {
 	result := DB.Model(&models.User{}).Where("username = ?", username).Update("is_admin", true)
 	return result.Error
 }
+
+// UpdateUserPassword 更新密码哈希(旧明文用户登录成功后自动迁移用)
+func UpdateUserPassword(username, passwordHash string) error {
+	result := DB.Model(&models.User{}).Where("username = ?", username).Update("password", passwordHash)
+	return result.Error
+}
