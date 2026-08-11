@@ -57,6 +57,11 @@ func main() {
 	srv := &http.Server{
 		Addr:    ":" + port,
 		Handler: r,
+		// ReadHeaderTimeout 防慢速连接攻击; IdleTimeout 回收空闲 keep-alive 连接。
+		// 不设全局 WriteTimeout——SSE 流式接口是长连接, 全局写超时会断流,
+		// 单请求预算由 handler 内 ctx 控制。
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	// 后台启动 HTTP 服务

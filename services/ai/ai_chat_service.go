@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
@@ -93,12 +94,16 @@ func (s *AiMessageService) prepareAiChat(ctx context.Context, sessionID, userID,
 
 	memoryService := GetAiMemoryService()
 	threshold := memoryService.GetCompressionThreshold()
-	memoryContext, err := memoryService.GetContext(ctx, sessionID, userID, threshold)
+	// 派生 10s 超时覆盖记忆读取 + 用户消息落库: Mongo/Redis 挂起时快速失败,
+	// 避免请求无限挂起(SSE 长连接不设全局写超时)
+	dbCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	memoryContext, err := memoryService.GetContext(dbCtx, sessionID, userID, threshold)
 	if err != nil {
 		return nil, "", err
 	}
 
-	userMessage, err := mongorepo.SaveAiMessage(ctx, sessionID, userID, "user", content)
+	userMessage, err := mongorepo.SaveAiMessage(dbCtx, sessionID, userID, "user", content)
 	if err != nil {
 		return nil, "", err
 	}
@@ -113,12 +118,16 @@ func (s *AiMessageService) prepareAiChat(ctx context.Context, sessionID, userID,
 
 // finishAiChat 完成聊天：保存 assistant 消息 → 更新会话消息数 → 异步触发记忆压缩 → 返回响应 DTO
 func (s *AiMessageService) finishAiChat(ctx context.Context, sessionID, userID string, userMessage *models.AiMessage, reply string, threshold int) (*dto.AiChatRespDTO, error) {
-	assistantMessage, err := mongorepo.SaveAiMessage(ctx, sessionID, userID, "assistant", reply)
+	// 派生 5s 超时: Mongo 挂起时快速失败, 避免请求无限挂起
+	dbCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	assistantMessage, err := mongorepo.SaveAiMessage(dbCtx, sessionID, userID, "assistant", reply)
 	if err != nil {
 		return nil, err
 	}
 
-	if total, err := mongorepo.CountAiMessages(ctx, sessionID, userID); err == nil {
+	if total, err := mongorepo.CountAiMessages(dbCtx, sessionID, userID); err == nil {
 		if err := GetAiConversationService().UpdateConversationMessageCount(sessionID, userID, total); err != nil {
 			logrus.Warnf("Failed to update AI conversation message count, session=%s, err=%v", sessionID, err)
 		}
