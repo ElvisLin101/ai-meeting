@@ -50,12 +50,12 @@ description: 当需求涉及 AI 长上下文、历史消息窗口、压缩摘要
 - 主节点: SET NX 抢锁 → 心跳续期 → 执行 fn → 写结果 → Pub/Sub 通知 → 释放锁。
 - 从节点: 订阅 channel → 轮询检查主节点健康 → 收到通知读结果。
 - AI 流式输出作心跳: 主节点压缩时走 `CallConfiguredAIChatStream`, 在 `onChunk` 中调 `writer.Write` 刷新 `progressKey`(`累计字节数:时间戳`); 从节点检测 `progressKey` 停滞超 30s 则换主。`streamKey` 已移除, follower 仅靠 `progressKey` 判停滞, 不消费流内容。
-- 换主时写 cancelKey 通知旧主停止, 旧主 cancel context 自动断开 AI 调用。
+- 换主时**双通道**通知旧主停止: `notifyCancel` 同时 `Publish cancelChan`（Pub/Sub 毫秒级推送）+ 写 `cancelKey`（5s 轮询兜底）; 旧主 `watchCancel` 收到匹配自己 nodeID 的信号后 cancel context 自动断开 AI 调用。
 - Redis 故障降级为本地 singleflight（`localGroup`）, 此时 `writer.redis` 为 nil, `Write` 直接 no-op。
 
 ## 关键不变量
 
-- 同一会话的 `sequence` 必须单调递增。
+- 同一会话的 `sequence` 必须单调递增（由 Mongo `counters` 集合计数器原子分配, 见 `repositories/mongo/counter.go`, 勿改回"读 max+1"——并发会重复）。
 - 上下文压缩只能基于当前用户自己的消息。
 - MongoDB `ai_messages` 是普通 AI 会话消息永久记忆真相源。
 - Redis 是热缓存, MongoDB `compressed_contexts` 是压缩上下文持久恢复层。

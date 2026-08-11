@@ -23,6 +23,7 @@ description: 当需求涉及 AI 会话、AI 消息、AI 模型配置、/ai 路�
 - MySQL 仓储: `repositories/mysql/ai_properties_repository.go`(AI 模型配置)。
 - Mongo 仓储: `repositories/mongo/ai_conversation_repository.go`(会话), `repositories/mongo/ai_message_repository.go`(消息)。
 - 模型客户端: `clients/ai_model_client.go`。
+- 模型配置缓存: `clients/ai_model_cache.go`（生效配置 60s TTL + 未命中 10s 负缓存, 属性增删改/启停后 `InvalidateAiPropertyCache` 主动失效）。
 - DTO: `dto/ai.go`。
 - 模型: `models/ai.go`。
 
@@ -45,6 +46,7 @@ description: 当需求涉及 AI 会话、AI 消息、AI 模型配置、/ai 路�
 - 用户消息和 assistant 回复都保存到 MongoDB `ai_messages`。
 - 通过 OpenAI-compatible endpoint 调用模型；默认优先读取 `config.yaml` 中 `ai.deepseek` 的 DeepSeek 配置。
 - 会话绑定有效 `AiID` 时优先使用 MySQL `AiProperties`, 未绑定或未找到启用模型时回退到 `ai.deepseek`。
+- **模型配置读取走全局缓存** `clients.GetEnabledAiProperty`（不每次直查 MySQL, 写路径变更自动失效）。
 - 模型回复后更新 `ai_conversations.message_cnt` 和 `updated_at`。
 - 保存完整一轮对话后异步触发 AI 上下文压缩。
 - 普通 chat 返回 JSON, 响应字段包含 `content`, `user_message_id`, `assistant_message_id`。
@@ -85,14 +87,14 @@ description: 当需求涉及 AI 会话、AI 消息、AI 模型配置、/ai 路�
 ## 修改指南
 
 1. 接入真实模型调用时, 优先沿用 `clients/ai_model_client.go`, 不要在 handler 或 service 里直接写 HTTP 调用。
-2. 保存 assistant 回复时, 保持 `sequence` 单调递增。
+2. 保存 assistant 回复时, 保持 `sequence` 单调递增（Mongo `counters` 计数器原子分配, `repositories/mongo/counter.go`）。
 3. 更新消息数、标题生成和失败回滚策略要和会话表一致。
 4. 如果 AI 配置影响 memory 压缩, 同步读 `ai-meeting-memory`。
 5. 修改模型字段或路由后更新 references。
 
 ## 当前风险
 
-- `AiMessage.Sequence` 仍是查询当前最大值后加一, 高并发同会话写入时仍可能重复。
+- ~~`AiMessage.Sequence` 仍是查询当前最大值后加一, 高并发同会话写入时仍可能重复。~~ **已完成: `AiMessage`/`AgentMessage`/`TurnArchive` seq 均改用 Mongo 计数器(`repositories/mongo/counter.go`)原子递增。**
 - AI memory 阈值是运行时内存配置, 服务重启后恢复默认值。
 - 非流式 OpenAI-compatible 响应解析只支持 `choices[].message.content` 或 `choices[].text`; 流式解析支持 `delta.content`, `delta.reasoning_content` 和 `text`。
 - SSE 流式调用中途断开时, 已保存 user 消息, 但不会保存不完整 assistant 回复。

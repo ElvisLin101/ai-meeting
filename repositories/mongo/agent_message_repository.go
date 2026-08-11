@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
-	drivermongo "go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
@@ -90,7 +89,7 @@ func SaveAgentMessage(ctx context.Context, sessionID, userID, role, content stri
 		return err
 	}
 
-	maxSeq, err := nextAgentMessageSequence(ctx, collection, sessionID, userID)
+	maxSeq, err := nextAgentMessageSequence(ctx, sessionID, userID)
 	if err != nil {
 		return err
 	}
@@ -107,19 +106,13 @@ func SaveAgentMessage(ctx context.Context, sessionID, userID, role, content stri
 	return err
 }
 
-func nextAgentMessageSequence(ctx context.Context, collection *drivermongo.Collection, sessionID, userID string) (int, error) {
-	opts := options.FindOne().SetSort(bson.D{{Key: "sequence", Value: -1}})
-	filter := bson.M{"session_id": sessionID, "user_id": userID}
-
-	var latest models.AgentMessage
-	err := collection.FindOne(ctx, filter, opts).Decode(&latest)
-	if err == drivermongo.ErrNoDocuments {
-		return 1, nil
-	}
+// nextAgentMessageSequence 分配消息 seq(计数器原子递增, 替代"读 max+1"避免并发重复)
+func nextAgentMessageSequence(ctx context.Context, sessionID, userID string) (int, error) {
+	seq, err := nextSeqFromCounter(ctx, "agent_msg_seq:"+sessionID+":"+userID)
 	if err != nil {
 		return 0, err
 	}
-	return latest.Sequence + 1, nil
+	return int(seq), nil
 }
 
 // SaveAgentMessageWithDetail 保存消息（含 responseTime 和 errorMessage，用于 assistant 消息）
@@ -129,7 +122,7 @@ func SaveAgentMessageWithDetail(ctx context.Context, sessionID, userID, role, co
 		return 0, err
 	}
 
-	maxSeq, err := nextAgentMessageSequence(ctx, collection, sessionID, userID)
+	maxSeq, err := nextAgentMessageSequence(ctx, sessionID, userID)
 	if err != nil {
 		return 0, err
 	}

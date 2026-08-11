@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
-	drivermongo "go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
@@ -14,7 +13,7 @@ import (
 // 面试运行态 Mongo 仓储
 // 热快照: CAS 乐观锁更新
 // 冷快照: 无 CAS, upsert 覆盖
-// 轮次归档: 不可变, 按 requestId 幂等, seq 单调
+// 轮次归档: 不可变, 按 requestId 幂等, seq 单调(计数器原子分配)
 // ============================================================
 
 const (
@@ -186,8 +185,8 @@ func ArchiveTurn(ctx context.Context, sessionID, requestID string, turn models.I
 		return existing.Seq, nil // 已存在, 返回原 seq
 	}
 
-	// 取 max seq + 1
-	maxSeq, err := nextTurnSeq(ctx, collection, sessionID)
+	// 计数器原子分配 seq(替代"读 max+1", 避免并发重复)
+	maxSeq, err := nextSeqFromCounter(ctx, "turn_seq:"+sessionID)
 	if err != nil {
 		return 0, err
 	}
@@ -226,18 +225,4 @@ func FindTurnArchives(ctx context.Context, sessionID string) ([]models.Interview
 		return nil, err
 	}
 	return archives, nil
-}
-
-// nextTurnSeq 取当前 session 的 max seq + 1
-func nextTurnSeq(ctx context.Context, collection *drivermongo.Collection, sessionID string) (int64, error) {
-	opts := options.FindOne().SetSort(bson.D{{Key: "seq", Value: -1}})
-	var latest models.InterviewSessionTurnArchive
-	err := collection.FindOne(ctx, bson.M{"session_id": sessionID}, opts).Decode(&latest)
-	if err == drivermongo.ErrNoDocuments {
-		return 1, nil // 第一条
-	}
-	if err != nil {
-		return 0, err
-	}
-	return latest.Seq + 1, nil
 }

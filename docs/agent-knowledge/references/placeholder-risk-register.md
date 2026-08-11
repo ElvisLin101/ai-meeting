@@ -11,7 +11,7 @@
 ## AI
 
 - `api/handlers/ai_handler.go`: `AiMessageController.ChatStream` 已接 SSE, 但流式中断时不会保存不完整 assistant 回复。
-- `repositories/mongo/ai_message_repository.go`: `AiMessage.Sequence` 通过查询当前最大值后加一生成, 高并发同会话写入时可能重复。
+- ~~`repositories/mongo/ai_message_repository.go`: `AiMessage.Sequence` 通过查询当前最大值后加一生成, 高并发同会话写入时可能重复。~~ **已完成: `AiMessage`/`AgentMessage`/`TurnArchive` 的 seq 均改用 Mongo 计数器(`counters` 集合, `findOneAndUpdate` + `$inc` 原子递增)分配, 并发不再重复; 相关集合已建复合索引(见 `repositories/mongo/client.go: ensureIndexes`)。**
 - `clients/ai_model_client.go`: 模型调用按 OpenAI-compatible endpoint 解析, 非兼容 provider 需要适配。
 - `config/config.yaml`: `ai.deepseek.api_key` 当前预留为空, 本地运行真实模型前需要填入或通过 `AI_DEEPSEEK_API_KEY` 覆盖。
 
@@ -32,11 +32,10 @@
 
 - `services/user/user_service.go`: 密码明文比较。
 - `api/middleware/auth.go`: 缺失或无效 token 默认放行。
-- `api/handlers/user_handler.go`: `GenerateToken(user.Username, string(rune(user.ID)))` 可能不是预期的 user ID 字符串。
 
 ## 新增基础设施（无占位）
 
-- `services/agent/agent_scene.go`: 5 个业务场景枚举, 已完整实现, 尚未被面试模块使用。
+- `services/agent/agent_scene.go`: 4 个业务场景枚举, 已完整实现, 尚未被面试模块使用。
 - `services/agent/agent_properties_loader.go`: 启动缓存 + 场景解析器, 已完整实现。
 - `pkg/singleflight/singleflight.go`: 分布式 SingleFlight, 已完整实现; 流式心跳已接入 AI 侧压缩路径（`AiMemoryService` 压缩走 `CallConfiguredAIChatStream`, `onChunk` 内调 `writer.Write` 刷新 `progressKey` 时间戳, follower 据此判停滞换主）。Agent 侧不压缩, 不走 SingleFlight。
 - `repositories/redis.go`: 全局 `SingleFlight` 实例, 在 `InitRedis` 中初始化。

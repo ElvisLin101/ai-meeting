@@ -72,9 +72,10 @@ Mongo 轮次归档（不可变）       ← 完整轮次历史
 
 - **热冷分层快照**：热快照存高频流程态（CAS 乐观锁 + 单调性校验），冷快照存低频材料（无 CAS），ACTIVE 阶段跳过冷层刷新避免写放大
 - **Lazy Rehydrate 恢复**：Redis miss 后从 Mongo 热快照恢复 flow/分数/追问题，冷快照恢复材料，TurnArchive 恢复完整轮次历史
-- **分数提交失败回滚**：先拍 flow 快照后推进，分数提交失败时 RestoreFlow 回滚，保证"题号没推进但也没计分"的一致性
+- **条件回滚**：先拍 flow 快照后推进，失败时 RestoreFlow 走 CAS 条件回滚（仅当 flow 未被他人推进才回滚，不砸并发进度）；评分失败回滚 `EVALUATING→ASKING` 不卡死流程；题级锁 TTL(300s) > 执行预算(120s)，锁不先于请求过期
 - **turn log 异步补偿**：写失败入 Redis 队列，定时重试最多 6 次，不阻断主流程返回
 - **幂等三层防线**：Redis replay key（24h）→ 热快照 lastMutationId → TurnArchive 软回放
+- **seq 原子分配 + 复合索引**：TurnArchive/AiMessage/AgentMessage 的 sequence 用 Mongo `counters` 集合计数器原子递增（并发不重复），高频查询集合启动时自动建复合索引
 
 **代码位置**：`services/interview/flow/`、`services/interview/runtime/`
 

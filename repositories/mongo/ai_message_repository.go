@@ -7,7 +7,6 @@ import (
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	drivermongo "go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
@@ -91,7 +90,7 @@ func SaveAiMessage(ctx context.Context, sessionID, userID, role, content string)
 		return nil, err
 	}
 
-	sequence, err := nextAiMessageSequence(ctx, collection, sessionID, userID)
+	sequence, err := nextAiMessageSequence(ctx, sessionID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -111,19 +110,13 @@ func SaveAiMessage(ctx context.Context, sessionID, userID, role, content string)
 	return message, nil
 }
 
-func nextAiMessageSequence(ctx context.Context, collection *drivermongo.Collection, sessionID, userID string) (int, error) {
-	opts := options.FindOne().SetSort(bson.D{{Key: "sequence", Value: -1}})
-	filter := bson.M{"session_id": sessionID, "user_id": userID}
-
-	var latest models.AiMessage
-	err := collection.FindOne(ctx, filter, opts).Decode(&latest)
-	if err == drivermongo.ErrNoDocuments {
-		return 1, nil
-	}
+// nextAiMessageSequence 分配消息 seq(计数器原子递增, 替代"读 max+1"避免并发重复)
+func nextAiMessageSequence(ctx context.Context, sessionID, userID string) (int, error) {
+	seq, err := nextSeqFromCounter(ctx, "ai_msg_seq:"+sessionID+":"+userID)
 	if err != nil {
 		return 0, err
 	}
-	return latest.Sequence + 1, nil
+	return int(seq), nil
 }
 
 func CountAiMessages(ctx context.Context, sessionID, userID string) (int, error) {

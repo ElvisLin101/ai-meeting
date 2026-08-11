@@ -80,14 +80,14 @@ AI 侧有运行时压缩阈值接口:
 - 使用自定义 JWT middleware。
 - token 无效或缺失时中间件默认放行，依赖 handler 手动检查。
 - 登录密码明文比较。
-- `GenerateToken(user.Username, string(rune(user.ID)))` 可能不是十进制 user ID。
+- `GenerateToken` 使用 `strconv.FormatUint(uint64(user.ID), 10)` 生成十进制 `user_id`（已修复）。
 - 管理员设置缺少操作者权限校验。
 - 没有独立的会话归属校验服务。
 - 没有 WebSocket token 鉴权体系。
 
 待办:
 
-- P0: 修正 JWT `user_id` 写法，引入强制认证分组或 `RequireAuth`。
+- P0: 引入强制认证分组或 `RequireAuth`（`user_id` 十进制写法已修复）。
 - P0: 密码哈希和管理员接口权限校验。
 - P1: 抽象 conversation ownership service。
 - P2: WebSocket 鉴权。
@@ -157,7 +157,7 @@ AI 侧有运行时压缩阈值接口:
 
 - `InterviewSession`、`InterviewQuestion` 等核心对象走 MongoDB。
 - 简历提题调用模型，写题目、建议和简历分。
-- 答题链路有完整 pipeline: 参数校验、`requestId` 幂等、当前题校验、同题锁、AI 评分、追问规则、主问题计分、失败回滚、快照刷新。
+- 答题链路有完整 pipeline: 参数校验、`requestId` 幂等、当前题校验、同题锁、AI 评分、追问规则、主问题计分、条件回滚、快照刷新。回滚为条件回滚(`RollbackFlowCAS`): 评分失败回滚 `EVALUATING→ASKING`, 推进后的失败仅在 flow 未被他人推进时回滚; 题级锁 TTL(300s) > 执行预算(120s)。
 - 规则链决定是否追问。
 - Redis 存热运行态，MongoDB 存热/冷快照和轮次归档。
 - 恢复支持 `READ_ONLY` / `READ_WRITE_REQUIRED` 和不同恢复范围。
