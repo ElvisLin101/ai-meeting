@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"ai-meeting/clients"
 	"ai-meeting/dto"
 	"ai-meeting/models"
 	mongorepo "ai-meeting/repositories/mongo"
@@ -146,7 +147,11 @@ func (s *AiPropertiesService) GetAvailableAiModels() ([]models.AiProperties, err
 // CreateAiProperties 创建AI配置
 func (s *AiPropertiesService) CreateAiProperties(req dto.AiPropertiesCreateReqDTO) error {
 	prop := models.AiProperties{Name: req.Name, ModelType: req.ModelType, ApiKey: req.ApiKey, ApiSecret: req.ApiSecret, Endpoint: req.Endpoint, Config: req.Config, IsEnabled: true}
-	return mysqlrepo.CreateAiProperties(&prop)
+	if err := mysqlrepo.CreateAiProperties(&prop); err != nil {
+		return err
+	}
+	clients.InvalidateAiPropertyCache()
+	return nil
 }
 
 // UpdateAiProperties 更新AI配置
@@ -170,12 +175,20 @@ func (s *AiPropertiesService) UpdateAiProperties(req dto.AiPropertiesUpdateReqDT
 	if req.Config != "" {
 		updates["config"] = req.Config
 	}
-	return mysqlrepo.UpdateAiProperties(req.ID, updates)
+	if err := mysqlrepo.UpdateAiProperties(req.ID, updates); err != nil {
+		return err
+	}
+	clients.InvalidateAiPropertyCache()
+	return nil
 }
 
 // DeleteAiProperties 删除AI配置
 func (s *AiPropertiesService) DeleteAiProperties(id uint) error {
-	return mysqlrepo.DeleteAiProperties(id)
+	if err := mysqlrepo.DeleteAiProperties(id); err != nil {
+		return err
+	}
+	clients.InvalidateAiPropertyCache()
+	return nil
 }
 
 // GetAiPropertiesById 根据ID查询AI配置
@@ -196,7 +209,11 @@ func (s *AiPropertiesService) GetAllEnabledAiProperties() ([]models.AiProperties
 
 // ToggleAiPropertiesStatus 切换AI配置启用状态
 func (s *AiPropertiesService) ToggleAiPropertiesStatus(id uint, isEnabled int) error {
-	return mysqlrepo.ToggleAiPropertiesStatus(id, isEnabled == 1)
+	if err := mysqlrepo.ToggleAiPropertiesStatus(id, isEnabled == 1); err != nil {
+		return err
+	}
+	clients.InvalidateAiPropertyCache()
+	return nil
 }
 
 var aiPropertiesServiceInstance *AiPropertiesService

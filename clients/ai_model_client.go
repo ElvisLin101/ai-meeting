@@ -3,7 +3,6 @@ package clients
 import (
 	"ai-meeting/config"
 	"ai-meeting/models"
-	mysqlrepo "ai-meeting/repositories/mysql"
 	"bufio"
 	"bytes"
 	"context"
@@ -16,6 +15,13 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+)
+
+var (
+	// httpClientStd 非流式调用客户端（60s 超时）
+	httpClientStd = &http.Client{Timeout: 60 * time.Second}
+	// httpClientStream 流式调用客户端（5min 超时，SSE 长连接）
+	httpClientStream = &http.Client{Timeout: 5 * time.Minute}
 )
 
 type PromptMessage struct {
@@ -49,8 +55,7 @@ func CallConfiguredAIChat(ctx context.Context, aiID uint, messages []PromptMessa
 		return "", err
 	}
 
-	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := httpClientStd.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -107,8 +112,7 @@ func callConfiguredAIChatStream(ctx context.Context, aiID uint, messages []Promp
 	}
 	req.Header.Set("Accept", "text/event-stream")
 
-	client := &http.Client{Timeout: 5 * time.Minute}
-	resp, err := client.Do(req)
+	resp, err := httpClientStream.Do(req)
 	if err != nil {
 		return err
 	}
@@ -183,7 +187,7 @@ func loadEnabledAiProperty(aiID uint) (*models.AiProperties, error) {
 		}
 	}
 
-	prop, err := mysqlrepo.FindEnabledAiProperty(aiID)
+	prop, err := GetEnabledAiProperty(aiID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			if prop, ok := loadConfiguredDeepSeekProperty(); ok {
