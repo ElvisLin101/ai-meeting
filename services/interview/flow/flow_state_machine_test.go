@@ -155,11 +155,18 @@ func TestFlowStateMachine_RestoreFlow(t *testing.T) {
 	current, _ := fsm.Current(ctx, "s1")
 	snapshot := fsm.SnapshotFlow(current)
 
-	if _, err := fsm.MoveToEvaluating(ctx, "s1"); err != nil {
+	evaluating, err := fsm.MoveToEvaluating(ctx, "s1")
+	if err != nil {
 		t.Fatalf("MoveToEvaluating failed: %v", err)
 	}
-	if err := fsm.RestoreFlow(ctx, "s1", snapshot); err != nil {
+
+	// 条件回滚: expectedVersion 等于自己推进后的 version → 成功回滚
+	rolled, err := fsm.RestoreFlow(ctx, "s1", snapshot, evaluating.Version)
+	if err != nil {
 		t.Fatalf("RestoreFlow failed: %v", err)
+	}
+	if !rolled {
+		t.Fatal("expected rollback to succeed, got skipped")
 	}
 
 	restored, _ := fsm.Current(ctx, "s1")
@@ -168,5 +175,39 @@ func TestFlowStateMachine_RestoreFlow(t *testing.T) {
 	}
 	if restored.Version != snapshot.Version {
 		t.Errorf("restored version = %d, want %d", restored.Version, snapshot.Version)
+	}
+}
+
+func TestFlowStateMachine_RestoreFlow_SkipWhenAdvanced(t *testing.T) {
+	fsm := newTestStateMachine(t)
+	ctx := context.Background()
+
+	if _, err := fsm.EnsureInitialized(ctx, "s1", 3); err != nil {
+		t.Fatalf("EnsureInitialized failed: %v", err)
+	}
+	current, _ := fsm.Current(ctx, "s1")
+	snapshot := fsm.SnapshotFlow(current)
+
+	// 模拟并发: 自己推进到 EVALUATING 后, 别人又推进到了第 2 题(version 前进)
+	if _, err := fsm.MoveToEvaluating(ctx, "s1"); err != nil {
+		t.Fatalf("MoveToEvaluating failed: %v", err)
+	}
+	advanced, err := fsm.AdvanceMainQuestion(ctx, "s1")
+	if err != nil {
+		t.Fatalf("AdvanceMainQuestion failed: %v", err)
+	}
+
+	// 用旧 version(=2) 回滚 → 当前 version(3) 不匹配 → 放弃回滚, 不砸掉别人进度
+	rolled, err := fsm.RestoreFlow(ctx, "s1", snapshot, 2)
+	if err != nil {
+		t.Fatalf("RestoreFlow failed: %v", err)
+	}
+	if rolled {
+		t.Fatal("expected rollback to be skipped when flow advanced, got rolled back")
+	}
+
+	after, _ := fsm.Current(ctx, "s1")
+	if after.Version != advanced.Version || after.CurrentQuestionNumber != advanced.CurrentQuestionNumber {
+		t.Errorf("flow should stay untouched after skipped rollback, got %+v", after)
 	}
 }

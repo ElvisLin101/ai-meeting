@@ -157,7 +157,8 @@ ensureRuntime(sessionId, loadMode, scope)
 → markSucceeded(写replay+删processing) → 刷新快照(forceFlush)
 ```
 
-- **回滚粒度**: 只有"分数提交失败"回滚 flow(恢复到推进前), 且发生在写 turn log 之前, 不会有"写了 turn log 但分数没入账"的脏数据。
+- **题级锁 TTL(300s) > 答题执行预算(120s)**: 锁不先于请求过期, 杜绝"锁过期但旧请求仍在评分 → 新请求同题双执行、双计分"。
+- **回滚粒度(条件回滚, `RollbackFlowCAS`)**: ① 评分失败 → 回滚 `EVALUATING→ASKING`(flow 不卡死评分态); ② 推进后失败(如分数提交失败) → 回滚到评分前快照。回滚均为 CAS 条件回滚, **仅当 flow 仍是自己推进后的 version 才回滚, 已被其他请求推进则放弃**——绝不无条件覆盖, 防止砸掉并发已提交的进度。回滚发生在写 turn log 之前, 不会有"写了 turn log 但分数没入账"的脏数据。
 - **turn log 写失败不回滚**, 走异步补偿队列(每 3s 重试, 最多 6 次), 因为响应已组装成功应当返回客户端。
 - **markSucceeded 不可逆地先于快照刷新**: 即使快照 CAS 3 次用尽失败, replay key 已写, 客户端重试命中 replay; 此窗口靠软回放(热快照/归档)兜底。
 
@@ -173,13 +174,13 @@ Go 侧面试模块会话/题目/记录已迁 Mongo, 运行态状态机 P0 骨架
 - flow 缓存 + CAS: `services/interview/runtime/flow_cache.go`(Lua 乐观锁, 5 次重试)
 - 分数缓存: `services/interview/runtime/score_cache.go`(Lua 原子累计平均分)
 - turn log 缓存: `services/interview/runtime/turn_log_cache.go`(List + requestId 幂等)
-- 状态机: `services/interview/flow/flow_state_machine.go`(转移方法 + 合法性校验 + 回滚)
+- 状态机: `services/interview/flow/flow_state_machine.go`(转移方法 + 合法性校验 + 条件回滚 `RestoreFlow`)
 - 追问规则链: `services/interview/flow/follow_up_rule.go`(纯 Go 函数, 5 条短路规则)
 - AI 调用: `services/interview/evaluation/`(评分/出题/追问, 走 DeepSeek 流式 + JSON 解析容错)
   - 评分/出题接入分布式 SingleFlight(流式 chunk 作心跳, 同一题/同一简历并发去重)
   - 追问走流式但不接 SingleFlight(输入差异大, 重复概率低)
 - 通用分布式锁: `pkg/lock/lock.go`(SetNX + Lua 释放, 题级锁/幂等锁)
-- 答题流水线: `services/interview/flow/answer_pipeline.go`(幂等→锁→评分→推进flow→写分→turn log→标记成功)
+- 答题流水线: `services/interview/flow/answer_pipeline.go`(幂等→锁→评分→推进flow→写分→turn log→标记成功; 失败走条件回滚 `RollbackFlowCAS`)
 - 幂等机制: `services/interview/flow/idempotency_service.go`(processing/replay 双 key + requestId 自动生成)
 
 **现成可复用**:
@@ -192,7 +193,7 @@ Go 侧面试模块会话/题目/记录已迁 Mongo, 运行态状态机 P0 骨架
 **需要新建(P1/P2)**:
 - 通用分布式锁(同题锁/幂等锁/状态机推进锁, 语义是"拒绝/排队"不是"去重")
 - Mongo CAS / FindOneAndUpdate 带条件(状态机原子推进)
-- 原子 sequence 生成(`$inc` 计数器, 当前 `nextXxxSequence` 非原子)
+- ~~原子 sequence 生成(`$inc` 计数器, 当前 `nextXxxSequence` 非原子)~~ **已完成: `repositories/mongo/counter.go`(`counters` 集合 `findOneAndUpdate`+`$inc`, 覆盖 TurnArchive/AiMessage/AgentMessage)**
 - 面试配置块(singleflight 常量改可配)
 - 面试运行态 repository(Mongo 热/冷快照 + TurnArchive 持久化)
 - 幂等机制(processing/replay 双 key)
@@ -208,7 +209,7 @@ Go 侧面试模块会话/题目/记录已迁 Mongo, 运行态状态机 P0 骨架
 ### 5.3 落地优先级
 
 - **P0(已完成)**: 状态机模型 + Redis key 常量 + flow cache(CAS) + score cache(Lua 原子) + turn log cache + 状态机转移方法 + 追问规则链
-- **P1(部分完成)**: 通用分布式锁 `pkg/lock` ✅ + 幂等机制 ✅ + 答题流水线 ✅ + 评分/出题/追问 AI 调用 ✅ + Mongo 热冷快照 + TurnArchive ✅ + ensureRuntime 恢复 ✅ + refreshSnapshot 更新 ✅ + turn log 异步补偿 ✅ + 面试报告归档 ✅ | 待做: 出题流程的冷快照在 ensureRuntime 中恢复材料的完善、原子 sequence
+- **P1(部分完成)**: 通用分布式锁 `pkg/lock` ✅ + 幂等机制 ✅ + 答题流水线(条件回滚) ✅ + 评分/出题/追问 AI 调用 ✅ + Mongo 热冷快照 + TurnArchive ✅ + ensureRuntime 恢复 ✅ + refreshSnapshot 更新 ✅ + turn log 异步补偿 ✅ + 面试报告归档 ✅ + 原子 sequence(`repositories/mongo/counter.go`) ✅ + 复合索引(`repositories/mongo/client.go: ensureIndexes`) ✅ | 待做: 出题流程的冷快照在 ensureRuntime 中恢复材料的完善
 - **P2(待做)**: singleflight 分 stage 可配 + Fencing Token + worker pool/AI Guard
 
 ## 6. 修改时必查

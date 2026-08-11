@@ -62,7 +62,54 @@ func (c *FlowCache) GetFlow(ctx context.Context, sessionID string) (*models.Inte
 	return parseFlowState(result)
 }
 
-// SaveFlow 直接覆盖写入 flow（用于初始化和回滚，不走 CAS）
+// flowRollbackScript 条件回滚 flow
+// 仅当当前 version == ARGV[1]（调用方自己推进后的版本）才覆盖写回快照,
+// 否则说明 flow 已被其他请求合法推进, 放弃回滚(返回 0), 防止回滚砸掉并发已提交的进度。
+// ARGV: [expectedVersion, status, currentIndex, currentQuestionNumber,
+//
+//	totalQuestions, followUpCount, maxFollowUp, snapshotVersion, ttlSeconds]
+const flowRollbackScript = `
+local current = redis.call('HGET', KEYS[1], 'version')
+if current == false or tostring(current) ~= tostring(ARGV[1]) then
+	return 0
+end
+redis.call('HSET', KEYS[1],
+	'status', ARGV[2],
+	'currentIndex', ARGV[3],
+	'currentQuestionNumber', ARGV[4],
+	'totalQuestions', ARGV[5],
+	'followUpCount', ARGV[6],
+	'maxFollowUp', ARGV[7],
+	'version', ARGV[8])
+redis.call('EXPIRE', KEYS[1], tonumber(ARGV[9]))
+return 1
+`
+
+// RollbackFlowCAS 条件回滚: 仅当当前 version == expectedVersion 时覆盖写回快照。
+// expectedVersion 为调用方推进 flow 后拿到的 version——只有"当前仍是自己推进后的版本"
+// 才允许回滚; 若已被其他请求推进, 返回 (false, nil) 表示放弃回滚。
+func (c *FlowCache) RollbackFlowCAS(ctx context.Context, sessionID string, expectedVersion int, state *models.InterviewFlowState) (bool, error) {
+	key := flowKey(sessionID)
+	args := []interface{}{
+		fmt.Sprintf("%d", expectedVersion),
+		string(state.Status),
+		fmt.Sprintf("%d", state.CurrentIndex),
+		state.CurrentQuestionNumber,
+		fmt.Sprintf("%d", state.TotalQuestions),
+		fmt.Sprintf("%d", state.FollowUpCount),
+		fmt.Sprintf("%d", state.MaxFollowUp),
+		fmt.Sprintf("%d", state.Version),
+		fmt.Sprintf("%d", cacheTTLHours*3600),
+	}
+	result, err := redis.NewScript(flowRollbackScript).Run(ctx, c.rdb, []string{key}, args...).Result()
+	if err != nil {
+		return false, err
+	}
+	r, ok := result.(int64)
+	return ok && r == 1, nil
+}
+
+// SaveFlow 直接覆盖写入 flow（用于初始化, 不走 CAS; 回滚请用 RollbackFlowCAS）
 func (c *FlowCache) SaveFlow(ctx context.Context, sessionID string, state *models.InterviewFlowState) error {
 	key := flowKey(sessionID)
 	_, err := c.rdb.HSet(ctx, key,

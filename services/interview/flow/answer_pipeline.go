@@ -24,7 +24,10 @@ import (
 //   失败: 回滚flow(分数提交失败时) + 清幂等标记
 // ============================================================
 
-const questionLockTTL = 120 * time.Second
+// questionLockTTL 题级锁 TTL。
+// 必须大于答题执行预算(120s): 锁比 ctx 多活 180s, 覆盖 ctx 超时后的清理窗口,
+// 避免"锁已过期但旧请求还在评分"导致新请求拿到同题锁双执行、双计分。
+const questionLockTTL = 300 * time.Second
 
 // AnswerPipeline 答题流水线
 type AnswerPipeline struct {
@@ -92,9 +95,6 @@ func (p *AnswerPipeline) Execute(ctx context.Context, sessionID string, req dto.
 		return nil, ecode.New(ecode.ErrIdempotencyProcessing, "该请求正在处理中，请稍后重试")
 	}
 
-	idempotencyStarted := true
-	idempotencyMarked := false
-
 	// 3. ensureRuntime: Redis 命中? miss 则从 Mongo 重建
 	flow, err := p.snapshotSvc.EnsureRuntime(ctx, sessionID)
 	if err != nil {
@@ -137,10 +137,15 @@ func (p *AnswerPipeline) Execute(ctx context.Context, sessionID string, req dto.
 	}
 
 	// 6. 评分
-	if _, err := p.flowStateMachine.MoveToEvaluating(ctx, sessionID); err != nil {
+	// 评分前快照(ASKING 状态): 评分失败时条件回滚, 避免 flow 永久卡死 EVALUATING
+	preEvalSnapshot := p.flowStateMachine.SnapshotFlow(flow)
+
+	evalFlow, err := p.flowStateMachine.MoveToEvaluating(ctx, sessionID)
+	if err != nil {
 		p.idempotencySvc.ClearProcessing(ctx, sessionID, requestID)
 		return nil, ecode.Wrap(err, "转入评分态失败")
 	}
+	evalVersion := evalFlow.Version
 
 	// 从 Redis 读取题面和简历上下文
 	questionContent, err := p.questionCache.GetQuestion(ctx, sessionID, req.QuestionNumber)
@@ -154,13 +159,17 @@ func (p *AnswerPipeline) Execute(ctx context.Context, sessionID string, req dto.
 
 	evalResult, err := p.evaluationSvc.EvaluateAnswer(ctx, questionContent, req.AnswerContent, resumeContext)
 	if err != nil {
+		// 评分失败: 条件回滚 EVALUATING → ASKING(仅当无人推进过), 让客户端重试时状态机合法
+		if rolled, rerr := p.flowStateMachine.RestoreFlow(ctx, sessionID, preEvalSnapshot, evalVersion); rerr != nil {
+			logrus.Errorf("Failed to restore flow after eval failure, session=%s, err=%v", sessionID, rerr)
+		} else if !rolled {
+			logrus.Warnf("Skip restore after eval failure: flow advanced by another request, session=%s", sessionID)
+		}
 		p.idempotencySvc.ClearProcessing(ctx, sessionID, requestID)
 		return nil, ecode.Wrap(err, "AI 评分失败")
 	}
 
 	// 7. 推进 flow
-	flowSnapshot := p.flowStateMachine.SnapshotFlow(flow)
-
 	isFollowUp := IsFollowUpQuestion(req.QuestionNumber)
 	var nextQuestionNumber string
 	var nextQuestion string
@@ -182,37 +191,40 @@ func (p *AnswerPipeline) Execute(ctx context.Context, sessionID string, req dto.
 		// 追问分支
 		followUpResult, err := p.followUpSvc.GenerateFollowUp(ctx, questionContent, req.AnswerContent, evalResult.MissingPoints, flow.FollowUpCount, flow.MaxFollowUp)
 		if err == nil && followUpResult != nil && !followUpResult.EndInterview && followUpResult.Question != "" {
-			nextQuestionNumber = BuildFollowUpQuestionNumber(ResolveMainQuestionNumber(req.QuestionNumber), flow.FollowUpCount+1)
-			nextQuestion = followUpResult.Question
-			if _, err := p.flowStateMachine.StartFollowUpQuestion(ctx, sessionID, nextQuestionNumber); err != nil {
-				p.rollbackFlow(ctx, sessionID, flowSnapshot, requestID)
-				return nil, ecode.Wrap(err, "开始追问失败")
-			}
-			// 追问题写入 Redis（否则下次读题面会 miss）
-			if err := p.questionCache.SaveFollowUpQuestion(ctx, sessionID, nextQuestionNumber, nextQuestion); err != nil {
-				logrus.Warnf("Failed to save follow-up question, session=%s, qn=%s, err=%v", sessionID, nextQuestionNumber, err)
-			}
-			// 主问题计分（追问不计分, 但当前答的是主问题, 需要入账）
-			if !isFollowUp {
-				if _, _, _, err := p.scoreCache.AddScore(ctx, sessionID, evalResult.Score); err != nil {
-					p.rollbackFlow(ctx, sessionID, flowSnapshot, requestID)
-					return nil, ecode.Wrap(err, "分数提交失败")
-				}
-			}
-		} else {
-			// 追问生成失败 → 走主问题推进
-			nextQuestionNumber, nextQuestion, finished, err = p.advanceMainQuestion(ctx, sessionID, flowSnapshot, requestID, isFollowUp, evalResult.Score)
-			if err != nil {
-				return nil, err
+		nextQuestionNumber = BuildFollowUpQuestionNumber(ResolveMainQuestionNumber(req.QuestionNumber), flow.FollowUpCount+1)
+		nextQuestion = followUpResult.Question
+		followUpFlow, err := p.flowStateMachine.StartFollowUpQuestion(ctx, sessionID, nextQuestionNumber)
+		if err != nil {
+			// MutateFlow 失败 = 推进未发生或已被他人推进: 不回滚(避免覆盖并发进度), 只清幂等标记
+			p.idempotencySvc.ClearProcessing(ctx, sessionID, requestID)
+			return nil, ecode.Wrap(err, "开始追问失败")
+		}
+		// 追问题写入 Redis（否则下次读题面会 miss）
+		if err := p.questionCache.SaveFollowUpQuestion(ctx, sessionID, nextQuestionNumber, nextQuestion); err != nil {
+			logrus.Warnf("Failed to save follow-up question, session=%s, qn=%s, err=%v", sessionID, nextQuestionNumber, err)
+		}
+		// 主问题计分（追问不计分, 但当前答的是主问题, 需要入账）
+		if !isFollowUp {
+			if _, _, _, err := p.scoreCache.AddScore(ctx, sessionID, evalResult.Score); err != nil {
+				// 分数提交失败 → 条件回滚已推进的追问状态
+				p.rollbackFlow(ctx, sessionID, preEvalSnapshot, followUpFlow.Version, requestID)
+				return nil, ecode.Wrap(err, "分数提交失败")
 			}
 		}
 	} else {
-		// 主问题推进
-		nextQuestionNumber, nextQuestion, finished, err = p.advanceMainQuestion(ctx, sessionID, flowSnapshot, requestID, isFollowUp, evalResult.Score)
+		// 追问生成失败 → 走主问题推进
+		nextQuestionNumber, nextQuestion, finished, err = p.advanceMainQuestion(ctx, sessionID, preEvalSnapshot, requestID, isFollowUp, evalResult.Score)
 		if err != nil {
 			return nil, err
 		}
 	}
+} else {
+	// 主问题推进
+	nextQuestionNumber, nextQuestion, finished, err = p.advanceMainQuestion(ctx, sessionID, preEvalSnapshot, requestID, isFollowUp, evalResult.Score)
+	if err != nil {
+		return nil, err
+	}
+}
 
 	// 8. 读当前总分
 	totalScore, _ := p.scoreCache.GetTotalScore(ctx, sessionID)
@@ -260,7 +272,6 @@ func (p *AnswerPipeline) Execute(ctx context.Context, sessionID string, req dto.
 	if err := p.idempotencySvc.MarkSucceeded(ctx, sessionID, requestID, resp); err != nil {
 		logrus.Warnf("Failed to mark idempotency succeeded, session=%s, err=%v", sessionID, err)
 	}
-	idempotencyMarked = true
 
 	// 刷新快照到 Mongo（异步不阻塞返回）
 	go func() {
@@ -281,24 +292,23 @@ func (p *AnswerPipeline) Execute(ctx context.Context, sessionID string, req dto.
 		SessionID: sessionID, Extra: fmt.Sprintf(`{"score":%d,"follow_up":%v,"finished":%v}`, evalResult.Score, decision.NeedFollowUp, finished),
 	})
 
-	_ = idempotencyStarted
-	_ = idempotencyMarked
 	return resp, nil
 }
 
 // advanceMainQuestion 推进主问题 + 计分
-func (p *AnswerPipeline) advanceMainQuestion(ctx context.Context, sessionID string, flowSnapshot *models.InterviewFlowState, requestID string, isFollowUp bool, score int) (nextQNum, nextQ string, finished bool, err error) {
+func (p *AnswerPipeline) advanceMainQuestion(ctx context.Context, sessionID string, preEvalSnapshot *models.InterviewFlowState, requestID string, isFollowUp bool, score int) (nextQNum, nextQ string, finished bool, err error) {
 	nextFlow, err := p.flowStateMachine.AdvanceMainQuestion(ctx, sessionID)
 	if err != nil {
-		p.rollbackFlow(ctx, sessionID, flowSnapshot, requestID)
+		// MutateFlow 失败 = 推进未发生或已被他人推进: 不回滚(避免覆盖并发进度), 只清幂等标记
+		p.idempotencySvc.ClearProcessing(ctx, sessionID, requestID)
 		return "", "", false, ecode.Wrap(err, "推进主问题失败")
 	}
 
 	// 计分: 主问题入账, 追问不计分
 	if !isFollowUp {
 		if _, _, _, err := p.scoreCache.AddScore(ctx, sessionID, score); err != nil {
-			// 分数提交失败 → 回滚 flow
-			p.rollbackFlow(ctx, sessionID, flowSnapshot, requestID)
+			// 分数提交失败 → 条件回滚已推进的 flow
+			p.rollbackFlow(ctx, sessionID, preEvalSnapshot, nextFlow.Version, requestID)
 			return "", "", false, ecode.Wrap(err, "分数提交失败")
 		}
 	}
@@ -311,12 +321,17 @@ func (p *AnswerPipeline) advanceMainQuestion(ctx context.Context, sessionID stri
 	return nextFlow.CurrentQuestionNumber, nextQuestion, false, nil
 }
 
-// rollbackFlow 回滚 flow 到快照 + 清幂等标记
-func (p *AnswerPipeline) rollbackFlow(ctx context.Context, sessionID string, snapshot *models.InterviewFlowState, requestID string) {
+// rollbackFlow 条件回滚 flow 到快照 + 清幂等标记
+// expectedVersion 为调用方推进后的 version: 仅当 flow 仍处于该版本才回滚,
+// 已被其他请求推进时放弃回滚, 防止砸掉并发已提交的进度。
+func (p *AnswerPipeline) rollbackFlow(ctx context.Context, sessionID string, snapshot *models.InterviewFlowState, expectedVersion int, requestID string) {
 	metric.GetMetricService().Record(models.MetricLog{Module: "state_machine", Event: "flow_rollback", Success: false, SessionID: sessionID})
 	if snapshot != nil {
-		if err := p.flowStateMachine.RestoreFlow(ctx, sessionID, snapshot); err != nil {
+		rolled, err := p.flowStateMachine.RestoreFlow(ctx, sessionID, snapshot, expectedVersion)
+		if err != nil {
 			logrus.Errorf("Failed to rollback flow, session=%s, err=%v", sessionID, err)
+		} else if !rolled {
+			logrus.Warnf("Skip flow rollback: flow advanced by another request, session=%s, expected_version=%d", sessionID, expectedVersion)
 		}
 	}
 	p.idempotencySvc.ClearProcessing(ctx, sessionID, requestID)

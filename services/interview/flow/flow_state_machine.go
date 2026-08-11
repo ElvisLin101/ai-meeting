@@ -137,9 +137,12 @@ func (m *FlowStateMachine) MarkCompleted(ctx context.Context, sessionID string) 
 	})
 }
 
-// RestoreFlow 回滚到快照（分数提交失败时用，不走 CAS）
-func (m *FlowStateMachine) RestoreFlow(ctx context.Context, sessionID string, snapshot *models.InterviewFlowState) error {
-	return m.flowCache.SaveFlow(ctx, sessionID, snapshot)
+// RestoreFlow 条件回滚到快照（分数提交失败时用）
+// expectedVersion 为调用方推进 flow 后拿到的 version: 仅当当前 flow 仍是该版本
+// （即"只有自己动过"）才回滚, 否则视为已被其他请求合法推进, 放弃回滚返回 false。
+// 返回 (是否成功回滚, 错误)。
+func (m *FlowStateMachine) RestoreFlow(ctx context.Context, sessionID string, snapshot *models.InterviewFlowState, expectedVersion int) (bool, error) {
+	return m.flowCache.RollbackFlowCAS(ctx, sessionID, expectedVersion, snapshot)
 }
 
 // SnapshotFlow 深拷贝当前 flow（用于回滚备份）
