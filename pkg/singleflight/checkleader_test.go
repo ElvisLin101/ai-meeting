@@ -26,16 +26,16 @@ func TestCheckLeader_Healthy(t *testing.T) {
 
 	last := ""
 	// 首次检查: 跳过初始化周期
-	if reason := g.checkLeader(ctx, lockKey, resultKey, progressKey, cancelKey, &last); reason != 0 {
+	if reason := g.checkLeader(ctx, lockKey, resultKey, progressKey, cancelKey, "CCHAN", &last); reason != 0 {
 		t.Fatalf("first check reason = %d, want 0", reason)
 	}
 	// 进度有推进 → 健康
 	g.redis.Set(ctx, progressKey, fmt.Sprintf("20:%d", now+1), LockTTL*2)
-	if reason := g.checkLeader(ctx, lockKey, resultKey, progressKey, cancelKey, &last); reason != 0 {
+	if reason := g.checkLeader(ctx, lockKey, resultKey, progressKey, cancelKey, "CCHAN", &last); reason != 0 {
 		t.Fatalf("advancing leader reason = %d, want 0", reason)
 	}
 	// 进度停滞但在阈值内 → 健康
-	if reason := g.checkLeader(ctx, lockKey, resultKey, progressKey, cancelKey, &last); reason != 0 {
+	if reason := g.checkLeader(ctx, lockKey, resultKey, progressKey, cancelKey, "CCHAN", &last); reason != 0 {
 		t.Fatalf("stable-within-threshold reason = %d, want 0", reason)
 	}
 	if cancelKeyVal, _ := g.redis.Get(ctx, cancelKey).Result(); cancelKeyVal != "" {
@@ -55,7 +55,7 @@ func TestCheckLeader_StalledTakeover(t *testing.T) {
 	g.redis.Set(ctx, progressKey, staleProgress, LockTTL*2)
 
 	last := staleProgress // 和上次读到的进度一致 → 无新输出
-	reason := g.checkLeader(ctx, lockKey, resultKey, progressKey, cancelKey, &last)
+	reason := g.checkLeader(ctx, lockKey, resultKey, progressKey, cancelKey, "CCHAN", &last)
 	if reason != followerLeaderTimeout {
 		t.Fatalf("stalled leader reason = %d, want followerLeaderTimeout(%d)", reason, followerLeaderTimeout)
 	}
@@ -75,7 +75,7 @@ func TestCheckLeader_LockExpiredWithResult(t *testing.T) {
 	g.redis.Set(ctx, resultKey, respBytes, ResultTTL)
 
 	last := ""
-	reason := g.checkLeader(ctx, lockKey, resultKey, progressKey, cancelKey, &last)
+	reason := g.checkLeader(ctx, lockKey, resultKey, progressKey, cancelKey, "CCHAN", &last)
 	if reason != followerGotResult {
 		t.Fatalf("reason = %d, want followerGotResult(%d)", reason, followerGotResult)
 	}
@@ -87,7 +87,7 @@ func TestCheckLeader_LockExpiredNoResult(t *testing.T) {
 	lockKey, resultKey, progressKey, cancelKey := "L", "R", "P", "C"
 
 	// 锁没了结果也没有 → 主节点超时, 准备换主
-	reason := g.checkLeader(ctx, lockKey, resultKey, progressKey, cancelKey, nil)
+	reason := g.checkLeader(ctx, lockKey, resultKey, progressKey, cancelKey, "CCHAN", nil)
 	if reason != followerLeaderTimeout {
 		t.Fatalf("reason = %d, want followerLeaderTimeout(%d)", reason, followerLeaderTimeout)
 	}
@@ -106,11 +106,11 @@ func TestCheckLeader_ProgressLost(t *testing.T) {
 
 	last := ""
 	// 首次检查: progressKey 不存在 → 跳过一周期给 leader 启动时间
-	if reason := g.checkLeader(ctx, lockKey, resultKey, progressKey, cancelKey, &last); reason != 0 {
+	if reason := g.checkLeader(ctx, lockKey, resultKey, progressKey, cancelKey, "CCHAN", &last); reason != 0 {
 		t.Fatalf("first check reason = %d, want 0", reason)
 	}
 	// 后续 progressKey 仍不存在 → 换主
-	reason := g.checkLeader(ctx, lockKey, resultKey, progressKey, cancelKey, &last)
+	reason := g.checkLeader(ctx, lockKey, resultKey, progressKey, cancelKey, "CCHAN", &last)
 	if reason != followerLeaderTimeout {
 		t.Fatalf("reason = %d, want followerLeaderTimeout(%d)", reason, followerLeaderTimeout)
 	}

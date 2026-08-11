@@ -123,7 +123,8 @@ func (g *DistributedGroup) Do(ctx context.Context, key string, fn StreamFn) (int
 		resultKey := "sf:result:" + key
 		channel := "sf:channel:" + key
 		progressKey := "sf:progress:" + key
-		cancelKey := "sf:cancel:" + key // 换主时写入，通知旧主停止
+		cancelKey := "sf:cancel:" + key      // 换主时写入，通知旧主停止(轮询兜底)
+		cancelChan := "sf:cancelchan:" + key // 换主时 Pub/Sub 推送取消(毫秒级生效)
 
 		// 2. 尝试成为主节点
 		acquired, err := g.tryAcquireLock(ctx, lockKey, nodeID)
@@ -138,12 +139,12 @@ func (g *DistributedGroup) Do(ctx context.Context, key string, fn StreamFn) (int
 		if acquired {
 			// 3. 我是主节点 → 执行 fn
 			g.record("leader_elected", true, key)
-			return g.runAsLeader(ctx, key, lockKey, resultKey, channel, progressKey, cancelKey, nodeID, fn)
+			return g.runAsLeader(ctx, key, lockKey, resultKey, channel, progressKey, cancelKey, cancelChan, nodeID, fn)
 		}
 
 		// 4. 我是从节点 → 等待结果
 		g.record("follower_waiting", true, key)
-		result, reason, err := g.runAsFollower(ctx, lockKey, resultKey, channel, progressKey, cancelKey)
+		result, reason, err := g.runAsFollower(ctx, lockKey, resultKey, channel, progressKey, cancelKey, cancelChan)
 		if err != nil {
 			return nil, err
 		}
@@ -164,7 +165,7 @@ func (g *DistributedGroup) Do(ctx context.Context, key string, fn StreamFn) (int
 // ============================================================
 
 func (g *DistributedGroup) runAsLeader(
-	ctx context.Context, key, lockKey, resultKey, channel, progressKey, cancelKey, nodeID string,
+	ctx context.Context, key, lockKey, resultKey, channel, progressKey, cancelKey, cancelChan, nodeID string,
 	fn StreamFn,
 ) (interface{}, error) {
 	execCtx, cancel := context.WithTimeout(ctx, g.maxExec)
@@ -176,7 +177,7 @@ func (g *DistributedGroup) runAsLeader(
 	go g.heartbeatLoop(hbCtx, lockKey, nodeID)
 
 	// 取消监听协程：被换主时 cancel execCtx，DeepSeek SDK 自动断开
-	go g.watchCancel(execCtx, cancelKey, cancel, key, nodeID)
+	go g.watchCancel(execCtx, cancelKey, cancelChan, cancel, key, nodeID)
 
 	// 清理上一次可能残留的进度数据和取消标记（换主场景）
 	g.redis.Del(execCtx, progressKey, cancelKey)
@@ -245,29 +246,50 @@ func (g *DistributedGroup) heartbeatLoop(ctx context.Context, lockKey, nodeID st
 	}
 }
 
-// watchCancel 监听取消标记，被换主时 cancel execCtx 停止 AI 调用
-// 只有 cancelKey 的 value 等于自己的 nodeID 才取消——防止新主误读旧主的取消信号
+// watchCancel 监听取消信号，被换主时 cancel execCtx 停止 AI 调用
+// 双通道（与从节点拿结果同理，推送为主、轮询兜底）:
+//   - Pub/Sub 推送: 从节点换主时 Publish 到 cancelChan, 毫秒级取消旧主
+//   - 轮询兜底: 每 5s 读 cancelKey, 覆盖 Pub/Sub 消息丢失场景
+//
+// 只有信号携带的 nodeID 等于自己才取消——防止新主误读旧主的取消信号
 // DeepSeek SDK 收到 ctx 取消会自动断开 SSE 连接，不浪费 token
-func (g *DistributedGroup) watchCancel(ctx context.Context, cancelKey string, cancel context.CancelFunc, key, nodeID string) {
-	ticker := time.NewTicker(5 * time.Second) // 每 5s 检查一次取消标记
+func (g *DistributedGroup) watchCancel(ctx context.Context, cancelKey, cancelChan string, cancel context.CancelFunc, key, nodeID string) {
+	ticker := time.NewTicker(5 * time.Second) // 轮询兜底间隔
 	defer ticker.Stop()
+
+	// 订阅取消推送通道
+	pubsub := g.redis.Subscribe(ctx, cancelChan)
+	defer pubsub.Close()
+	msgCh := pubsub.Channel()
+
+	cancelIfMatches := func(target string) bool {
+		if target != nodeID {
+			return false // 给别的主的取消信号，忽略
+		}
+		logrus.Warnf("[singleflight] 主节点收到取消信号，停止 AI 调用 key=%s", key)
+		cancel() // 取消 execCtx，DeepSeek SDK 自动断开
+		return true
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			// execCtx 结束（正常完成或超时），停止监听
 			return
+		case msg := <-msgCh:
+			// Pub/Sub 推送优先, 毫秒级生效
+			if cancelIfMatches(msg.Payload) {
+				return
+			}
 		case <-ticker.C:
+			// 轮询兜底: 推送丢失时 5s 内兜住
 			val, err := g.redis.Get(ctx, cancelKey).Result()
 			if err != nil {
 				continue // key 不存在或 Redis 出错
 			}
-			if val == nodeID {
-				logrus.Warnf("[singleflight] 主节点收到取消信号，停止 AI 调用 key=%s", key)
-				cancel() // 取消 execCtx，DeepSeek SDK 自动断开
+			if cancelIfMatches(val) {
 				return
 			}
-			// value 不等于自己的 nodeID → 这是给别的主的取消信号，忽略
 		}
 	}
 }
@@ -284,7 +306,7 @@ const (
 	followerCtxDone                             // 自己超时/取消
 )
 
-func (g *DistributedGroup) runAsFollower(ctx context.Context, lockKey, resultKey, channel, progressKey, cancelKey string) (interface{}, followerReason, error) {
+func (g *DistributedGroup) runAsFollower(ctx context.Context, lockKey, resultKey, channel, progressKey, cancelKey, cancelChan string) (interface{}, followerReason, error) {
 	pubsub := g.redis.Subscribe(ctx, channel)
 	defer pubsub.Close()
 	msgCh := pubsub.Channel()
@@ -314,7 +336,7 @@ func (g *DistributedGroup) runAsFollower(ctx context.Context, lockKey, resultKey
 
 		case <-ticker.C:
 			// 检查主节点状态
-			reason := g.checkLeader(ctx, lockKey, resultKey, progressKey, cancelKey, &lastProgress)
+			reason := g.checkLeader(ctx, lockKey, resultKey, progressKey, cancelKey, cancelChan, &lastProgress)
 			if reason != 0 { // 0 表示主节点正常，继续等
 				return nil, reason, nil
 			}
@@ -326,7 +348,7 @@ func (g *DistributedGroup) runAsFollower(ctx context.Context, lockKey, resultKey
 // 返回 0 = 主节点正常，继续等待
 // 返回 followerGotResult = 主节点已完成（兜底读到结果）
 // 返回 followerLeaderTimeout = 主节点卡死/超时
-func (g *DistributedGroup) checkLeader(ctx context.Context, lockKey, resultKey, progressKey, cancelKey string, lastProgress *string) followerReason {
+func (g *DistributedGroup) checkLeader(ctx context.Context, lockKey, resultKey, progressKey, cancelKey, cancelChan string, lastProgress *string) followerReason {
 	// 1. 检查锁是否还在
 	lockExists, err := g.redis.Exists(ctx, lockKey).Result()
 	if err != nil {
@@ -341,7 +363,7 @@ func (g *DistributedGroup) checkLeader(ctx context.Context, lockKey, resultKey, 
 		}
 		// 锁没了结果也没有，主节点超时了
 		// 此时拿不到旧主 nodeID，写空串——旧主的 execCtx 也会因超时退出
-		g.notifyCancel(ctx, cancelKey, "")
+		g.notifyCancel(ctx, cancelKey, cancelChan, "")
 		g.record("leader_timeout", false, "lock_expired")
 		logrus.Warnf("[singleflight] 主节点锁已消失，写入取消标记，准备换主")
 		return followerLeaderTimeout
@@ -358,7 +380,7 @@ func (g *DistributedGroup) checkLeader(ctx context.Context, lockKey, resultKey, 
 			return 0
 		}
 		// 后续检查 progressKey 仍不存在 → leader 长时间无输出，换主
-		g.notifyCancel(ctx, cancelKey, leaderNodeID)
+		g.notifyCancel(ctx, cancelKey, cancelChan, leaderNodeID)
 		g.record("leader_timeout", false, "progress_lost")
 		logrus.Warnf("[singleflight] 主节点进度信息丢失，写入取消标记，准备换主")
 		return followerLeaderTimeout
@@ -378,7 +400,7 @@ func (g *DistributedGroup) checkLeader(ctx context.Context, lockKey, resultKey, 
 	lastUpdateMs := parts[1]
 	stalledDuration := time.Since(time.UnixMilli(lastUpdateMs))
 	if stalledDuration > StallThreshold {
-		g.notifyCancel(ctx, cancelKey, leaderNodeID)
+		g.notifyCancel(ctx, cancelKey, cancelChan, leaderNodeID)
 		g.record("leader_timeout", false, "stalled")
 		logrus.Warnf("[singleflight] 主节点输出停滞 %v，超过阈值 %v，写入取消标记，准备换主",
 			stalledDuration, StallThreshold)
@@ -388,10 +410,14 @@ func (g *DistributedGroup) checkLeader(ctx context.Context, lockKey, resultKey, 
 	return 0
 }
 
-// notifyCancel 写入取消标记，通知旧主节点停止 AI 调用
-// targetNodeID 为旧主的 nodeID（锁的 value），watchCancel 只在 value 匹配自己时才 cancel
-func (g *DistributedGroup) notifyCancel(ctx context.Context, cancelKey, targetNodeID string) {
+// notifyCancel 通知旧主节点停止 AI 调用（双通道）
+// targetNodeID 为旧主的 nodeID（锁的 value），watchCancel 只在信号匹配自己时才 cancel
+//   - Set cancelKey: 轮询兜底通道
+//   - Publish cancelChan: Pub/Sub 推送通道, 毫秒级生效
+func (g *DistributedGroup) notifyCancel(ctx context.Context, cancelKey, cancelChan, targetNodeID string) {
 	g.redis.Set(ctx, cancelKey, targetNodeID, MaxExecTime)
+	// Pub/Sub 推送尽力而为, 消息丢失时由轮询兜底
+	g.redis.Publish(ctx, cancelChan, targetNodeID)
 }
 
 // splitProgress 解析 "totalBytes:timestampMs" 格式
