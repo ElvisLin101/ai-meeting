@@ -20,7 +20,7 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 - 路由: `api/routes/routes.go` 中 `setupAgentRoutes`。
 - Handler: `api/handlers/agent_handler.go`。
 - Service: `services/agent/agent_service.go`。
-- 场景枚举: `services/agent/agent_scene.go`（5 个 BusinessAgentScene + 候选名称）。
+- 场景枚举: `services/agent/agent_scene.go`（4 个 BusinessAgentScene + 候选名称）。
 - 启动缓存 + 场景解析器: `services/agent/agent_properties_loader.go`（sync.Map 内存缓存 + miss 查库 + ResolveRequired）。
 - 模型客户端: `clients/ai_model_client.go`（CallConfiguredAIChatStream, DeepSeek/OpenAI 兼容）。
 - MySQL 仓储: `repositories/mysql/agent_properties_repository.go`, `repositories/mysql/agent_file_asset_repository.go`。
@@ -45,13 +45,12 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 - Handler 设置 SSE 响应头（`Content-Type: text/event-stream`）。
 - Service `AgentChatSSE` 完整流程:
   1. 会话归属校验（`GetAgentConversationBySessionId`）。
-  2. 解析智能体配置（`AgentPropertiesLoader.GetByAgentID`，先查 sync.Map 缓存 miss 查库）。
-  3. 校验 apiKey/apiSecret/apiFlowId 非空。
-  4. 保存用户消息到 MongoDB（`SaveAgentMessage`）。
-  5. 加载历史消息 → 构建 `PromptMessage` 数组（system prompt + 历史对话 + 当前用户消息）。
-  6. 调用 `clients.CallConfiguredAIChatStream`（DeepSeek SSE 流式, aiID=0 走 config fallback），通过 `onChunk` 回调 `ctx.SSEvent("message", chunk)` 推送前端。
-  7. 保存 assistant 回复（`SaveAgentMessageWithDetail`，含 responseTime 和 errorMessage）。
-  8. 更新会话消息计数（`UpdateAgentConversationMessageCount`）。
+  2. 解析智能体配置（`AgentPropertiesLoader.GetByAgentID`，先查 sync.Map 缓存 miss 查库）——**仅用于场景绑定, 不再校验星辰凭证**(apiKey/apiSecret/apiFlowId 校验已移除)。
+  3. 保存用户消息到 MongoDB（`SaveAgentMessage`）。
+  4. 加载历史消息 → 构建 `PromptMessage` 数组（system prompt + 历史对话 + 当前用户消息）。
+  5. 调用 `clients.CallConfiguredAIChatStream`（DeepSeek SSE 流式, aiID=0 走 config fallback），通过 `onChunk` 回调 `ctx.SSEvent("message", chunk)` 推送前端。
+  6. 保存 assistant 回复（`SaveAgentMessageWithDetail`，含 responseTime 和 errorMessage）。
+  7. 更新会话消息计数（`UpdateAgentConversationMessageCount`）。
 - 出错时也保存一条错误 assistant 消息（content="Sorry, an error occurred..."，errorMessage=err.Error()）。
 - 最终发送 `ctx.SSEvent("end", "[DONE]")`。
 

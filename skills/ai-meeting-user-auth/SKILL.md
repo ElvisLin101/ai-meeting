@@ -31,14 +31,14 @@ description: 当需求涉及登录、注册、JWT、用户上下文、用户资�
 - 全局挂载在 `routes.SetupRouter`。
 - 缺少 Authorization header 或 Bearer 格式错误时, 当前行为是 `c.Next()`, 不会拦截。
 - token 有效时设置 `username` 和 `user_id`。
-- `RequireAuth` 已定义, 但当前路由没有使用。
+- `RequireAuth` 已定义（401 响应 `{"code":-101,"error":"Unauthorized"}`）, 但当前路由没有使用。
 
 `Login`
 
 - 路由: `POST /api/xunzhi/v1/users/login`。
 - `UserService.Login` 按 `username` 和 `status=1` 查询。
 - 当前密码是明文比较。
-- `GenerateToken` 当前调用传入 `string(rune(user.ID))`, 这不是十进制 ID 字符串。改动前要确认前端和面试模块如何使用 `user_id`。
+- `GenerateToken` 传入 `strconv.FormatUint(uint64(user.ID), 10)` 作为 `user_id`。
 
 `Register`
 
@@ -62,5 +62,4 @@ description: 当需求涉及登录、注册、JWT、用户上下文、用户资�
 
 - 密码明文存储和比较。
 - 中间件默认放行, 安全边界依赖各 handler 手动检查上下文。
-- `user_id` 的 token 写法可能不是预期 ID。
 - 管理员设置缺少操作者权限校验。

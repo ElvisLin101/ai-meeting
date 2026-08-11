@@ -55,6 +55,14 @@ AI-Meeting 是一个 Go 1.24.1 + Gin 后端。入口在 `main.go`, 路由集中�
 - 不要把示例返回值当成真实业务实现。当前面试流程、AI 调用、Agent 调用和上下文压缩里存在多个占位实现, 详见 `docs/agent-knowledge/references/placeholder-risk-register.md`。
 - Go 代码约束读 `docs/agent-knowledge/rules/go-backend.md`。
 
+## 统一错误码约定
+
+- 业务错误必须携带错误码: 使用 `pkg/ecode`（`ecode.New(code, msg)` 或 `ecode.Wrap(err, "...")` 保留包装链）。标准码 `-500/-400/-101/-403/-404`; 业务码定义在 `pkg/ecode/ecode_biz.go`（用户 -100x / 面试 -200x / AI -300x / Agent -400x）。
+- Handler 出口统一走 `api/resp` 的 `Respond(c, err, data)` / `Fail(c, code, msg)`, **禁止**散落 `c.JSON(status, gin.H{"error": ...})`。错误响应格式为 `{"code": N, "error": "msg"}`, HTTP 状态码由 `ecode.Error.HTTPStatus()` 映射。
+- 新增业务错误码时同步更新 `pkg/ecode/ecode_biz.go`（含 HTTP 状态注册表 `RegisterHTTPStatus`）。
+- 内部/系统错误可继续用裸 `errors.New`/`fmt.Errorf`, 由 `Respond` 兜底为 `-500` 并保留原文消息。
+- 应用入口 `main.go` 已做优雅停机（SIGTERM/SIGINT → `srv.Shutdown` → 指标落库 → 关连接）, 改动启动/退出流程时同步本约定。
+
 ## 知识防腐机制
 
 - 反向校验: 每次读 Skill 后都对照代码。若代码锚点不存在或行为不符, 先相信代码, 再修 Skill。

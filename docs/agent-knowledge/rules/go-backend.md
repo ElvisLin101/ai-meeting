@@ -9,6 +9,7 @@
 - Redis 当前仍在根 `repositories`, 通过 `repositories.RedisClient` 使用。
 - 外部 HTTP/API 调用放 `clients`, 不放在 service 或 repository。
 - 错误返回给调用方, 不在普通业务流程里 `panic`。
+- 统一错误码: 业务错误用 `pkg/ecode`（`ecode.New(code, msg)` / `ecode.Wrap`）, handler 出口统一走 `api/resp` 的 `Respond`/`Fail`, 错误响应 `{"code": N, "error": "msg"}`, 禁止散落 `c.JSON(status, gin.H{"error": ...})`。
 - 新增复杂函数时优先传 `context.Context`; 现有代码大量未传 context, 新增可逐步改善, 不做无关大重构。
 
 ## 数据和安全
