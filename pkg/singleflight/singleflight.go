@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
+	"github.com/sirupsen/logrus"
 )
 
 // ============================================================
@@ -24,12 +25,12 @@ import (
 // ============================================================
 
 const (
-	LockTTL         = 30 * time.Second  // 锁过期时间
-	Heartbeat       = 10 * time.Second  // 心跳续期间隔
-	MaxExecTime     = 120 * time.Second // 主节点最大执行时间
-	ResultTTL       = 5 * time.Minute   // 结果缓存时间
-	StallThreshold  = 30 * time.Second  // 输出停滞阈值：超过这么久没新内容则认为卡死
-	FollowerPoll    = 10 * time.Second  // 从节点检查间隔
+	LockTTL        = 30 * time.Second  // 锁过期时间
+	Heartbeat      = 10 * time.Second  // 心跳续期间隔
+	MaxExecTime    = 120 * time.Second // 主节点最大执行时间
+	ResultTTL      = 5 * time.Minute   // 结果缓存时间
+	StallThreshold = 30 * time.Second  // 输出停滞阈值：超过这么久没新内容则认为卡死
+	FollowerPoll   = 10 * time.Second  // 从节点检查间隔
 )
 
 // StreamWriter 主节点用它把 AI 流式输出进度写入 Redis 作为心跳。
@@ -110,7 +111,7 @@ func (g *DistributedGroup) Do(ctx context.Context, key string, fn StreamFn) (int
 	for {
 		// 1. Redis 不可用 → 降级为本地 singleflight
 		if !g.redisAvailable(ctx) {
-			fmt.Printf("[singleflight] Redis 不可用，降级为本地去重 key=%s\n", key)
+			logrus.Warnf("[singleflight] Redis 不可用，降级为本地去重 key=%s", key)
 			return g.local.Do(key, func() (interface{}, error) {
 				dummyWriter := &StreamWriter{}
 				return fn(ctx, dummyWriter)
@@ -127,7 +128,7 @@ func (g *DistributedGroup) Do(ctx context.Context, key string, fn StreamFn) (int
 		// 2. 尝试成为主节点
 		acquired, err := g.tryAcquireLock(ctx, lockKey, nodeID)
 		if err != nil {
-			fmt.Printf("[singleflight] Redis 操作失败，降级为本地去重 key=%s err=%v\n", key, err)
+			logrus.Warnf("[singleflight] Redis 操作失败，降级为本地去重 key=%s err=%v", key, err)
 			return g.local.Do(key, func() (interface{}, error) {
 				dummyWriter := &StreamWriter{}
 				return fn(ctx, dummyWriter)
@@ -187,7 +188,7 @@ func (g *DistributedGroup) runAsLeader(
 		progressKey: progressKey,
 	}
 
-	fmt.Printf("[singleflight] 主节点开始执行 key=%s nodeID=%s\n", key, nodeID)
+	logrus.Infof("[singleflight] 主节点开始执行 key=%s nodeID=%s", key, nodeID)
 
 	// 执行 fn（AI 流式调用，fn 内部会不断调 writer.Write）
 	result, err := fn(execCtx, writer)
@@ -214,7 +215,7 @@ func (g *DistributedGroup) runAsLeader(
 	// 释放锁
 	g.releaseLock(context.Background(), lockKey, nodeID)
 
-	fmt.Printf("[singleflight] 主节点执行完成 key=%s err=%v\n", key, err)
+	logrus.Infof("[singleflight] 主节点执行完成 key=%s err=%v", key, err)
 	g.record("leader_completed", err == nil, key)
 
 	if err != nil {
@@ -262,7 +263,7 @@ func (g *DistributedGroup) watchCancel(ctx context.Context, cancelKey string, ca
 				continue // key 不存在或 Redis 出错
 			}
 			if val == nodeID {
-				fmt.Printf("[singleflight] 主节点收到取消信号，停止 AI 调用 key=%s\n", key)
+				logrus.Warnf("[singleflight] 主节点收到取消信号，停止 AI 调用 key=%s", key)
 				cancel() // 取消 execCtx，DeepSeek SDK 自动断开
 				return
 			}
@@ -342,7 +343,7 @@ func (g *DistributedGroup) checkLeader(ctx context.Context, lockKey, resultKey, 
 		// 此时拿不到旧主 nodeID，写空串——旧主的 execCtx 也会因超时退出
 		g.notifyCancel(ctx, cancelKey, "")
 		g.record("leader_timeout", false, "lock_expired")
-		fmt.Printf("[singleflight] 主节点锁已消失，写入取消标记，准备换主\n")
+		logrus.Warnf("[singleflight] 主节点锁已消失，写入取消标记，准备换主")
 		return followerLeaderTimeout
 	}
 
@@ -359,7 +360,7 @@ func (g *DistributedGroup) checkLeader(ctx context.Context, lockKey, resultKey, 
 		// 后续检查 progressKey 仍不存在 → leader 长时间无输出，换主
 		g.notifyCancel(ctx, cancelKey, leaderNodeID)
 		g.record("leader_timeout", false, "progress_lost")
-		fmt.Printf("[singleflight] 主节点进度信息丢失，写入取消标记，准备换主\n")
+		logrus.Warnf("[singleflight] 主节点进度信息丢失，写入取消标记，准备换主")
 		return followerLeaderTimeout
 	}
 
@@ -379,7 +380,7 @@ func (g *DistributedGroup) checkLeader(ctx context.Context, lockKey, resultKey, 
 	if stalledDuration > StallThreshold {
 		g.notifyCancel(ctx, cancelKey, leaderNodeID)
 		g.record("leader_timeout", false, "stalled")
-		fmt.Printf("[singleflight] 主节点输出停滞 %v，超过阈值 %v，写入取消标记，准备换主\n",
+		logrus.Warnf("[singleflight] 主节点输出停滞 %v，超过阈值 %v，写入取消标记，准备换主",
 			stalledDuration, StallThreshold)
 		return followerLeaderTimeout
 	}

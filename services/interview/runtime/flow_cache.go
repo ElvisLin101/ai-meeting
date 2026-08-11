@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/go-redis/redis/v8"
+	"github.com/sirupsen/logrus"
 )
 
 // ============================================================
@@ -19,7 +20,8 @@ const flowCASMaxRetries = 5
 
 // flowCASUpdateScript CAS 乐观锁更新 flow
 // ARGV: [expectedVersion, status, currentIndex, currentQuestionNumber,
-//        totalQuestions, followUpCount, maxFollowUp, newVersion, ttlSeconds]
+//
+//	totalQuestions, followUpCount, maxFollowUp, newVersion, ttlSeconds]
 const flowCASUpdateScript = `
 local current = redis.call('HGET', KEYS[1], 'version')
 if current == false or tostring(current) ~= tostring(ARGV[1]) then
@@ -92,10 +94,6 @@ func (c *FlowCache) MutateFlow(ctx context.Context, sessionID string, mutator fu
 			return nil, fmt.Errorf("flow not found for session %s", sessionID)
 		}
 
-		// 调试: 直接从 Redis 读 raw version 对比
-		rawVersion, _ := c.rdb.HGet(ctx, key, "version").Result()
-		fmt.Printf("[flow_cache] MutateFlow attempt %d: parsed_version=%d, raw_version=%q\n", attempt+1, current.Version, rawVersion)
-
 		next, err := mutator(current)
 		if err != nil {
 			return nil, err
@@ -112,12 +110,11 @@ func (c *FlowCache) MutateFlow(ctx context.Context, sessionID string, mutator fu
 			return next, nil
 		}
 		// CAS 失败（版本冲突），退避后重试
-		fmt.Printf("[flow_cache] CAS failed (attempt %d), session=%s, expected_version=%d\n", attempt+1, sessionID, current.Version)
+		logrus.Debugf("[flow_cache] CAS failed (attempt %d), session=%s, expected_version=%d", attempt+1, sessionID, current.Version)
 		time.Sleep(time.Duration(20*(attempt+1)) * time.Millisecond)
 	}
 
 	// 重试用尽，报错——调用方必须知道 CAS 失败了
-	fmt.Printf("[flow_cache] CAS retries exhausted, session=%s\n", sessionID)
 	return nil, fmt.Errorf("flow CAS failed after %d retries, session=%s", flowCASMaxRetries, sessionID)
 }
 
@@ -134,15 +131,11 @@ func (c *FlowCache) casUpdate(ctx context.Context, key string, expectedVersion i
 		fmt.Sprintf("%d", state.Version),
 		fmt.Sprintf("%d", cacheTTLHours*3600),
 	}
-	fmt.Printf("[flow_cache] CAS update: key=%s, expectedVersion=%d, newVersion=%d, args=%v\n", key, expectedVersion, state.Version, args)
-
 	result, err := redis.NewScript(flowCASUpdateScript).Run(ctx, c.rdb, []string{key}, args...).Result()
 	if err != nil {
-		fmt.Printf("[flow_cache] CAS script error: %v\n", err)
 		return false, err
 	}
 	r, ok := result.(int64)
-	fmt.Printf("[flow_cache] CAS result: %v (type: %T)\n", result, result)
 	return ok && r == 1, nil
 }
 
@@ -155,12 +148,12 @@ func parseFlowState(m map[string]string) (*models.InterviewFlowState, error) {
 	version, _ := strconv.Atoi(m["version"])
 
 	return &models.InterviewFlowState{
-		Status:              models.InterviewFlowStatus(m["status"]),
-		CurrentIndex:        currentIndex,
+		Status:                models.InterviewFlowStatus(m["status"]),
+		CurrentIndex:          currentIndex,
 		CurrentQuestionNumber: m["currentQuestionNumber"],
-		TotalQuestions:      totalQuestions,
-		FollowUpCount:       followUpCount,
-		MaxFollowUp:         maxFollowUp,
-		Version:             version,
+		TotalQuestions:        totalQuestions,
+		FollowUpCount:         followUpCount,
+		MaxFollowUp:           maxFollowUp,
+		Version:               version,
 	}, nil
 }

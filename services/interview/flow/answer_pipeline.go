@@ -28,17 +28,17 @@ const questionLockTTL = 120 * time.Second
 
 // AnswerPipeline 答题流水线
 type AnswerPipeline struct {
-	rdb            *redis.Client
+	rdb              *redis.Client
 	flowStateMachine *FlowStateMachine
-	flowCache      *runtime.FlowCache
-	scoreCache     *runtime.ScoreCache
-	turnLogCache   *runtime.TurnLogCache
-	questionCache  *runtime.QuestionCache
-	snapshotSvc    *runtime.SnapshotService
-	turnRepairSvc  *TurnRepairService
-	evaluationSvc  *evaluation.EvaluationService
-	followUpSvc    *evaluation.FollowUpService
-	idempotencySvc *IdempotencyService
+	flowCache        *runtime.FlowCache
+	scoreCache       *runtime.ScoreCache
+	turnLogCache     *runtime.TurnLogCache
+	questionCache    *runtime.QuestionCache
+	snapshotSvc      *runtime.SnapshotService
+	turnRepairSvc    *TurnRepairService
+	evaluationSvc    *evaluation.EvaluationService
+	followUpSvc      *evaluation.FollowUpService
+	idempotencySvc   *IdempotencyService
 }
 
 // NewAnswerPipeline 创建答题流水线
@@ -322,10 +322,11 @@ func (p *AnswerPipeline) rollbackFlow(ctx context.Context, sessionID string, sna
 	p.idempotencySvc.ClearProcessing(ctx, sessionID, requestID)
 }
 
-// truncateForLog 截断文本用于日志
+// truncateForLog 截断文本用于日志（按 rune 截断，避免切坏 UTF-8 中文）
 func truncateForLog(text string, maxLen int) string {
-	if len(text) <= maxLen {
+	r := []rune(text)
+	if len(r) <= maxLen {
 		return text
 	}
-	return text[:maxLen]
+	return string(r[:maxLen])
 }
