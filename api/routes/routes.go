@@ -16,29 +16,39 @@ func SetupRouter() *gin.Engine {
 	r.StaticFile("/", "./static/index.html")
 
 	r.Use(middleware.CORSMiddleware())
+	// AuthMiddleware: 解析 JWT, 有效则注入 username/user_id; 缺失/无效不拦截——
+	// 公开接口(登录/注册等)需要放行, 受保护路由由 RequireAuth 在组内强制认证
 	r.Use(middleware.AuthMiddleware())
 
 	api := r.Group("/api/xunzhi/v1")
 
-	setupUserRoutes(api)
-	setupAgentRoutes(api)
-	setupAiRoutes(api)
-	setupInterviewRoutes(api)
-	setupMediaRoutes(api)
+	// 受保护路由组: 无有效 JWT 直接 401(补齐"缺失 token 默认放行"的安全缺口)
+	authed := api.Group("")
+	authed.Use(middleware.RequireAuth())
+
+	setupUserRoutes(api, authed)
+	setupAgentRoutes(authed)
+	setupAiRoutes(authed)
+	setupInterviewRoutes(authed)
+	setupMediaRoutes(authed)
 
 	return r
 }
 
-func setupUserRoutes(api *gin.RouterGroup) {
+func setupUserRoutes(api, authed *gin.RouterGroup) {
 	userHandler := handlers.NewUserHandler()
-	users := api.Group("/users")
 
-	users.POST("/login", userHandler.Login)
-	users.POST("/register", userHandler.Register)
+	// 公开接口(无需登录)
+	public := api.Group("/users")
+	public.POST("/login", userHandler.Login)
+	public.POST("/register", userHandler.Register)
+	public.GET("/check-login", userHandler.CheckLogin)
+	public.GET("/is-admin", userHandler.IsAdmin)
+	public.GET("/has-username", userHandler.HasUsername)
+
+	// 受保护接口(需要有效 JWT)
+	users := authed.Group("/users")
 	users.POST("/logout", userHandler.Logout)
-	users.GET("/check-login", userHandler.CheckLogin)
-	users.GET("/is-admin", userHandler.IsAdmin)
-	users.GET("/has-username", userHandler.HasUsername)
 	users.GET("/:username", userHandler.GetUserByUsername)
 	users.GET("/actual/:username", userHandler.GetUserByUsername)
 	users.PUT("", userHandler.Update)
@@ -46,12 +56,12 @@ func setupUserRoutes(api *gin.RouterGroup) {
 	users.GET("/page", userHandler.PageUsers)
 }
 
-func setupAgentRoutes(api *gin.RouterGroup) {
+func setupAgentRoutes(authed *gin.RouterGroup) {
 	agentController := handlers.NewAgentController()
 	agentFileController := handlers.NewAgentFileController()
 	agentPropertiesController := handlers.NewAgentPropertiesController()
 
-	agents := api.Group("/agents")
+	agents := authed.Group("/agents")
 	agents.POST("/sessions", agentController.CreateSession)
 	agents.POST("/sessions/:sessionId/chat", agentController.Chat)
 	agents.GET("/conversations", agentController.PageConversations)
@@ -59,10 +69,10 @@ func setupAgentRoutes(api *gin.RouterGroup) {
 	agents.GET("/messages/history", agentController.PageHistoryMessages)
 	agents.PUT("/conversations/:sessionId/end", agentController.EndConversation)
 
-	agentFiles := api.Group("/agents/files")
+	agentFiles := authed.Group("/agents/files")
 	agentFiles.POST("/upload", agentFileController.Upload)
 
-	agentProperties := api.Group("/agent-properties")
+	agentProperties := authed.Group("/agent-properties")
 	agentProperties.POST("", agentPropertiesController.Create)
 	agentProperties.DELETE("/:id", agentPropertiesController.Delete)
 	agentProperties.PUT("", agentPropertiesController.Update)
@@ -70,12 +80,12 @@ func setupAgentRoutes(api *gin.RouterGroup) {
 	agentProperties.GET("", agentPropertiesController.GetByPage)
 }
 
-func setupAiRoutes(api *gin.RouterGroup) {
+func setupAiRoutes(authed *gin.RouterGroup) {
 	aiConversationController := handlers.NewAiConversationController()
 	aiMessageController := handlers.NewAiMessageController()
 	aiPropertiesController := handlers.NewAiPropertiesController()
 
-	aiConversations := api.Group("/ai/conversations")
+	aiConversations := authed.Group("/ai/conversations")
 	aiConversations.POST("", aiConversationController.CreateConversation)
 	aiConversations.GET("", aiConversationController.PageConversations)
 	aiConversations.PUT("/:sessionId", aiConversationController.UpdateConversation)
@@ -83,7 +93,7 @@ func setupAiRoutes(api *gin.RouterGroup) {
 	aiConversations.DELETE("/:sessionId", aiConversationController.DeleteConversation)
 	aiConversations.GET("/:sessionId", aiConversationController.GetConversationById)
 
-	aiMessages := api.Group("/ai")
+	aiMessages := authed.Group("/ai")
 	aiMessages.POST("/sessions/:sessionId/chat", aiMessageController.Chat)
 	aiMessages.POST("/sessions/:sessionId/chat/stream", aiMessageController.ChatStream)
 	aiMessages.GET("/history/:sessionId", aiMessageController.GetConversationHistory)
@@ -91,7 +101,7 @@ func setupAiRoutes(api *gin.RouterGroup) {
 	aiMessages.GET("/memory/threshold", aiMessageController.GetMemoryThreshold)
 	aiMessages.PUT("/memory/threshold", aiMessageController.SetMemoryThreshold)
 
-	aiProperties := api.Group("/ai-properties")
+	aiProperties := authed.Group("/ai-properties")
 	aiProperties.GET("/options", aiPropertiesController.GetAvailableAiModels)
 	aiProperties.GET("/presets", aiPropertiesController.GetPresetModels)
 	aiProperties.POST("/preset", aiPropertiesController.CreateFromPreset)
@@ -104,12 +114,12 @@ func setupAiRoutes(api *gin.RouterGroup) {
 	aiProperties.PUT("/:id/status", aiPropertiesController.ToggleAiPropertiesStatus)
 }
 
-func setupInterviewRoutes(api *gin.RouterGroup) {
+func setupInterviewRoutes(authed *gin.RouterGroup) {
 	sessionController := handlers.NewInterviewSessionController()
 	recordController := handlers.NewInterviewRecordController()
 	resumeController := handlers.NewInterviewResumeController()
 
-	interview := api.Group("/interview")
+	interview := authed.Group("/interview")
 
 	interview.POST("/sessions", sessionController.CreateSession)
 	interview.GET("/conversations", sessionController.PageConversations)
@@ -138,16 +148,16 @@ func setupInterviewRoutes(api *gin.RouterGroup) {
 	interview.GET("/sessions/:sessionId/resume/preview", resumeController.PreviewResume)
 }
 
-func setupMediaRoutes(api *gin.RouterGroup) {
+func setupMediaRoutes(authed *gin.RouterGroup) {
 	ttsController := handlers.NewXunfeiTtsController()
 	wsController := handlers.NewWebSocketController()
 
-	xunfeiTts := api.Group("/xunfei/tts")
+	xunfeiTts := authed.Group("/xunfei/tts")
 	xunfeiTts.POST("/tasks", ttsController.CreateTask)
 	xunfeiTts.GET("/tasks/:taskId", ttsController.QueryTask)
 	xunfeiTts.POST("/synthesize", ttsController.SynthesizeAndWait)
 
-	websocket := api.Group("/websocket")
+	websocket := authed.Group("/websocket")
 	websocket.GET("/user/:userId/status", wsController.CheckUserStatus)
 	websocket.POST("/send-message", wsController.SendMessage)
 	websocket.POST("/notification/:userId", wsController.SendNotification)

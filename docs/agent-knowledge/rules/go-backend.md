@@ -16,6 +16,7 @@
 
 - 用户隔离查询必须带 `username` 或 `user_id`, 不能只按 `session_id` 查询敏感数据。
 - 认证相关改动必须同时检查 `api/middleware/auth.go` 和具体 handler 的上下文键读取方式。
+- 受保护路由统一挂 `RequireAuth`(`routes.SetupRouter` 的 `authed` 组): **新增接口默认放受保护组**, 仅登录/注册/check-login/is-admin/has-username 放公开组。
 - 密码已 bcrypt 哈希存储与比较（`services/user/user_service.go: verifyPassword`, 旧明文登录成功自动迁移）; AI/API 密钥仍直接存储在表字段中, 修复时同步更新 user-auth 和 ai Skill。
 - 上传文件已做大小限制(10MB, `http.MaxBytesReader`)与 UUID 重命名防路径穿越（`api/handlers/agent_handler.go`/`api/handlers/interview_handler.go`）; 新增上传接口必须同样处理, 并校验类型(magic bytes)。
 

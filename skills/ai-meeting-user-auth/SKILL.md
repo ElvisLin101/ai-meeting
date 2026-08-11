@@ -28,10 +28,10 @@ description: 当需求涉及登录、注册、JWT、用户上下文、用户资�
 
 `AuthMiddleware`
 
-- 全局挂载在 `routes.SetupRouter`。
-- 缺少 Authorization header 或 Bearer 格式错误时, 当前行为是 `c.Next()`, 不会拦截。
+- 全局挂载在 `routes.SetupRouter`, 只做 JWT 解析(有效则设置 `username`/`user_id`), 缺失/无效不拦截——公开接口需要放行。
+- **受保护路由已挂 `RequireAuth`**(见 `routes.SetupRouter` 的 `authed` 组): Agent/AI/Interview/Media 全部 + 用户模块的 logout/资料/管理员/分页, 无有效 JWT 直接 401。
 - token 有效时设置 `username` 和 `user_id`。
-- `RequireAuth` 已定义（401 响应 `{"code":-101,"error":"Unauthorized"}`）, 但当前路由没有使用。
+- `RequireAuth` 检查 `username`, 401 响应 `{"code":-101,"error":"Unauthorized"}`。
 
 `Login`
 
@@ -54,12 +54,12 @@ description: 当需求涉及登录、注册、JWT、用户上下文、用户资�
 ## 修改指南
 
 - 改 JWT claim 时, 同步检查 Agent/AI 使用 `username` 的地方和 Interview 使用 `user_id` 的地方。
-- 给接口增加强认证时, 可以接入 `RequireAuth`, 但要保留登录/注册/公开接口的放行策略。
+- 给接口增加强认证时, 可以接入 `RequireAuth`; 新增接口默认放受保护组(`authed`), 仅登录/注册/check-login/is-admin/has-username 放公开组。
 - 引入密码哈希时, 需要兼容旧密码或提供迁移策略。
 - 修改用户模型字段时, 更新 `data-models.md`。
 
 ## 当前风险
 
 - ~~密码明文存储和比较。~~ **已完成: bcrypt 哈希 + 旧明文兼容迁移。**
-- 中间件默认放行, 安全边界依赖各 handler 手动检查上下文。
+- ~~中间件默认放行, 安全边界依赖各 handler 手动检查上下文。~~ **已完成: 受保护路由挂 `RequireAuth` 强制认证(公开接口除外)。**
 - ~~管理员设置缺少操作者权限校验。~~ **已完成: `AddAdmin` 校验操作者为管理员。**

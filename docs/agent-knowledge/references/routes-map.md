@@ -2,21 +2,23 @@
 
 基础前缀: `/api/xunzhi/v1`
 
+认证: `AuthMiddleware` 全局解析 JWT(有效则注入 `username`/`user_id`); 除下表标注「公开」的接口外, 其余全部挂在 `RequireAuth` 受保护组(`api/routes/routes.go` 的 `authed`), 无有效 JWT 直接 401。
+
 ## User
 
-| Method | Path | Handler | Service |
-| --- | --- | --- | --- |
-| POST | `/users/login` | `UserHandler.Login` | `UserService.Login` |
-| POST | `/users/register` | `UserHandler.Register` | `UserService.Register` |
-| POST | `/users/logout` | `UserHandler.Logout` | none |
-| GET | `/users/check-login` | `UserHandler.CheckLogin` | none |
-| GET | `/users/is-admin` | `UserHandler.IsAdmin` | `UserService.IsAdmin` |
-| GET | `/users/has-username` | `UserHandler.HasUsername` | `UserService.HasUsername` |
-| GET | `/users/:username` | `UserHandler.GetUserByUsername` | `UserService.GetUserByUsername` |
-| GET | `/users/actual/:username` | `UserHandler.GetUserByUsername` | `UserService.GetUserByUsername` |
-| PUT | `/users` | `UserHandler.Update` | `UserService.Update` |
-| POST | `/users/admin` | `UserHandler.AddAdmin` | `UserService.SetAdmin` |
-| GET | `/users/page` | `UserHandler.PageUsers` | `UserService.PageUsers` |
+| Method | Path | Handler | Service | 认证 |
+| --- | --- | --- | --- | --- |
+| POST | `/users/login` | `UserHandler.Login` | `UserService.Login` | 公开 |
+| POST | `/users/register` | `UserHandler.Register` | `UserService.Register` | 公开 |
+| POST | `/users/logout` | `UserHandler.Logout` | none | 受保护 |
+| GET | `/users/check-login` | `UserHandler.CheckLogin` | none | 公开 |
+| GET | `/users/is-admin` | `UserHandler.IsAdmin` | `UserService.IsAdmin` | 公开 |
+| GET | `/users/has-username` | `UserHandler.HasUsername` | `UserService.HasUsername` | 公开 |
+| GET | `/users/:username` | `UserHandler.GetUserByUsername` | `UserService.GetUserByUsername` | 受保护 |
+| GET | `/users/actual/:username` | `UserHandler.GetUserByUsername` | `UserService.GetUserByUsername` | 受保护 |
+| PUT | `/users` | `UserHandler.Update` | `UserService.Update` | 受保护 |
+| POST | `/users/admin` | `UserHandler.AddAdmin` | `UserService.SetAdmin` | 受保护 |
+| GET | `/users/page` | `UserHandler.PageUsers` | `UserService.PageUsers` | 受保护 |
 
 ## Agent
 

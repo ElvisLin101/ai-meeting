@@ -77,8 +77,8 @@ AI 侧有运行时压缩阈值接口:
 
 当前实现:
 
-- 使用自定义 JWT middleware。
-- token 无效或缺失时中间件默认放行，依赖 handler 手动检查。
+- 使用自定义 JWT middleware（`AuthMiddleware` 只解析, `RequireAuth` 强制认证）。
+- 受保护路由已挂 `RequireAuth`（Agent/AI/Interview/Media 全部 + 用户模块的 logout/资料/管理员/分页）; 公开接口仅 login/register/check-login/is-admin/has-username。
 - 密码已 bcrypt 哈希存储与比较（旧明文登录成功自动迁移, `services/user/user_service.go: verifyPassword`）。
 - `GenerateToken` 使用 `strconv.FormatUint(uint64(user.ID), 10)` 生成十进制 `user_id`（已修复）。
 - 管理员设置已校验操作者为管理员（`AddAdmin` → `-403`）。
@@ -87,7 +87,7 @@ AI 侧有运行时压缩阈值接口:
 
 待办:
 
-- P0: 引入强制认证分组或 `RequireAuth`（`user_id` 十进制写法已修复; 密码哈希与管理员权限校验已完成）。
+- ~~P0: 引入强制认证分组或 `RequireAuth`~~ **已完成: 受保护路由强制认证; 密码哈希与管理权限校验也已完成。**
 - P1: 抽象 conversation ownership service。
 - P2: WebSocket 鉴权。
 
