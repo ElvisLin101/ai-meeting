@@ -3,12 +3,12 @@ package flow
 import (
 	"ai-meeting/dto"
 	"ai-meeting/models"
+	"ai-meeting/pkg/ecode"
 	"ai-meeting/pkg/lock"
 	"ai-meeting/services/interview/evaluation"
 	"ai-meeting/services/interview/runtime"
 	"ai-meeting/services/metric"
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -81,7 +81,7 @@ func (p *AnswerPipeline) Execute(ctx context.Context, sessionID string, req dto.
 	// 2. 幂等检查
 	tryStart, err := p.idempotencySvc.TryStart(ctx, sessionID, requestID)
 	if err != nil {
-		return nil, fmt.Errorf("idempotency check failed: %w", err)
+		return nil, ecode.Wrap(err, "idempotency check failed")
 	}
 	switch tryStart.Status {
 	case IdempotencySucceeded:
@@ -89,7 +89,7 @@ func (p *AnswerPipeline) Execute(ctx context.Context, sessionID string, req dto.
 		return tryStart.Response, nil
 	case IdempotencyProcessing:
 		metric.GetMetricService().Record(models.MetricLog{Module: "idempotency", Event: "processing_blocked", Success: false, SessionID: sessionID})
-		return nil, errors.New("该请求正在处理中，请稍后重试")
+		return nil, ecode.New(ecode.ErrIdempotencyProcessing, "该请求正在处理中，请稍后重试")
 	}
 
 	idempotencyStarted := true
@@ -99,15 +99,15 @@ func (p *AnswerPipeline) Execute(ctx context.Context, sessionID string, req dto.
 	flow, err := p.snapshotSvc.EnsureRuntime(ctx, sessionID)
 	if err != nil {
 		p.idempotencySvc.ClearProcessing(ctx, sessionID, requestID)
-		return nil, fmt.Errorf("ensureRuntime 失败: %w", err)
+		return nil, ecode.Wrap(err, "ensureRuntime 失败")
 	}
 	if flow == nil {
 		p.idempotencySvc.ClearProcessing(ctx, sessionID, requestID)
-		return nil, errors.New("面试流程未初始化，请先出题")
+		return nil, ecode.New(ecode.ErrInterviewNotInitialized, "面试流程未初始化，请先出题")
 	}
 	if flow.IsCompleted() {
 		p.idempotencySvc.ClearProcessing(ctx, sessionID, requestID)
-		return nil, errors.New("面试已结束")
+		return nil, ecode.New(ecode.ErrInterviewCompleted, "面试已结束")
 	}
 
 	// 4. 题级锁
@@ -115,12 +115,12 @@ func (p *AnswerPipeline) Execute(ctx context.Context, sessionID string, req dto.
 	questionLock, err := lock.Acquire(ctx, p.rdb, lockKey, questionLockTTL)
 	if err != nil {
 		p.idempotencySvc.ClearProcessing(ctx, sessionID, requestID)
-		return nil, fmt.Errorf("获取题级锁失败: %w", err)
+		return nil, ecode.Wrap(err, "获取题级锁失败")
 	}
 	if questionLock == nil {
 		metric.GetMetricService().Record(models.MetricLog{Module: "lock", Event: "question_lock_failed", Success: false, SessionID: sessionID})
 		p.idempotencySvc.ClearProcessing(ctx, sessionID, requestID)
-		return nil, errors.New("当前题目正在被处理，请稍后重试")
+		return nil, ecode.New(ecode.ErrQuestionLocked, "当前题目正在被处理，请稍后重试")
 	}
 	metric.GetMetricService().Record(models.MetricLog{Module: "lock", Event: "question_lock_acquired", Success: true, SessionID: sessionID})
 	defer questionLock.Release(ctx)
@@ -129,17 +129,17 @@ func (p *AnswerPipeline) Execute(ctx context.Context, sessionID string, req dto.
 	flow, err = p.flowStateMachine.Current(ctx, sessionID)
 	if err != nil {
 		p.idempotencySvc.ClearProcessing(ctx, sessionID, requestID)
-		return nil, fmt.Errorf("锁后重读流程状态失败: %w", err)
+		return nil, ecode.Wrap(err, "锁后重读流程状态失败")
 	}
 	if flow.CurrentQuestionNumber != req.QuestionNumber {
 		p.idempotencySvc.ClearProcessing(ctx, sessionID, requestID)
-		return nil, fmt.Errorf("题号已过期，当前题号为 %s", flow.CurrentQuestionNumber)
+		return nil, ecode.New(ecode.ErrQuestionExpired, fmt.Sprintf("题号已过期，当前题号为 %s", flow.CurrentQuestionNumber))
 	}
 
 	// 6. 评分
 	if _, err := p.flowStateMachine.MoveToEvaluating(ctx, sessionID); err != nil {
 		p.idempotencySvc.ClearProcessing(ctx, sessionID, requestID)
-		return nil, fmt.Errorf("转入评分态失败: %w", err)
+		return nil, ecode.Wrap(err, "转入评分态失败")
 	}
 
 	// 从 Redis 读取题面和简历上下文
@@ -155,7 +155,7 @@ func (p *AnswerPipeline) Execute(ctx context.Context, sessionID string, req dto.
 	evalResult, err := p.evaluationSvc.EvaluateAnswer(ctx, questionContent, req.AnswerContent, resumeContext)
 	if err != nil {
 		p.idempotencySvc.ClearProcessing(ctx, sessionID, requestID)
-		return nil, fmt.Errorf("AI 评分失败: %w", err)
+		return nil, ecode.Wrap(err, "AI 评分失败")
 	}
 
 	// 7. 推进 flow
@@ -186,7 +186,7 @@ func (p *AnswerPipeline) Execute(ctx context.Context, sessionID string, req dto.
 			nextQuestion = followUpResult.Question
 			if _, err := p.flowStateMachine.StartFollowUpQuestion(ctx, sessionID, nextQuestionNumber); err != nil {
 				p.rollbackFlow(ctx, sessionID, flowSnapshot, requestID)
-				return nil, fmt.Errorf("开始追问失败: %w", err)
+				return nil, ecode.Wrap(err, "开始追问失败")
 			}
 			// 追问题写入 Redis（否则下次读题面会 miss）
 			if err := p.questionCache.SaveFollowUpQuestion(ctx, sessionID, nextQuestionNumber, nextQuestion); err != nil {
@@ -196,7 +196,7 @@ func (p *AnswerPipeline) Execute(ctx context.Context, sessionID string, req dto.
 			if !isFollowUp {
 				if _, _, _, err := p.scoreCache.AddScore(ctx, sessionID, evalResult.Score); err != nil {
 					p.rollbackFlow(ctx, sessionID, flowSnapshot, requestID)
-					return nil, fmt.Errorf("分数提交失败: %w", err)
+					return nil, ecode.Wrap(err, "分数提交失败")
 				}
 			}
 		} else {
@@ -291,7 +291,7 @@ func (p *AnswerPipeline) advanceMainQuestion(ctx context.Context, sessionID stri
 	nextFlow, err := p.flowStateMachine.AdvanceMainQuestion(ctx, sessionID)
 	if err != nil {
 		p.rollbackFlow(ctx, sessionID, flowSnapshot, requestID)
-		return "", "", false, fmt.Errorf("推进主问题失败: %w", err)
+		return "", "", false, ecode.Wrap(err, "推进主问题失败")
 	}
 
 	// 计分: 主问题入账, 追问不计分
@@ -299,7 +299,7 @@ func (p *AnswerPipeline) advanceMainQuestion(ctx context.Context, sessionID stri
 		if _, _, _, err := p.scoreCache.AddScore(ctx, sessionID, score); err != nil {
 			// 分数提交失败 → 回滚 flow
 			p.rollbackFlow(ctx, sessionID, flowSnapshot, requestID)
-			return "", "", false, fmt.Errorf("分数提交失败: %w", err)
+			return "", "", false, ecode.Wrap(err, "分数提交失败")
 		}
 	}
 

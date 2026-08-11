@@ -1,10 +1,11 @@
 package handlers
 
 import (
+	respx "ai-meeting/api/resp"
 	"ai-meeting/dto"
 	"ai-meeting/models"
+	"ai-meeting/pkg/ecode"
 	agent "ai-meeting/services/agent"
-	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -26,13 +27,13 @@ func NewAgentController() *AgentController {
 func (c *AgentController) CreateSession(ctx *gin.Context) {
 	var req dto.AgentSessionCreateReqDTO
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respx.Fail(ctx, ecode.RequestErr, err.Error())
 		return
 	}
 
 	username, exists := ctx.Get("username")
 	if !exists || username == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
@@ -42,24 +43,24 @@ func (c *AgentController) CreateSession(ctx *gin.Context) {
 		req.FirstMessage,
 	)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, result)
+	respx.Respond(ctx, nil, result)
 }
 
 func (c *AgentController) Chat(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
 	var req dto.UserMessageReqDTO
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respx.Fail(ctx, ecode.RequestErr, err.Error())
 		return
 	}
 
 	username, exists := ctx.Get("username")
 	if !exists || username == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
@@ -90,19 +91,19 @@ func (c *AgentController) Chat(ctx *gin.Context) {
 func (c *AgentController) PageConversations(ctx *gin.Context) {
 	var req dto.AgentConversationPageReqDTO
 	if err := ctx.ShouldBindQuery(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respx.Fail(ctx, ecode.RequestErr, err.Error())
 		return
 	}
 
 	username, exists := ctx.Get("username")
 	if !exists || username == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	conversations, total, err := c.agentConversationService.PageConversations(username.(string), req)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
@@ -117,7 +118,7 @@ func (c *AgentController) PageConversations(ctx *gin.Context) {
 		})
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{
+	respx.Respond(ctx, nil, gin.H{
 		"data":  resp,
 		"total": total,
 	})
@@ -127,13 +128,13 @@ func (c *AgentController) GetConversationHistory(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
 	username, exists := ctx.Get("username")
 	if !exists || username == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	messages, err := c.agentMessageService.GetConversationHistory(sessionID, username.(string))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
@@ -142,7 +143,7 @@ func (c *AgentController) GetConversationHistory(ctx *gin.Context) {
 		resp = append(resp, toAgentMessageHistoryResp(msg))
 	}
 
-	ctx.JSON(http.StatusOK, resp)
+	respx.Respond(ctx, nil, resp)
 }
 
 func (c *AgentController) PageHistoryMessages(ctx *gin.Context) {
@@ -152,7 +153,7 @@ func (c *AgentController) PageHistoryMessages(ctx *gin.Context) {
 
 	username, exists := ctx.Get("username")
 	if !exists || username == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
@@ -161,7 +162,7 @@ func (c *AgentController) PageHistoryMessages(ctx *gin.Context) {
 
 	messages, total, err := c.agentMessageService.PageHistoryMessages(sessionID, page, pageSize, username.(string))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
@@ -170,7 +171,7 @@ func (c *AgentController) PageHistoryMessages(ctx *gin.Context) {
 		resp = append(resp, toAgentMessageHistoryResp(msg))
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{
+	respx.Respond(ctx, nil, gin.H{
 		"data":  resp,
 		"total": total,
 	})
@@ -180,16 +181,16 @@ func (c *AgentController) EndConversation(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
 	username, exists := ctx.Get("username")
 	if !exists || username == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	if err := c.agentConversationService.EndConversation(sessionID, username.(string)); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"message": "Conversation ended"})
+	respx.Respond(ctx, nil, gin.H{"message": "Conversation ended"})
 }
 
 func toAgentMessageHistoryResp(msg models.AgentMessage) dto.AgentMessageHistoryRespDTO {
@@ -221,29 +222,29 @@ func (c *AgentFileController) Upload(ctx *gin.Context) {
 	bizType := ctx.PostForm("bizType")
 	file, err := ctx.FormFile("file")
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "File is required"})
+		respx.Fail(ctx, ecode.RequestErr, "File is required")
 		return
 	}
 
 	username, exists := ctx.Get("username")
 	if !exists || username == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	savePath := "./uploads/" + file.Filename
 	if err := ctx.SaveUploadedFile(file, savePath); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
 	result, err := c.fileAssetService.UploadAndPersist(sessionID, bizType, username.(string), file.Filename, savePath, file.Size)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, result)
+	respx.Respond(ctx, nil, result)
 }
 
 type AgentPropertiesController struct {
@@ -259,57 +260,57 @@ func NewAgentPropertiesController() *AgentPropertiesController {
 func (c *AgentPropertiesController) Create(ctx *gin.Context) {
 	var req dto.AgentPropertiesReqDTO
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respx.Fail(ctx, ecode.RequestErr, err.Error())
 		return
 	}
 
 	if err := c.propertiesService.Create(req); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"message": "Create success"})
+	respx.Respond(ctx, nil, gin.H{"message": "Create success"})
 }
 
 func (c *AgentPropertiesController) Delete(ctx *gin.Context) {
 	id, err := strconv.ParseUint(ctx.Param("id"), 10, 64)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID"})
+		respx.Fail(ctx, ecode.RequestErr, "Invalid ID")
 		return
 	}
 
 	if err := c.propertiesService.Delete(uint(id)); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"message": "Delete success"})
+	respx.Respond(ctx, nil, gin.H{"message": "Delete success"})
 }
 
 func (c *AgentPropertiesController) Update(ctx *gin.Context) {
 	var req dto.AgentPropertiesReqDTO
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respx.Fail(ctx, ecode.RequestErr, err.Error())
 		return
 	}
 
 	if err := c.propertiesService.Update(req); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"message": "Update success"})
+	respx.Respond(ctx, nil, gin.H{"message": "Update success"})
 }
 
 func (c *AgentPropertiesController) GetByName(ctx *gin.Context) {
 	name := ctx.Query("name")
 	prop, err := c.propertiesService.GetByName(name)
 	if err != nil {
-		ctx.JSON(http.StatusNotFound, gin.H{"error": "Not found"})
+		respx.Fail(ctx, ecode.NotExist, "Not found")
 		return
 	}
 
-	ctx.JSON(http.StatusOK, dto.AgentPropertiesRespDTO{
+	respx.Respond(ctx, nil, dto.AgentPropertiesRespDTO{
 		ID:          prop.ID,
 		Name:        prop.Name,
 		Description: prop.Description,
@@ -322,13 +323,13 @@ func (c *AgentPropertiesController) GetByName(ctx *gin.Context) {
 func (c *AgentPropertiesController) GetByPage(ctx *gin.Context) {
 	var req dto.AgentPropertiesReqDTO
 	if err := ctx.ShouldBindQuery(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respx.Fail(ctx, ecode.RequestErr, err.Error())
 		return
 	}
 
 	props, total, err := c.propertiesService.GetByPage(req)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
@@ -344,7 +345,7 @@ func (c *AgentPropertiesController) GetByPage(ctx *gin.Context) {
 		})
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{
+	respx.Respond(ctx, nil, gin.H{
 		"data":  resp,
 		"total": total,
 	})

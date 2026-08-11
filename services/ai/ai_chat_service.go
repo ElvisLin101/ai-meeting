@@ -4,6 +4,7 @@ import (
 	"ai-meeting/clients"
 	"ai-meeting/dto"
 	"ai-meeting/models"
+	"ai-meeting/pkg/ecode"
 	mongorepo "ai-meeting/repositories/mongo"
 	"context"
 	"errors"
@@ -11,11 +12,6 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
-)
-
-var (
-	ErrAiConversationNotFound = errors.New("ai conversation not found")
-	ErrEmptyAiMessageContent  = errors.New("ai message content is required")
 )
 
 // AiChatStreamChunk 表示流式聊天返回的单个数据块
@@ -84,13 +80,13 @@ func (s *AiMessageService) ChatStream(ctx context.Context, sessionID, userID, co
 func (s *AiMessageService) prepareAiChat(ctx context.Context, sessionID, userID, content string) (*aiChatRequestContext, string, error) {
 	content = strings.TrimSpace(content)
 	if content == "" {
-		return nil, "", ErrEmptyAiMessageContent
+		return nil, "", ecode.New(ecode.ErrEmptyAiMessageContent, "消息内容不能为空")
 	}
 
 	conversation, err := GetAiConversationService().GetConversationBySessionId(sessionID, userID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, "", ErrAiConversationNotFound
+			return nil, "", ecode.New(ecode.ErrAiConversationNotFound, "会话不存在或无权限")
 		}
 		return nil, "", err
 	}

@@ -2,10 +2,10 @@ package evaluation
 
 import (
 	"ai-meeting/clients"
+	"ai-meeting/pkg/ecode"
 	"ai-meeting/services/metric"
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 )
@@ -58,12 +58,12 @@ func (s *FollowUpService) GenerateFollowUp(
 	if parseErr != nil {
 		result, err := s.callAndParse(ctx, messages, true)
 		if err != nil {
-			return nil, fmt.Errorf("追问解析失败(重试后仍失败): %w", parseErr)
+			return nil, ecode.Wrap(parseErr, "追问解析失败(重试后仍失败)")
 		}
 		return result, nil
 	}
 
-	return nil, errors.New("追问解析失败")
+	return nil, ecode.New(ecode.ErrFollowUpParse, "追问解析失败")
 }
 
 // callAndParse 调 AI + 解析 + schema 校验 + 异步指标埋点

@@ -2,9 +2,10 @@ package handlers
 
 import (
 	"ai-meeting/api/middleware"
+	"ai-meeting/api/resp"
 	"ai-meeting/dto"
+	"ai-meeting/pkg/ecode"
 	"ai-meeting/services/user"
-	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -24,25 +25,25 @@ func NewUserHandler() *UserHandler {
 func (h *UserHandler) Login(c *gin.Context) {
 	var req dto.UserLoginReqDTO
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		resp.Fail(c, ecode.RequestErr, err.Error())
 		return
 	}
 
 	user, err := h.userService.Login(req)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		resp.Respond(c, err, nil)
 		return
 	}
 
 	token, err := middleware.GenerateToken(user.Username, strconv.FormatUint(uint64(user.ID), 10))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
+		resp.Fail(c, ecode.ServerErr, "Failed to generate token")
 		return
 	}
 
 	isAdmin, _ := h.userService.IsAdmin(user.Username)
 
-	c.JSON(http.StatusOK, gin.H{
+	resp.Respond(c, nil, gin.H{
 		"token":    token,
 		"username": user.Username,
 		"isAdmin":  isAdmin,
@@ -52,27 +53,27 @@ func (h *UserHandler) Login(c *gin.Context) {
 func (h *UserHandler) Register(c *gin.Context) {
 	var req dto.UserRegisterReqDTO
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		resp.Fail(c, ecode.RequestErr, err.Error())
 		return
 	}
 
 	if err := h.userService.Register(req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		resp.Respond(c, err, nil)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Register success"})
+	resp.Respond(c, nil, gin.H{"message": "Register success"})
 }
 
 func (h *UserHandler) GetUserByUsername(c *gin.Context) {
 	username := c.Param("username")
 	user, err := h.userService.GetUserByUsername(username)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		resp.Fail(c, ecode.NotExist, "User not found")
 		return
 	}
 
-	c.JSON(http.StatusOK, dto.UserRespDTO{
+	resp.Respond(c, nil, dto.UserRespDTO{
 		ID:       user.ID,
 		Username: user.Username,
 		Email:    user.Email,
@@ -85,43 +86,43 @@ func (h *UserHandler) HasUsername(c *gin.Context) {
 	username := c.Query("username")
 	exists, err := h.userService.HasUsername(username)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		resp.Respond(c, err, nil)
 		return
 	}
 
-	c.JSON(http.StatusOK, exists)
+	resp.Respond(c, nil, exists)
 }
 
 func (h *UserHandler) Update(c *gin.Context) {
 	var req dto.UserUpdateReqDTO
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		resp.Fail(c, ecode.RequestErr, err.Error())
 		return
 	}
 
 	currentUsername, _ := c.Get("username")
 	if currentUsername == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		resp.Fail(c, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	if err := h.userService.Update(req, currentUsername.(string)); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		resp.Respond(c, err, nil)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Update success"})
+	resp.Respond(c, nil, gin.H{"message": "Update success"})
 }
 
 func (h *UserHandler) CheckLogin(c *gin.Context) {
 	username, exists := c.Get("username")
 	if !exists || username == "" {
-		c.JSON(http.StatusOK, gin.H{"isLogin": false})
+		resp.Respond(c, nil, gin.H{"isLogin": false})
 		return
 	}
 
 	token := c.GetHeader("Authorization")
-	c.JSON(http.StatusOK, gin.H{
+	resp.Respond(c, nil, gin.H{
 		"isLogin":  true,
 		"username": username,
 		"token":    token,
@@ -129,24 +130,24 @@ func (h *UserHandler) CheckLogin(c *gin.Context) {
 }
 
 func (h *UserHandler) Logout(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"message": "Logout success"})
+	resp.Respond(c, nil, gin.H{"message": "Logout success"})
 }
 
 func (h *UserHandler) IsAdmin(c *gin.Context) {
 	username, exists := c.Get("username")
 	if !exists || username == "" {
-		c.JSON(http.StatusOK, gin.H{"isAdmin": false})
+		resp.Respond(c, nil, gin.H{"isAdmin": false})
 		return
 	}
 
 	isAdmin, err := h.userService.IsAdmin(username.(string))
 	if err != nil {
 		logrus.Error(err)
-		c.JSON(http.StatusOK, gin.H{"isAdmin": false})
+		resp.Respond(c, nil, gin.H{"isAdmin": false})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	resp.Respond(c, nil, gin.H{
 		"isAdmin":  isAdmin,
 		"username": username,
 	})
@@ -155,34 +156,34 @@ func (h *UserHandler) IsAdmin(c *gin.Context) {
 func (h *UserHandler) AddAdmin(c *gin.Context) {
 	var username string
 	if err := c.ShouldBindJSON(&username); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		resp.Fail(c, ecode.RequestErr, err.Error())
 		return
 	}
 
 	if err := h.userService.SetAdmin(username); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		resp.Respond(c, err, nil)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Add admin success"})
+	resp.Respond(c, nil, gin.H{"message": "Add admin success"})
 }
 
 func (h *UserHandler) PageUsers(c *gin.Context) {
 	var req dto.UserPageReqDTO
 	if err := c.ShouldBindQuery(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		resp.Fail(c, ecode.RequestErr, err.Error())
 		return
 	}
 
 	users, total, err := h.userService.PageUsers(req)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		resp.Respond(c, err, nil)
 		return
 	}
 
-	var resp []dto.UserPageRespDTO
+	var respItems []dto.UserPageRespDTO
 	for _, user := range users {
-		resp = append(resp, dto.UserPageRespDTO{
+		respItems = append(respItems, dto.UserPageRespDTO{
 			ID:        user.ID,
 			Username:  user.Username,
 			Email:     user.Email,
@@ -193,8 +194,8 @@ func (h *UserHandler) PageUsers(c *gin.Context) {
 		})
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data":  resp,
+	resp.Respond(c, nil, gin.H{
+		"data":  respItems,
 		"total": total,
 	})
 }

@@ -8,7 +8,9 @@ import (
 )
 
 func SetupRouter() *gin.Engine {
-	r := gin.Default()
+	r := gin.New()
+	r.Use(gin.Logger())
+	r.Use(middleware.Recovery())
 
 	// 静态前端页面
 	r.StaticFile("/", "./static/index.html")

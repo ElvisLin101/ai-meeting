@@ -4,6 +4,7 @@ import (
 	"ai-meeting/clients"
 	"ai-meeting/dto"
 	"ai-meeting/models"
+	"ai-meeting/pkg/ecode"
 	mongorepo "ai-meeting/repositories/mongo"
 	mysqlrepo "ai-meeting/repositories/mysql"
 	"context"
@@ -97,20 +98,20 @@ func (s *AgentMessageService) AgentChatSSE(sessionID, userID, content string, on
 	conv, err := mongorepo.GetAgentConversationBySessionId(convCtx, sessionID, userID)
 	convCancel()
 	if err != nil || conv == nil {
-		return "", fmt.Errorf("会话不存在或无权限: %w", err)
+		return "", ecode.New(ecode.ErrSessionNotFound, "会话不存在或无权限")
 	}
 
 	// 2. 解析智能体配置（用于场景绑定,不再需要星辰凭证）
 	agentProps := GetAgentPropertiesLoader().GetByAgentID(conv.AgentID)
 	if agentProps == nil {
-		return "", fmt.Errorf("智能体配置不存在, agentID=%d", conv.AgentID)
+		return "", ecode.New(ecode.ErrAgentPropertyNotFound, fmt.Sprintf("智能体配置不存在, agentID=%d", conv.AgentID))
 	}
 
 	// 3. 保存用户消息
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := mongorepo.SaveAgentMessage(ctx, sessionID, userID, "user", content); err != nil {
-		return "", fmt.Errorf("保存用户消息失败: %w", err)
+		return "", ecode.Wrap(err, "保存用户消息失败")
 	}
 
 	// 4. 加载历史消息构建 prompt messages
@@ -118,7 +119,7 @@ func (s *AgentMessageService) AgentChatSSE(sessionID, userID, content string, on
 	defer historyCancel()
 	messages, err := mongorepo.ListAgentMessagesAsc(historyCtx, sessionID, userID)
 	if err != nil {
-		return "", fmt.Errorf("加载历史消息失败: %w", err)
+		return "", ecode.Wrap(err, "加载历史消息失败")
 	}
 	promptMessages := buildAgentPromptMessages(agentProps, messages, content)
 
@@ -142,7 +143,7 @@ func (s *AgentMessageService) AgentChatSSE(sessionID, userID, content string, on
 		defer saveCancel()
 		mongorepo.SaveAgentMessageWithDetail(saveCtx, sessionID, userID, "assistant", "Sorry, an error occurred while processing your request.", responseTime, err.Error())
 		logrus.Errorf("Agent chat failed, session=%s, err=%v", sessionID, err)
-		return "", fmt.Errorf("调用 DeepSeek 失败: %w", err)
+		return "", ecode.New(ecode.ErrDeepSeekCall, "调用 DeepSeek 失败")
 	}
 
 	// 6b. 保存 assistant 回复

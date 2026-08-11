@@ -3,6 +3,7 @@ package user
 import (
 	"ai-meeting/dto"
 	"ai-meeting/models"
+	"ai-meeting/pkg/ecode"
 	mysqlrepo "ai-meeting/repositories/mysql"
 	"errors"
 
@@ -17,12 +18,12 @@ func (s *UserService) Login(req dto.UserLoginReqDTO) (*models.User, error) {
 	user, err := mysqlrepo.FindActiveUserByUsername(req.Username)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("user not found")
+			return nil, ecode.New(ecode.ErrUserNotFound, "user not found")
 		}
 		return nil, err
 	}
 	if user.Password != req.Password {
-		return nil, errors.New("invalid password")
+		return nil, ecode.New(ecode.ErrWrongPassword, "invalid password")
 	}
 	return user, nil
 }
@@ -30,7 +31,7 @@ func (s *UserService) Login(req dto.UserLoginReqDTO) (*models.User, error) {
 // Register 用户注册
 func (s *UserService) Register(req dto.UserRegisterReqDTO) error {
 	if _, err := mysqlrepo.FindUserByUsername(req.Username); err == nil {
-		return errors.New("username already exists")
+		return ecode.New(ecode.ErrUsernameExists, "username already exists")
 	}
 	user := models.User{Username: req.Username, Password: req.Password, Email: req.Email, Phone: req.Phone, IsAdmin: false, Status: 1}
 	return mysqlrepo.CreateUser(&user)

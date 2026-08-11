@@ -2,6 +2,7 @@ package evaluation
 
 import (
 	"ai-meeting/clients"
+	"ai-meeting/pkg/ecode"
 	"ai-meeting/services/metric"
 	"context"
 	"errors"
@@ -50,12 +51,12 @@ func (s *EvaluationService) EvaluateAnswer(ctx context.Context, questionContent,
 	if parseErr != nil {
 		result, err := s.callAndParse(ctx, messages, true)
 		if err != nil {
-			return nil, fmt.Errorf("评分解析失败(重试后仍失败): %w", parseErr)
+			return nil, ecode.Wrap(parseErr, "评分解析失败(重试后仍失败)")
 		}
 		return result, nil
 	}
 
-	return nil, errors.New("评分解析失败")
+	return nil, ecode.New(ecode.ErrEvaluationParse, "评分解析失败")
 }
 
 // callAndParse 调 AI + 解析 + schema 校验 + 异步指标埋点

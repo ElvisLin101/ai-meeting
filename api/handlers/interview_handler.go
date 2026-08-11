@@ -1,10 +1,11 @@
 package handlers
 
 import (
+	respx "ai-meeting/api/resp"
 	"ai-meeting/dto"
 	"ai-meeting/models"
+	"ai-meeting/pkg/ecode"
 	"ai-meeting/services/interview"
-	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -23,35 +24,35 @@ func NewInterviewSessionController() *InterviewSessionController {
 func (c *InterviewSessionController) CreateSession(ctx *gin.Context) {
 	userID, exists := ctx.Get("user_id")
 	if !exists || userID == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	result, err := c.sessionFacade.CreateSession(userID.(string))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, result)
+	respx.Respond(ctx, nil, result)
 }
 
 func (c *InterviewSessionController) PageConversations(ctx *gin.Context) {
 	var req dto.InterviewConversationPageReqDTO
 	if err := ctx.ShouldBindQuery(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respx.Fail(ctx, ecode.RequestErr, err.Error())
 		return
 	}
 
 	userID, exists := ctx.Get("user_id")
 	if !exists || userID == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	conversations, total, err := c.sessionFacade.PageConversations(userID.(string), req)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
@@ -66,7 +67,7 @@ func (c *InterviewSessionController) PageConversations(ctx *gin.Context) {
 		})
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{
+	respx.Respond(ctx, nil, gin.H{
 		"data":  resp,
 		"total": total,
 	})
@@ -76,13 +77,13 @@ func (c *InterviewSessionController) GetConversationHistory(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
 	userID, exists := ctx.Get("user_id")
 	if !exists || userID == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	messages, err := c.sessionFacade.GetConversationHistory(sessionID, userID.(string))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
@@ -91,7 +92,7 @@ func (c *InterviewSessionController) GetConversationHistory(ctx *gin.Context) {
 		resp = append(resp, toInterviewMessageHistoryResp(msg))
 	}
 
-	ctx.JSON(http.StatusOK, resp)
+	respx.Respond(ctx, nil, resp)
 }
 
 func (c *InterviewSessionController) PageHistoryMessages(ctx *gin.Context) {
@@ -101,13 +102,13 @@ func (c *InterviewSessionController) PageHistoryMessages(ctx *gin.Context) {
 
 	userID, exists := ctx.Get("user_id")
 	if !exists || userID == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	messages, total, err := c.sessionFacade.PageHistoryMessages(sessionID, current, size, userID.(string))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
@@ -116,7 +117,7 @@ func (c *InterviewSessionController) PageHistoryMessages(ctx *gin.Context) {
 		resp = append(resp, toInterviewMessageHistoryResp(msg))
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{
+	respx.Respond(ctx, nil, gin.H{
 		"data":  resp,
 		"total": total,
 	})
@@ -126,32 +127,32 @@ func (c *InterviewSessionController) FinishSession(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
 	userID, exists := ctx.Get("user_id")
 	if !exists || userID == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	if err := c.sessionFacade.FinishSession(sessionID, userID.(string)); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"message": "Session finished"})
+	respx.Respond(ctx, nil, gin.H{"message": "Session finished"})
 }
 
 func (c *InterviewSessionController) EndConversation(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
 	userID, exists := ctx.Get("user_id")
 	if !exists || userID == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	if err := c.sessionFacade.EndConversation(sessionID, userID.(string)); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"message": "Conversation ended"})
+	respx.Respond(ctx, nil, gin.H{"message": "Conversation ended"})
 }
 
 func (c *InterviewSessionController) ExtractInterviewQuestions(ctx *gin.Context) {
@@ -159,7 +160,7 @@ func (c *InterviewSessionController) ExtractInterviewQuestions(ctx *gin.Context)
 
 	userID, exists := ctx.Get("user_id")
 	if !exists || userID == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
@@ -173,11 +174,11 @@ func (c *InterviewSessionController) ExtractInterviewQuestions(ctx *gin.Context)
 
 	result, err := c.sessionFacade.ExtractInterviewQuestions(sessionID, userID.(string), req.ResumeContent)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, result)
+	respx.Respond(ctx, nil, result)
 }
 
 // UploadResume 上传 PDF 简历并出题
@@ -186,23 +187,23 @@ func (c *InterviewSessionController) UploadResume(ctx *gin.Context) {
 
 	userID, exists := ctx.Get("user_id")
 	if !exists || userID == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	file, err := ctx.FormFile("file")
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "PDF file is required"})
+		respx.Fail(ctx, ecode.RequestErr, "PDF file is required")
 		return
 	}
 
 	result, err := c.sessionFacade.UploadResume(sessionID, userID.(string), file)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, result)
+	respx.Respond(ctx, nil, result)
 }
 
 func (c *InterviewSessionController) AnswerInterviewQuestion(ctx *gin.Context) {
@@ -213,7 +214,7 @@ func (c *InterviewSessionController) AnswerInterviewQuestion(ctx *gin.Context) {
 
 	userID, exists := ctx.Get("user_id")
 	if !exists || userID == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
@@ -225,170 +226,170 @@ func (c *InterviewSessionController) AnswerInterviewQuestion(ctx *gin.Context) {
 
 	result, err := c.sessionFacade.AnswerInterviewQuestion(sessionID, req, userID.(string))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, result)
+	respx.Respond(ctx, nil, result)
 }
 
 func (c *InterviewSessionController) AnswerInterviewQuestionJson(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
 	var req dto.InterviewAnswerReqDTO
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respx.Fail(ctx, ecode.RequestErr, err.Error())
 		return
 	}
 
 	userID, exists := ctx.Get("user_id")
 	if !exists || userID == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	result, err := c.sessionFacade.AnswerInterviewQuestion(sessionID, req, userID.(string))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, result)
+	respx.Respond(ctx, nil, result)
 }
 
 func (c *InterviewSessionController) GetNextQuestion(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
 	userID, exists := ctx.Get("user_id")
 	if !exists || userID == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	result, err := c.sessionFacade.GetNextQuestion(sessionID, userID.(string))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, result)
+	respx.Respond(ctx, nil, result)
 }
 
 func (c *InterviewSessionController) GetCurrentQuestion(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
 	userID, exists := ctx.Get("user_id")
 	if !exists || userID == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	result, err := c.sessionFacade.GetCurrentQuestion(sessionID, userID.(string))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, result)
+	respx.Respond(ctx, nil, result)
 }
 
 func (c *InterviewSessionController) RestoreInterviewSession(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
 	userID, exists := ctx.Get("user_id")
 	if !exists || userID == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	result, err := c.sessionFacade.RestoreInterviewSession(sessionID, userID.(string))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, result)
+	respx.Respond(ctx, nil, result)
 }
 
 func (c *InterviewSessionController) GetSessionInterviewQuestions(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
 	userID, exists := ctx.Get("user_id")
 	if !exists || userID == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	result, err := c.sessionFacade.GetSessionInterviewQuestions(sessionID, userID.(string))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, result)
+	respx.Respond(ctx, nil, result)
 }
 
 func (c *InterviewSessionController) GetSessionTotalScore(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
 	userID, exists := ctx.Get("user_id")
 	if !exists || userID == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	result, err := c.sessionFacade.GetSessionTotalScore(sessionID, userID.(string))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, result)
+	respx.Respond(ctx, nil, result)
 }
 
 func (c *InterviewSessionController) GetSessionInterviewSuggestions(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
 	userID, exists := ctx.Get("user_id")
 	if !exists || userID == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	result, err := c.sessionFacade.GetSessionInterviewSuggestions(sessionID, userID.(string))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, result)
+	respx.Respond(ctx, nil, result)
 }
 
 func (c *InterviewSessionController) GetSessionResumeScore(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
 	userID, exists := ctx.Get("user_id")
 	if !exists || userID == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	result, err := c.sessionFacade.GetSessionResumeScore(sessionID, userID.(string))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, result)
+	respx.Respond(ctx, nil, result)
 }
 
 func (c *InterviewSessionController) GetRadarChartData(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
 	userID, exists := ctx.Get("user_id")
 	if !exists || userID == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	result, err := c.sessionFacade.GetRadarChartData(sessionID, userID.(string))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, result)
+	respx.Respond(ctx, nil, result)
 }
 
 type InterviewRecordController struct {
@@ -404,40 +405,40 @@ func NewInterviewRecordController() *InterviewRecordController {
 func (c *InterviewRecordController) SaveInterviewRecord(ctx *gin.Context) {
 	var req dto.InterviewRecordSaveReqDTO
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respx.Fail(ctx, ecode.RequestErr, err.Error())
 		return
 	}
 
 	userID, exists := ctx.Get("user_id")
 	if !exists || userID == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	if err := c.recordService.SaveInterviewRecord(req.SessionID, userID.(string), req); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"message": "Save success"})
+	respx.Respond(ctx, nil, gin.H{"message": "Save success"})
 }
 
 func (c *InterviewRecordController) PageInterviewRecords(ctx *gin.Context) {
 	var req dto.InterviewRecordPageReqDTO
 	if err := ctx.ShouldBindQuery(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respx.Fail(ctx, ecode.RequestErr, err.Error())
 		return
 	}
 
 	userID, exists := ctx.Get("user_id")
 	if !exists || userID == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	records, total, err := c.recordService.PageInterviewRecords(userID.(string), req)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
@@ -446,7 +447,7 @@ func (c *InterviewRecordController) PageInterviewRecords(ctx *gin.Context) {
 		resp = append(resp, toInterviewRecordResp(record))
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{
+	respx.Respond(ctx, nil, gin.H{
 		"data":  resp,
 		"total": total,
 	})
@@ -456,33 +457,33 @@ func (c *InterviewRecordController) GetInterviewRecordBySessionId(ctx *gin.Conte
 	sessionID := ctx.Param("sessionId")
 	userID, exists := ctx.Get("user_id")
 	if !exists || userID == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	record, err := c.recordService.GetBySessionId(sessionID, userID.(string))
 	if err != nil {
-		ctx.JSON(http.StatusNotFound, gin.H{"error": "Not found"})
+		respx.Fail(ctx, ecode.NotExist, "Not found")
 		return
 	}
 
-	ctx.JSON(http.StatusOK, toInterviewRecordResp(*record))
+	respx.Respond(ctx, nil, toInterviewRecordResp(*record))
 }
 
 func (c *InterviewRecordController) SaveInterviewRecordFromRedis(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
 	userID, exists := ctx.Get("user_id")
 	if !exists || userID == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	if err := c.recordService.SaveInterviewRecordFromRedis(sessionID, userID.(string)); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"message": "Save success"})
+	respx.Respond(ctx, nil, gin.H{"message": "Save success"})
 }
 
 type InterviewResumeController struct {
@@ -500,17 +501,17 @@ func (c *InterviewResumeController) PreviewResume(ctx *gin.Context) {
 
 	userID, exists := ctx.Get("user_id")
 	if !exists || userID == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	content, err := c.sessionFacade.PreviewResume(sessionID, userID.(string))
 	if err != nil {
-		ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"session_id": sessionID, "content": content})
+	respx.Respond(ctx, nil, gin.H{"session_id": sessionID, "content": content})
 }
 
 func toInterviewMessageHistoryResp(msg models.AgentMessage) dto.AgentMessageHistoryRespDTO {

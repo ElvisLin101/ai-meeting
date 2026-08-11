@@ -4,11 +4,12 @@ import (
 	"ai-meeting/clients"
 	"ai-meeting/dto"
 	"ai-meeting/models"
+	"ai-meeting/pkg/ecode"
 	"ai-meeting/repositories"
+	mongorepo "ai-meeting/repositories/mongo"
 	"ai-meeting/services/interview/evaluation"
 	"ai-meeting/services/interview/flow"
 	"ai-meeting/services/interview/runtime"
-	mongorepo "ai-meeting/repositories/mongo"
 	"context"
 	"fmt"
 	"mime/multipart"
@@ -23,12 +24,12 @@ import (
 
 // InterviewSessionFacade 面试会话门面服务，封装面试会话相关的业务逻辑
 type InterviewSessionFacade struct {
-	answerPipeline *flow.AnswerPipeline
+	answerPipeline   *flow.AnswerPipeline
 	flowStateMachine *flow.FlowStateMachine
-	flowCache      *runtime.FlowCache
-	scoreCache     *runtime.ScoreCache
-	questionCache  *runtime.QuestionCache
-	extractionSvc  *evaluation.ExtractionService
+	flowCache        *runtime.FlowCache
+	scoreCache       *runtime.ScoreCache
+	questionCache    *runtime.QuestionCache
+	extractionSvc    *evaluation.ExtractionService
 }
 
 // CreateSession 创建面试会话
@@ -91,11 +92,11 @@ func (s *InterviewSessionFacade) ExtractInterviewQuestions(sessionID, userID, re
 		logrus.Warnf("出题第一次失败, 重试中, session=%s, err=%v", sessionID, err)
 		result, err = s.extractionSvc.ExtractQuestions(ctx, resumeContent)
 		if err != nil {
-			return nil, fmt.Errorf("AI 出题失败(重试后仍失败): %w", err)
+			return nil, ecode.Wrap(err, "AI 出题失败(重试后仍失败)")
 		}
 	}
 	if len(result.Questions) == 0 {
-		return nil, fmt.Errorf("AI 出题返回空题目列表")
+		return nil, ecode.New(ecode.ErrQuestionsEmpty, "AI 出题返回空题目列表")
 	}
 
 	// 2. 写 Redis: questions(题号→题面 Hash)
@@ -104,7 +105,7 @@ func (s *InterviewSessionFacade) ExtractInterviewQuestions(sessionID, userID, re
 		questionsMap[fmt.Sprintf("%d", i+1)] = q
 	}
 	if err := s.questionCache.SaveQuestions(ctx, sessionID, questionsMap); err != nil {
-		return nil, fmt.Errorf("写入题目缓存失败: %w", err)
+		return nil, ecode.Wrap(err, "写入题目缓存失败")
 	}
 
 	// 4. 写 Redis: suggestions/resumeScore/direction/resumeContext
@@ -126,7 +127,7 @@ func (s *InterviewSessionFacade) ExtractInterviewQuestions(sessionID, userID, re
 	// 4. 清零旧分数 + 初始化 flow
 	s.scoreCache.ResetScore(ctx, sessionID)
 	if _, err := s.flowStateMachine.EnsureInitialized(ctx, sessionID, len(result.Questions)); err != nil {
-		return nil, fmt.Errorf("初始化面试流程失败: %w", err)
+		return nil, ecode.Wrap(err, "初始化面试流程失败")
 	}
 
 	// 5. 返回第一题
@@ -143,24 +144,24 @@ func (s *InterviewSessionFacade) UploadResume(sessionID, userID string, fileHead
 	// 1. 校验文件类型
 	filename := fileHeader.Filename
 	if !strings.HasSuffix(strings.ToLower(filename), ".pdf") {
-		return nil, fmt.Errorf("仅支持 PDF 格式简历")
+		return nil, ecode.New(ecode.ErrResumeNotPDF, "仅支持 PDF 格式简历")
 	}
 
 	// 2. 保存文件（UUID 文件名, 避免重名/路径穿越）
 	uploadDir := "./uploads/resume"
 	if err := os.MkdirAll(uploadDir, 0755); err != nil {
-		return nil, fmt.Errorf("创建上传目录失败: %w", err)
+		return nil, ecode.Wrap(err, "创建上传目录失败")
 	}
 	savedName := uuid.New().String() + ".pdf"
 	savePath := filepath.Join(uploadDir, savedName)
 	if err := ctx_SaveUploadedFile(fileHeader, savePath); err != nil {
-		return nil, fmt.Errorf("保存简历文件失败: %w", err)
+		return nil, ecode.Wrap(err, "保存简历文件失败")
 	}
 
 	// 3. 解析 PDF 文本
 	resumeContent, err := clients.ParsePDFFromPath(savePath)
 	if err != nil {
-		return nil, fmt.Errorf("解析 PDF 失败: %w", err)
+		return nil, ecode.Wrap(err, "解析 PDF 失败")
 	}
 
 	// 4. 回填 ResumePath 到 Mongo
@@ -239,7 +240,7 @@ func (s *InterviewSessionFacade) getCurrentQuestionInfo(sessionID string) (*dto.
 		return nil, err
 	}
 	if flowState == nil {
-		return nil, fmt.Errorf("面试流程未初始化")
+		return nil, ecode.New(ecode.ErrInterviewNotInitialized, "面试流程未初始化")
 	}
 	// 从 Redis 读取当前题面
 	questionContent, _ := s.questionCache.GetQuestion(ctx, sessionID, flowState.CurrentQuestionNumber)
@@ -261,7 +262,7 @@ func (s *InterviewSessionFacade) RestoreInterviewSession(sessionID, userID strin
 		return nil, err
 	}
 	if flowState == nil {
-		return nil, fmt.Errorf("面试流程未初始化")
+		return nil, ecode.New(ecode.ErrInterviewNotInitialized, "面试流程未初始化")
 	}
 
 	questionContent, _ := s.questionCache.GetQuestion(ctx, sessionID, flowState.CurrentQuestionNumber)
@@ -337,15 +338,15 @@ func (s *InterviewSessionFacade) PreviewResume(sessionID, userID string) (string
 
 	session, err := mongorepo.FindInterviewSession(ctx, sessionID, userID)
 	if err != nil {
-		return "", fmt.Errorf("面试会话不存在: %w", err)
+		return "", ecode.New(ecode.ErrSessionNotFound, "面试会话不存在")
 	}
 	if session.ResumePath == "" {
-		return "", fmt.Errorf("未上传简历")
+		return "", ecode.New(ecode.ErrNoResume, "未上传简历")
 	}
 
 	content, err := clients.ParsePDFFromPath(session.ResumePath)
 	if err != nil {
-		return "", fmt.Errorf("解析简历失败: %w", err)
+		return "", ecode.Wrap(err, "解析简历失败")
 	}
 	return content, nil
 }
@@ -371,7 +372,7 @@ func GetInterviewSessionFacade() *InterviewSessionFacade {
 		pipeline := flow.NewAnswerPipeline(rdb, fsm, flowCache, scoreCache, turnLogCache, questionCache, snapshotSvc, turnRepairSvc, evalSvc, followUpSvc, idempotencySvc)
 
 		interviewSessionFacadeInstance = &InterviewSessionFacade{
-			answerPipeline:    pipeline,
+			answerPipeline:   pipeline,
 			flowStateMachine: fsm,
 			flowCache:        flowCache,
 			scoreCache:       scoreCache,
@@ -416,10 +417,10 @@ func (s *InterviewRecordService) SaveInterviewRecordFromRedis(sessionID, userID 
 	// 1. 从 Mongo TurnArchive 读全部轮次
 	archives, err := mongorepo.FindTurnArchives(ctx, sessionID)
 	if err != nil {
-		return fmt.Errorf("读取轮次归档失败: %w", err)
+		return ecode.Wrap(err, "读取轮次归档失败")
 	}
 	if len(archives) == 0 {
-		return fmt.Errorf("无轮次记录, 无法生成报告")
+		return ecode.New(ecode.ErrNoTurnRecord, "无轮次记录, 无法生成报告")
 	}
 
 	// 2. 汇总: 主问题轮次的平均分
@@ -450,7 +451,7 @@ func (s *InterviewRecordService) SaveInterviewRecordFromRedis(sessionID, userID 
 		Suggestions: lastTurn.Feedback,
 	}
 	if err := mongorepo.CreateInterviewRecord(ctx, record); err != nil {
-		return fmt.Errorf("保存面试报告失败: %w", err)
+		return ecode.Wrap(err, "保存面试报告失败")
 	}
 
 	logrus.Infof("Interview report saved, session=%s, totalScore=%d, turns=%d", sessionID, totalScore, len(archives))

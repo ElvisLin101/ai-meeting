@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"ai-meeting/config"
+	"ai-meeting/pkg/ecode"
 	"net/http"
 	"strings"
 	"time"
@@ -54,7 +55,7 @@ func RequireAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		username, exists := c.Get("username")
 		if !exists || username == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+			c.JSON(http.StatusUnauthorized, gin.H{"code": ecode.NotLogin, "error": "Unauthorized"})
 			c.Abort()
 			return
 		}

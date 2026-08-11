@@ -1,10 +1,11 @@
 package handlers
 
 import (
+	respx "ai-meeting/api/resp"
 	"ai-meeting/clients"
 	"ai-meeting/dto"
+	"ai-meeting/pkg/ecode"
 	"ai-meeting/services/ai"
-	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -25,13 +26,13 @@ func NewAiConversationController() *AiConversationController {
 func (c *AiConversationController) CreateConversation(ctx *gin.Context) {
 	var req dto.AiSessionCreateReqDTO
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respx.Fail(ctx, ecode.RequestErr, err.Error())
 		return
 	}
 
 	username, exists := ctx.Get("username")
 	if !exists || username == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
@@ -41,29 +42,29 @@ func (c *AiConversationController) CreateConversation(ctx *gin.Context) {
 		req.FirstMessage,
 	)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, result)
+	respx.Respond(ctx, nil, result)
 }
 
 func (c *AiConversationController) PageConversations(ctx *gin.Context) {
 	var req dto.AiConversationPageReqDTO
 	if err := ctx.ShouldBindQuery(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respx.Fail(ctx, ecode.RequestErr, err.Error())
 		return
 	}
 
 	username, exists := ctx.Get("username")
 	if !exists || username == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	conversations, total, err := c.conversationService.PageConversations(username.(string), req)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
@@ -79,7 +80,7 @@ func (c *AiConversationController) PageConversations(ctx *gin.Context) {
 		})
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{
+	respx.Respond(ctx, nil, gin.H{
 		"data":  resp,
 		"total": total,
 	})
@@ -92,65 +93,65 @@ func (c *AiConversationController) UpdateConversation(ctx *gin.Context) {
 
 	username, exists := ctx.Get("username")
 	if !exists || username == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	if err := c.conversationService.UpdateConversation(sessionID, messageCount, title, username.(string)); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"message": "Update success"})
+	respx.Respond(ctx, nil, gin.H{"message": "Update success"})
 }
 
 func (c *AiConversationController) EndConversation(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
 	username, exists := ctx.Get("username")
 	if !exists || username == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	if err := c.conversationService.EndConversation(sessionID, username.(string)); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"message": "Conversation ended"})
+	respx.Respond(ctx, nil, gin.H{"message": "Conversation ended"})
 }
 
 func (c *AiConversationController) DeleteConversation(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
 	username, exists := ctx.Get("username")
 	if !exists || username == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	if err := c.conversationService.DeleteConversation(sessionID, username.(string)); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"message": "Delete success"})
+	respx.Respond(ctx, nil, gin.H{"message": "Delete success"})
 }
 
 func (c *AiConversationController) GetConversationById(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
 	username, exists := ctx.Get("username")
 	if !exists || username == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	conv, err := c.conversationService.GetConversationBySessionId(sessionID, username.(string))
 	if err != nil {
-		ctx.JSON(http.StatusNotFound, gin.H{"error": "Not found"})
+		respx.Fail(ctx, ecode.NotExist, "Not found")
 		return
 	}
 
-	ctx.JSON(http.StatusOK, dto.AiConversationRespDTO{
+	respx.Respond(ctx, nil, dto.AiConversationRespDTO{
 		SessionID:   conv.SessionID,
 		AiId:        conv.AiID,
 		Title:       conv.Title,
@@ -176,13 +177,13 @@ func (c *AiMessageController) Chat(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
 	var req dto.AiMessageReqDTO
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respx.Fail(ctx, ecode.RequestErr, err.Error())
 		return
 	}
 
 	username, exists := ctx.Get("username")
 	if !exists || username == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
@@ -190,36 +191,28 @@ func (c *AiMessageController) Chat(ctx *gin.Context) {
 
 	resp, err := c.messageService.Chat(ctx.Request.Context(), sessionID, username.(string), req.Content)
 	if err != nil {
-		if errors.Is(err, ai.ErrEmptyAiMessageContent) {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		if errors.Is(err, ai.ErrAiConversationNotFound) {
-			ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-			return
-		}
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, resp)
+	respx.Respond(ctx, nil, resp)
 }
 
 func (c *AiMessageController) ChatStream(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
 	var req dto.AiMessageReqDTO
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respx.Fail(ctx, ecode.RequestErr, err.Error())
 		return
 	}
 	if strings.TrimSpace(req.Content) == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": ai.ErrEmptyAiMessageContent.Error()})
+		respx.Fail(ctx, ecode.ErrEmptyAiMessageContent, "消息内容不能为空")
 		return
 	}
 
 	username, exists := ctx.Get("username")
 	if !exists || username == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
@@ -261,13 +254,13 @@ func (c *AiMessageController) GetConversationHistory(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
 	username, exists := ctx.Get("username")
 	if !exists || username == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	messages, err := c.messageService.GetConversationHistory(sessionID, username.(string))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
@@ -287,7 +280,7 @@ func (c *AiMessageController) GetConversationHistory(ctx *gin.Context) {
 		})
 	}
 
-	ctx.JSON(http.StatusOK, resp)
+	respx.Respond(ctx, nil, resp)
 }
 
 func (c *AiMessageController) PageHistoryMessages(ctx *gin.Context) {
@@ -297,13 +290,13 @@ func (c *AiMessageController) PageHistoryMessages(ctx *gin.Context) {
 
 	username, exists := ctx.Get("username")
 	if !exists || username == "" {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
 		return
 	}
 
 	messages, total, err := c.messageService.PageHistoryMessages(sessionID, current, size, username.(string))
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
@@ -323,7 +316,7 @@ func (c *AiMessageController) PageHistoryMessages(ctx *gin.Context) {
 		})
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{
+	respx.Respond(ctx, nil, gin.H{
 		"data":  resp,
 		"total": total,
 	})
@@ -331,7 +324,7 @@ func (c *AiMessageController) PageHistoryMessages(ctx *gin.Context) {
 
 func (c *AiMessageController) GetMemoryThreshold(ctx *gin.Context) {
 	threshold, minThreshold, maxThreshold, triggerOffset := c.memoryService.GetCompressionThresholdConfig()
-	ctx.JSON(http.StatusOK, dto.MemoryThresholdRespDTO{
+	respx.Respond(ctx, nil, dto.MemoryThresholdRespDTO{
 		Threshold:     threshold,
 		MinThreshold:  minThreshold,
 		MaxThreshold:  maxThreshold,
@@ -342,17 +335,17 @@ func (c *AiMessageController) GetMemoryThreshold(ctx *gin.Context) {
 func (c *AiMessageController) SetMemoryThreshold(ctx *gin.Context) {
 	var req dto.MemoryThresholdReqDTO
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respx.Fail(ctx, ecode.RequestErr, err.Error())
 		return
 	}
 
 	if err := c.memoryService.SetCompressionThreshold(req.Threshold); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respx.Fail(ctx, ecode.RequestErr, err.Error())
 		return
 	}
 
 	threshold, minThreshold, maxThreshold, triggerOffset := c.memoryService.GetCompressionThresholdConfig()
-	ctx.JSON(http.StatusOK, dto.MemoryThresholdRespDTO{
+	respx.Respond(ctx, nil, dto.MemoryThresholdRespDTO{
 		Threshold:     threshold,
 		MinThreshold:  minThreshold,
 		MaxThreshold:  maxThreshold,
@@ -373,7 +366,7 @@ func NewAiPropertiesController() *AiPropertiesController {
 func (c *AiPropertiesController) GetAvailableAiModels(ctx *gin.Context) {
 	props, err := c.propertiesService.GetAvailableAiModels()
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
@@ -385,41 +378,41 @@ func (c *AiPropertiesController) GetAvailableAiModels(ctx *gin.Context) {
 		})
 	}
 
-	ctx.JSON(http.StatusOK, resp)
+	respx.Respond(ctx, nil, resp)
 }
 
 func (c *AiPropertiesController) CreateAiProperties(ctx *gin.Context) {
 	var req dto.AiPropertiesCreateReqDTO
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respx.Fail(ctx, ecode.RequestErr, err.Error())
 		return
 	}
 
 	if err := c.propertiesService.CreateAiProperties(req); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"message": "Create success"})
+	respx.Respond(ctx, nil, gin.H{"message": "Create success"})
 }
 
 // GetPresetModels 返回预设模型模板列表
 func (c *AiPropertiesController) GetPresetModels(ctx *gin.Context) {
-	ctx.JSON(http.StatusOK, clients.PresetModels)
+	respx.Respond(ctx, nil, clients.PresetModels)
 }
 
 // CreateFromPreset 按预设模板创建 AI 配置（用户只需填 apiKey）
 func (c *AiPropertiesController) CreateFromPreset(ctx *gin.Context) {
 	var req dto.AiPropertiesCreateFromPresetReqDTO
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respx.Fail(ctx, ecode.RequestErr, err.Error())
 		return
 	}
 
 	// 查找预设模板
 	preset := clients.GetPresetByProvider(req.Provider)
 	if preset == nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "不支持的 provider: " + req.Provider})
+		respx.Fail(ctx, ecode.RequestErr, "不支持的 provider: "+req.Provider)
 		return
 	}
 
@@ -447,57 +440,57 @@ func (c *AiPropertiesController) CreateFromPreset(ctx *gin.Context) {
 	}
 
 	if err := c.propertiesService.CreateAiProperties(createReq); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"message": "Create success"})
+	respx.Respond(ctx, nil, gin.H{"message": "Create success"})
 }
 
 func (c *AiPropertiesController) UpdateAiProperties(ctx *gin.Context) {
 	var req dto.AiPropertiesUpdateReqDTO
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respx.Fail(ctx, ecode.RequestErr, err.Error())
 		return
 	}
 
 	if err := c.propertiesService.UpdateAiProperties(req); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"message": "Update success"})
+	respx.Respond(ctx, nil, gin.H{"message": "Update success"})
 }
 
 func (c *AiPropertiesController) DeleteAiProperties(ctx *gin.Context) {
 	id, err := strconv.ParseUint(ctx.Param("id"), 10, 64)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID"})
+		respx.Fail(ctx, ecode.RequestErr, "Invalid ID")
 		return
 	}
 
 	if err := c.propertiesService.DeleteAiProperties(uint(id)); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"message": "Delete success"})
+	respx.Respond(ctx, nil, gin.H{"message": "Delete success"})
 }
 
 func (c *AiPropertiesController) GetAiPropertiesById(ctx *gin.Context) {
 	id, err := strconv.ParseUint(ctx.Param("id"), 10, 64)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID"})
+		respx.Fail(ctx, ecode.RequestErr, "Invalid ID")
 		return
 	}
 
 	prop, err := c.propertiesService.GetAiPropertiesById(uint(id))
 	if err != nil {
-		ctx.JSON(http.StatusNotFound, gin.H{"error": "Not found"})
+		respx.Fail(ctx, ecode.NotExist, "Not found")
 		return
 	}
 
-	ctx.JSON(http.StatusOK, dto.AiPropertiesRespDTO{
+	respx.Respond(ctx, nil, dto.AiPropertiesRespDTO{
 		ID:        prop.ID,
 		Name:      prop.Name,
 		ModelType: prop.ModelType,
@@ -510,13 +503,13 @@ func (c *AiPropertiesController) GetAiPropertiesById(ctx *gin.Context) {
 func (c *AiPropertiesController) PageAiProperties(ctx *gin.Context) {
 	var req dto.AiPropertiesPageReqDTO
 	if err := ctx.ShouldBindQuery(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respx.Fail(ctx, ecode.RequestErr, err.Error())
 		return
 	}
 
 	props, total, err := c.propertiesService.PageAiProperties(req)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
@@ -532,7 +525,7 @@ func (c *AiPropertiesController) PageAiProperties(ctx *gin.Context) {
 		})
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{
+	respx.Respond(ctx, nil, gin.H{
 		"data":  resp,
 		"total": total,
 	})
@@ -541,7 +534,7 @@ func (c *AiPropertiesController) PageAiProperties(ctx *gin.Context) {
 func (c *AiPropertiesController) GetAllEnabledAiProperties(ctx *gin.Context) {
 	props, err := c.propertiesService.GetAllEnabledAiProperties()
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
@@ -557,26 +550,26 @@ func (c *AiPropertiesController) GetAllEnabledAiProperties(ctx *gin.Context) {
 		})
 	}
 
-	ctx.JSON(http.StatusOK, resp)
+	respx.Respond(ctx, nil, resp)
 }
 
 func (c *AiPropertiesController) ToggleAiPropertiesStatus(ctx *gin.Context) {
 	id, err := strconv.ParseUint(ctx.Param("id"), 10, 64)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID"})
+		respx.Fail(ctx, ecode.RequestErr, "Invalid ID")
 		return
 	}
 
 	isEnabled, err := strconv.Atoi(ctx.Query("isEnabled"))
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid isEnabled"})
+		respx.Fail(ctx, ecode.RequestErr, "Invalid isEnabled")
 		return
 	}
 
 	if err := c.propertiesService.ToggleAiPropertiesStatus(uint(id), isEnabled); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respx.Respond(ctx, err, nil)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"message": "Status updated"})
+	respx.Respond(ctx, nil, gin.H{"message": "Status updated"})
 }
