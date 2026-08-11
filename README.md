@@ -1,5 +1,8 @@
 # AI-Meeting
 
+![CI](https://img.shields.io/github/actions/workflow/status/ElvisLin101/ai-meeting/ci.yml?branch=main&label=CI)
+[![Go Version](https://img.shields.io/badge/Go-1.24.1-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+
 > 本项目主要面向集群分布式开发，旨在解决分布式场景下后端服务的稳定性与可用性（如 AI 调用去重、长会话状态恢复、并发一致性保障）。项目不依赖任何 Agent 框架，面试流程通过本地状态机 + DeepSeek API 直接编排，是一个纯后端基础设施项目，面试业务场景是这些分布式机制的载体。
 
 基于 Go + Gin 的 AI 面试平台后端，包含通用 AI 对话和模拟面试两大模块，支持对接 DeepSeek 等 OpenAI 兼容模型，支持简历驱动的面试出题、评分、追问全流程编排。

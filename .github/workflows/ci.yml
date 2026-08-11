@@ -1,0 +1,59 @@
+# ============================================================
+# CI: GitHub Actions
+# 触发: push 到 main / 任意 PR
+# 步骤: gofmt 检查 → build → vet → race 测试 → 覆盖率统计并上传
+# 说明: 单元测试全部走内存依赖(miniredis/httptest), 无需启动
+#       MySQL/Redis/Mongo; singleflight 集成测试带 integration tag
+#       默认排除, 需要连真实 Redis 时手动加 -tags=integration 运行
+# ============================================================
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          # 从 go.mod 读取 go 1.24.1, 避免版本漂移
+          go-version-file: go.mod
+          cache: true
+
+      - name: Format check
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "以下文件未通过 gofmt, 请先运行: gofmt -w ."
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race ./...
+
+      - name: Coverage
+        run: |
+          go test -coverprofile=coverage.out ./... > /dev/null
+          go tool cover -func=coverage.out | tail -1
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.out
