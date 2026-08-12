@@ -315,7 +315,7 @@ func (s *InterviewSessionFacade) GetSessionResumeScore(sessionID, userID string)
 	return s.questionCache.GetResumeScore(ctx, sessionID)
 }
 
-// GetRadarChartData 获取雷达图数据（从 Redis 读三个原始分, 加权计算五维）
+// GetRadarChartData 获取雷达图数据（从 Redis 读两个原始分, 加权计算四维）
 func (s *InterviewSessionFacade) GetRadarChartData(sessionID, userID string) (*dto.RadarChartDTO, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

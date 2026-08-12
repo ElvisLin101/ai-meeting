@@ -6,7 +6,7 @@
 
 - ~~`api/handlers/agent_handler.go`: `AgentController.Chat` 保存用户消息并异步触发 memory 压缩判断, 但不调用模型, 不保存 assistant 回复。~~ **已完成: Agent Chat SSE 闭环, 对接 DeepSeek, 双消息持久化。**
 - `services/agent/agent_service.go`: `CreateConversationWithTitle` 入参有 `agentID`, 但当前 `AgentID` 固定为 1。
-- ~~`services/agent/agent_service.go`: `GetConversationHistoryWithContext` 已接 memory, 但 handler 未使用。~~ **已完成: AgentChatSSE 中已接入记忆压缩。**
+- ~~`services/agent/agent_service.go`: `GetConversationHistoryWithContext` 已接 memory, 但 handler 未使用。~~ **已移除: 该函数已删除, Agent 侧不再使用压缩记忆(见下方"Agent 侧已移除压缩机制")。**
 
 ## AI
 
