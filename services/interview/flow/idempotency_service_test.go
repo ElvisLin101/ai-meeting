@@ -5,25 +5,12 @@ import (
 	"testing"
 
 	"ai-meeting/dto"
-
-	"github.com/alicebob/miniredis/v2"
-	"github.com/go-redis/redis/v8"
+	"ai-meeting/internal/testutil"
 )
-
-// newTestRedis 启动内存 Redis 用于测试
-func newTestRedis(t *testing.T) *redis.Client {
-	t.Helper()
-	mr, err := miniredis.Run()
-	if err != nil {
-		t.Fatalf("failed to start miniredis: %v", err)
-	}
-	t.Cleanup(mr.Close)
-	return redis.NewClient(&redis.Options{Addr: mr.Addr()})
-}
 
 func newTestIdempotency(t *testing.T) *IdempotencyService {
 	t.Helper()
-	return NewIdempotencyService(newTestRedis(t))
+	return NewIdempotencyService(testutil.NewTestRedis(t))
 }
 
 func TestIdempotency_NewRequest(t *testing.T) {

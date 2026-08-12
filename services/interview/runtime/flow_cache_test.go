@@ -5,26 +5,13 @@ import (
 	"sync"
 	"testing"
 
+	"ai-meeting/internal/testutil"
 	"ai-meeting/models"
-
-	"github.com/alicebob/miniredis/v2"
-	"github.com/go-redis/redis/v8"
 )
-
-// newTestRedis 启动内存 Redis 用于测试
-func newTestRedis(t *testing.T) *redis.Client {
-	t.Helper()
-	mr, err := miniredis.Run()
-	if err != nil {
-		t.Fatalf("failed to start miniredis: %v", err)
-	}
-	t.Cleanup(mr.Close)
-	return redis.NewClient(&redis.Options{Addr: mr.Addr()})
-}
 
 func newTestFlowCache(t *testing.T) *FlowCache {
 	t.Helper()
-	return NewFlowCache(newTestRedis(t))
+	return NewFlowCache(testutil.NewTestRedis(t))
 }
 
 func TestFlowCache_SaveAndGet(t *testing.T) {

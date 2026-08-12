@@ -5,26 +5,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alicebob/miniredis/v2"
-	"github.com/go-redis/redis/v8"
+	"ai-meeting/internal/testutil"
 )
 
 // ============================================================
-// 通用分布式锁测试(miniredis 内存版)
+// 通用分布式锁测试(miniredis 内存版, Redis 由 internal/testutil 提供)
 // ============================================================
 
-func newTestRedis(t *testing.T) *redis.Client {
-	t.Helper()
-	mr, err := miniredis.Run()
-	if err != nil {
-		t.Fatalf("failed to start miniredis: %v", err)
-	}
-	t.Cleanup(mr.Close)
-	return redis.NewClient(&redis.Options{Addr: mr.Addr()})
-}
-
 func TestAcquire_Success(t *testing.T) {
-	rdb := newTestRedis(t)
+	rdb := testutil.NewTestRedis(t)
 	l, err := Acquire(context.Background(), rdb, "lock:key1", 10*time.Second)
 	if err != nil {
 		t.Fatalf("Acquire failed: %v", err)
@@ -36,7 +25,7 @@ func TestAcquire_Success(t *testing.T) {
 }
 
 func TestAcquire_Occupied(t *testing.T) {
-	rdb := newTestRedis(t)
+	rdb := testutil.NewTestRedis(t)
 	ctx := context.Background()
 
 	l1, err := Acquire(ctx, rdb, "lock:key1", 10*time.Second)
@@ -56,7 +45,7 @@ func TestAcquire_Occupied(t *testing.T) {
 }
 
 func TestAcquire_DifferentKeys(t *testing.T) {
-	rdb := newTestRedis(t)
+	rdb := testutil.NewTestRedis(t)
 	ctx := context.Background()
 
 	l1, err := Acquire(ctx, rdb, "lock:a", 10*time.Second)
@@ -76,7 +65,7 @@ func TestAcquire_DifferentKeys(t *testing.T) {
 }
 
 func TestAcquire_Release_Reacquire(t *testing.T) {
-	rdb := newTestRedis(t)
+	rdb := testutil.NewTestRedis(t)
 	ctx := context.Background()
 
 	l1, err := Acquire(ctx, rdb, "lock:key1", 10*time.Second)
@@ -99,7 +88,7 @@ func TestAcquire_Release_Reacquire(t *testing.T) {
 
 func TestLock_ReleaseOnlyOwn(t *testing.T) {
 	// 模拟持有者已变更(锁 value 不再是自己的 nodeID): 释放不能误删他人的锁
-	rdb := newTestRedis(t)
+	rdb := testutil.NewTestRedis(t)
 	ctx := context.Background()
 
 	const key = "lock:key1"
@@ -132,7 +121,7 @@ func TestLock_NilRelease(t *testing.T) {
 
 func TestLock_Expired(t *testing.T) {
 	// TTL 到期后锁自动失效, 可重新获取
-	rdb := newTestRedis(t)
+	rdb := testutil.NewTestRedis(t)
 	ctx := context.Background()
 
 	l1, err := Acquire(ctx, rdb, "lock:key1", 1*time.Second)

@@ -3,10 +3,12 @@ package runtime
 import (
 	"context"
 	"testing"
+
+	"ai-meeting/internal/testutil"
 )
 
 func TestScoreCache_AddScore(t *testing.T) {
-	c := NewScoreCache(newTestRedis(t))
+	c := NewScoreCache(testutil.NewTestRedis(t))
 	ctx := context.Background()
 
 	sum, count, avg, err := c.AddScore(ctx, "s1", 80)
@@ -35,7 +37,7 @@ func TestScoreCache_AddScore(t *testing.T) {
 }
 
 func TestScoreCache_AddScore_Clamp(t *testing.T) {
-	c := NewScoreCache(newTestRedis(t))
+	c := NewScoreCache(testutil.NewTestRedis(t))
 	ctx := context.Background()
 
 	if _, _, avg, err := c.AddScore(ctx, "s1", 150); err != nil || avg != 100 {
@@ -48,7 +50,7 @@ func TestScoreCache_AddScore_Clamp(t *testing.T) {
 }
 
 func TestScoreCache_Reset(t *testing.T) {
-	c := NewScoreCache(newTestRedis(t))
+	c := NewScoreCache(testutil.NewTestRedis(t))
 	ctx := context.Background()
 
 	if _, _, _, err := c.AddScore(ctx, "s1", 90); err != nil {
@@ -64,7 +66,7 @@ func TestScoreCache_Reset(t *testing.T) {
 }
 
 func TestScoreCache_Empty(t *testing.T) {
-	c := NewScoreCache(newTestRedis(t))
+	c := NewScoreCache(testutil.NewTestRedis(t))
 	total, err := c.GetTotalScore(context.Background(), "no-score")
 	if err != nil {
 		t.Fatalf("GetTotalScore failed: %v", err)

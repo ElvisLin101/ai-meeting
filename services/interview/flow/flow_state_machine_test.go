@@ -4,13 +4,14 @@ import (
 	"context"
 	"testing"
 
+	"ai-meeting/internal/testutil"
 	"ai-meeting/models"
 	"ai-meeting/services/interview/runtime"
 )
 
 func newTestStateMachine(t *testing.T) *FlowStateMachine {
 	t.Helper()
-	return NewFlowStateMachine(runtime.NewFlowCache(newTestRedis(t)))
+	return NewFlowStateMachine(runtime.NewFlowCache(testutil.NewTestRedis(t)))
 }
 
 func TestFlowStateMachine_EnsureInitialized(t *testing.T) {
