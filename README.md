@@ -102,6 +102,19 @@ Mongo 轮次归档（不可变）       ← 完整轮次历史
 
 **代码位置**：`pkg/singleflight/singleflight.go`
 
+**实测验证**：`cmd/sfprobe` 对真实 Redis 发起 N 个并发同 key 请求（模拟单次约 300ms 的 AI 流式调用）：
+
+| 并发数 | 实际执行次数 | 去重率 | 结果一致 | 失败 | 总耗时 |
+|---|---|---|---|---|---|
+| 100 | 1 | 99.0%（省 99 次） | 100/100 | 0 | ~362ms |
+| 500 | 1 | 99.8%（省 499 次） | 500/500 | 0 | ~404ms |
+
+总耗时约等于单次底层调用耗时，说明并发请求被真正合并；事件统计 `leader_elected=1 / follower_waiting=N-1 / leader_completed=1`，无换主（leader 健康）。复现：
+
+```bash
+go run ./cmd/sfprobe --addr localhost:6379 --password 123456 --concurrency 500
+```
+
 ### 3. AI 记忆压缩 — 长对话上下文管理
 
 **问题**：长对话场景下全量历史消息超出模型 token 限制，且每次都传全部历史浪费成本。
@@ -165,7 +178,7 @@ docs/agent-knowledge/references/（路由表、数据模型、运行态治理、
 
 - SSE 流式聊天（DeepSeek config fallback）
 - 双消息持久化 + 会话归属校验（MongoDB）
-- 场景机制（4 个业务场景枚举 + 候选名称匹配 + 启动缓存）已实现，尚未接入聊天链路，当前会话 AgentID 固定为 1
+- 场景机制（4 个业务场景枚举 + 候选名称匹配 + 启动缓存）已实现；创建会话支持指定 AgentID（默认 1），聊天链路按会话绑定的 AgentID 调用，场景解析（ResolveRequired）尚未接入
 
 ### 模拟面试
 
