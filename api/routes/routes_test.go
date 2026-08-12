@@ -47,7 +47,6 @@ func TestProtectedRoutesRequireAuth(t *testing.T) {
 		{http.MethodPost, "/api/xunzhi/v1/interview/sessions"},
 		{http.MethodGet, "/api/xunzhi/v1/users/page"},
 		{http.MethodPost, "/api/xunzhi/v1/users/admin"},
-		{http.MethodGet, "/api/xunzhi/v1/websocket/user/u1/status"},
 	}
 	for _, c := range cases {
 		req := httptest.NewRequest(c.method, c.path, nil)

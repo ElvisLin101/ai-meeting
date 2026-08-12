@@ -41,10 +41,9 @@
 - `/api/xunzhi/v1/ai/**`
 - `/api/xunzhi/v1/ai-properties/**`
 - `/api/xunzhi/v1/interview/**`
-- `/api/xunzhi/v1/websocket/**`
 - `/api/xunzhi/v1/xunfei/tts/**`
 
-注意: 路径存在不等于能力完成。Agent/AI/面试主链路已接真实实现，媒体(TTS/WebSocket)仍为 mock。
+注意: 路径存在不等于能力完成。Agent/AI/面试主链路已接真实实现，媒体(TTS)仍为 mock(WebSocket mock 接口已移除)。
 
 ### 记忆阈值接口
 
@@ -61,7 +60,7 @@ AI 侧有运行时压缩阈值接口:
 
 - `WEBSOCKET /api/xunzhi/v1/xunfei/audio-to-text/{userId}`
 
-由于本项目不使用讯飞 API Key，这个实时 ASR WebSocket endpoint 不纳入实现计划。当前仅有 `/websocket/**` 的 HTTP 推送接口。
+由于本项目不使用讯飞 API Key，这个实时 ASR WebSocket endpoint 不纳入实现计划。此前预留的 `/websocket/**` HTTP mock 推送接口已移除，不再实现 WebSocket 能力。
 
 ## 当前项目主要差距
 
@@ -214,12 +213,10 @@ AI 侧有运行时压缩阈值接口:
 
 当前实现:
 
-- `/websocket/**` HTTP 接口只是 mock 返回。
-- 缺少真正 WebSocket endpoint。
 - TTS 三个接口只返回 mock task/status。
 - 不计划实现讯飞实时 ASR，因此不需要讯飞 ASR 客户端、二进制音频帧处理和 ASR 增量去重。
 - 没有真实 TTS 客户端。
-- 没有在线用户连接表、心跳、事件协议。
+- 没有在线用户连接表、心跳、事件协议(WebSocket mock 接口已移除，不实现)。
 
 待办:
 

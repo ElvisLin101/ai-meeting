@@ -150,17 +150,9 @@ func setupInterviewRoutes(authed *gin.RouterGroup) {
 
 func setupMediaRoutes(authed *gin.RouterGroup) {
 	ttsController := handlers.NewXunfeiTtsController()
-	wsController := handlers.NewWebSocketController()
 
 	xunfeiTts := authed.Group("/xunfei/tts")
 	xunfeiTts.POST("/tasks", ttsController.CreateTask)
 	xunfeiTts.GET("/tasks/:taskId", ttsController.QueryTask)
 	xunfeiTts.POST("/synthesize", ttsController.SynthesizeAndWait)
-
-	websocket := authed.Group("/websocket")
-	websocket.GET("/user/:userId/status", wsController.CheckUserStatus)
-	websocket.POST("/send-message", wsController.SendMessage)
-	websocket.POST("/notification/:userId", wsController.SendNotification)
-	websocket.POST("/transcription/:userId", wsController.SendTranscriptionResult)
-	websocket.POST("/error/:userId", wsController.SendErrorMessage)
 }
