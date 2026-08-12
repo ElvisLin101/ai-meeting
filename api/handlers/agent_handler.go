@@ -46,7 +46,7 @@ func (c *AgentController) CreateSession(ctx *gin.Context) {
 
 	result, err := c.agentConversationService.CreateConversationWithTitle(
 		username.(string),
-		"1",
+		req.AgentID,
 		req.FirstMessage,
 	)
 	if err != nil {

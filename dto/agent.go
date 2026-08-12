@@ -2,6 +2,7 @@ package dto
 
 type AgentSessionCreateReqDTO struct {
 	FirstMessage string `json:"first_message"`
+	AgentID      string `json:"agent_id"` // 可选, 空默认使用 1(通用智能体)
 }
 
 type AgentSessionCreateRespDTO struct {

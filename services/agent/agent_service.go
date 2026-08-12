@@ -9,6 +9,7 @@ import (
 	mysqlrepo "ai-meeting/repositories/mysql"
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,19 +20,40 @@ import (
 type AgentConversationService struct{}
 
 // CreateConversationWithTitle 创建Agent会话并生成标题
+// agentID 可选: 空默认 1(通用智能体), 非空则校验配置存在且启用
 func (s *AgentConversationService) CreateConversationWithTitle(username, agentID string, firstMessage string) (*dto.AgentSessionCreateRespDTO, error) {
+	agentIDUint, err := resolveAgentID(agentID)
+	if err != nil {
+		return nil, err
+	}
+
 	sessionID := uuid.New().String()
 	title := "New Conversation"
 	if len(firstMessage) > 50 {
 		title = firstMessage[:50] + "..."
 	}
-	conversation := models.AgentConversation{SessionID: sessionID, UserID: username, AgentID: 1, Title: title, Status: 1, MessageCnt: 0}
+	conversation := models.AgentConversation{SessionID: sessionID, UserID: username, AgentID: agentIDUint, Title: title, Status: 1, MessageCnt: 0}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := mongorepo.CreateAgentConversation(ctx, &conversation); err != nil {
 		return nil, err
 	}
 	return &dto.AgentSessionCreateRespDTO{SessionID: sessionID, Title: title}, nil
+}
+
+// resolveAgentID 解析并校验 agentID: 空默认 1, 必须存在且启用
+func resolveAgentID(agentID string) (uint, error) {
+	if strings.TrimSpace(agentID) == "" {
+		agentID = "1"
+	}
+	id, err := strconv.ParseUint(agentID, 10, 32)
+	if err != nil {
+		return 0, ecode.New(ecode.ErrAgentPropertyNotFound, "invalid agent id: "+agentID)
+	}
+	if GetAgentPropertiesLoader().GetByAgentID(uint(id)) == nil {
+		return 0, ecode.New(ecode.ErrAgentPropertyNotFound, "agent not found or disabled: "+agentID)
+	}
+	return uint(id), nil
 }
 
 // PageConversations 分页查询用户的Agent会话列表

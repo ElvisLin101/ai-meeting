@@ -5,7 +5,7 @@
 ## Agent
 
 - ~~`api/handlers/agent_handler.go`: `AgentController.Chat` 保存用户消息并异步触发 memory 压缩判断, 但不调用模型, 不保存 assistant 回复。~~ **已完成: Agent Chat SSE 闭环, 对接 DeepSeek, 双消息持久化。**
-- `services/agent/agent_service.go`: `CreateConversationWithTitle` 入参有 `agentID`, 但当前 `AgentID` 固定为 1。
+- ~~`services/agent/agent_service.go`: `CreateConversationWithTitle` 入参有 `agentID`, 但当前 `AgentID` 固定为 1。~~ **已完成: 创建会话支持指定 agentID(DTO 新增 `agent_id` 字段), 空默认 1, 非空时校验配置存在且启用(`resolveAgentID`), 校验失败返回 -4001。**
 - ~~`services/agent/agent_service.go`: `GetConversationHistoryWithContext` 已接 memory, 但 handler 未使用。~~ **已移除: 该函数已删除, Agent 侧不再使用压缩记忆(见下方"Agent 侧已移除压缩机制")。**
 
 ## AI
@@ -20,7 +20,7 @@
 - `services/interview/interview_service.go`: `ExtractInterviewQuestions`, `AnswerInterviewQuestion`, `GetNextQuestion`, `GetCurrentQuestion`, `RestoreInterviewSession`, `GetSessionInterviewQuestions`, `GetSessionTotalScore`, `GetSessionInterviewSuggestions`, `GetSessionResumeScore`, `GetRadarChartData` 已接入真实实现。神态评估已移除。
 - ~~`services/interview/interview_service.go`: `SaveInterviewRecordFromRedis` 是空实现。~~ **已完成: 从 Mongo `TurnArchive` 汇总轮次算平均分, 取最后一轮作报告概要, 写入 `InterviewRecord`。**
 - ~~`api/handlers/interview_handler.go`: `PreviewResume` 只返回固定提示。~~ **已完成: 从 Mongo 读 `ResumePath` → 解析 PDF 返回文本。**
-- `InterviewSessionFacade.CreateSession` 写 `InterviewSession`, 但 `PageConversations` 读 `AgentConversation`。
+- ~~`InterviewSessionFacade.CreateSession` 写 `InterviewSession`, 但 `PageConversations` 读 `AgentConversation`。~~ **已完成: `CreateSession` 双写 AgentConversation 列表条目(标题"模拟面试"), 保证新建面试会话在列表中可见; 列表条目创建失败时补偿删除 InterviewSession, 保持要么全成功要么失败。**
 
 ## Memory
 

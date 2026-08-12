@@ -35,12 +35,27 @@ type InterviewSessionFacade struct {
 }
 
 // CreateSession 创建面试会话
+// 面试会话列表复用 AgentConversation 集合, 创建时双写列表条目保证新会话可见
 func (s *InterviewSessionFacade) CreateSession(userID string) (*dto.InterviewSessionCreateRespDTO, error) {
 	sessionID := uuid.New().String()
 	session := models.InterviewSession{SessionID: sessionID, UserID: userID, Status: 1}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := mongorepo.CreateInterviewSession(ctx, &session); err != nil {
+		return nil, err
+	}
+
+	conv := models.AgentConversation{
+		SessionID:  sessionID,
+		UserID:     userID,
+		AgentID:    0, // 面试会话不绑定具体智能体
+		Title:      "模拟面试",
+		Status:     1,
+		MessageCnt: 0,
+	}
+	if err := mongorepo.CreateAgentConversation(ctx, &conv); err != nil {
+		// 补偿: 删除已创建的面试会话, 保证要么全部成功要么失败
+		_ = mongorepo.DeleteInterviewSession(ctx, sessionID)
 		return nil, err
 	}
 	return &dto.InterviewSessionCreateRespDTO{SessionID: sessionID}, nil

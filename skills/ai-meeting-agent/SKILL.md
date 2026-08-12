@@ -37,7 +37,7 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 - Handler 从 JWT 上下文读取 `username`。
 - Service `CreateConversationWithTitle` 生成 UUID 作为 `session_id`。
 - 标题默认 `New Conversation`, 首条消息超过 50 字符时截断。
-- 当前 `agentID` 参数硬编码为 "1", 入库 `AgentID` 固定为 1。
+- `agentID` 从请求体 `agent_id` 读取(可选, 空默认 "1"), `resolveAgentID` 校验配置存在且启用后入库, 校验失败返回 `-4001`。
 
 `AgentChat`（已实现 SSE 流式闭环）
 

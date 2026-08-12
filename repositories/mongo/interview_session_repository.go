@@ -52,6 +52,16 @@ func EndInterviewSession(ctx context.Context, sessionID, userID string) error {
 	return err
 }
 
+// DeleteInterviewSession 删除面试会话（CreateSession 双写失败时补偿用）
+func DeleteInterviewSession(ctx context.Context, sessionID string) error {
+	collection, err := GetCollection(interviewSessionsCollection)
+	if err != nil {
+		return err
+	}
+	_, err = collection.DeleteOne(ctx, bson.M{"_id": sessionID})
+	return err
+}
+
 // UpdateResumePath 更新面试会话的简历路径
 func UpdateResumePath(ctx context.Context, sessionID, userID, resumePath string) error {
 	collection, err := GetCollection(interviewSessionsCollection)
