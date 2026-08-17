@@ -51,6 +51,7 @@ description: 当需求涉及 AI 长上下文、历史消息窗口、压缩摘要
 - 从节点: 订阅 channel → 轮询检查主节点健康 → 收到通知读结果。
 - AI 流式输出作心跳: 主节点压缩时走 `CallConfiguredAIChatStream`, 在 `onChunk` 中调 `writer.Write` 刷新 `progressKey`(`累计字节数:时间戳`); 从节点检测 `progressKey` 停滞超 30s 则换主。`streamKey` 已移除, follower 仅靠 `progressKey` 判停滞, 不消费流内容。
 - 换主时**双通道**通知旧主停止: `notifyCancel` 同时 `Publish cancelChan`（Pub/Sub 毫秒级推送）+ 写 `cancelKey`（5s 轮询兜底）; 旧主 `watchCancel` 收到匹配自己 nodeID 的信号后 cancel context 自动断开 AI 调用。
+- 换主竞态(已修复): 新 leader 抢锁后清空 `progressKey` 但 fn 首段输出前有空窗口, 迟到的旧 follower 会误判新 leader 卡死并 cancel 它。修复: `runAsLeader` 清理后立即写占位进度 `0:<now>`(TTL LockTTL*2)。集群压测见 `cmd/sfcluster` + `scripts/sfcluster-run.sh`。
 - Redis 故障降级为本地 singleflight（`localGroup`）, 此时 `writer.redis` 为 nil, `Write` 直接 no-op。
 
 ## 关键不变量

@@ -182,6 +182,12 @@ func (g *DistributedGroup) runAsLeader(
 	// 清理上一次可能残留的进度数据和取消标记（换主场景）
 	g.redis.Del(execCtx, progressKey, cancelKey)
 
+	// 立即写占位进度: 消除"新 leader 上任 → fn 首段输出"之间的空窗口。
+	// 否则迟到的旧 follower 会检测到 progressKey 不存在, 误判新 leader 卡死,
+	// 读锁拿到新 leader 的 nodeID 写 cancelKey, 把刚上任的新 leader cancel 掉,
+	// 触发连环换主风暴(压测实测 exec 从 2 膨胀到 6 并伴随失败)。
+	g.redis.Set(execCtx, progressKey, fmt.Sprintf("0:%d", time.Now().UnixMilli()), LockTTL*2)
+
 	// 创建流式写入器，主节点每收到一段 AI 输出就刷新 progressKey 作心跳
 	writer := &StreamWriter{
 		redis:       g.redis,

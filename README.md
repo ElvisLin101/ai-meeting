@@ -115,6 +115,24 @@ Mongo 轮次归档（不可变）       ← 完整轮次历史
 go run ./cmd/sfprobe --addr localhost:6379 --password 123456 --concurrency 500
 ```
 
+**集群（多实例）压测**：`cmd/sfcluster` 启动 N 个独立 worker 进程（各自独立 DistributedGroup / 独立 nodeID / 进程隔离），仅共享一个 Redis，等价于真实集群中请求被打到不同实例：
+
+| 场景 | 实例数 | 每实例并发 | 总请求 | 实际执行 | 结果一致 | 失败 | 总耗时 | 执行实例 |
+|---|---|---|---|---|---|---|---|---|
+| 去重 | 3 | 50 | 150 | 1 | 150/150 | 0 | ~0.9s | 单实例 |
+| 换主（首个 leader 假死 40s） | 3 | 50 | 150 | 2 | 150/150 | 0 | ~30.5s | 假死实例 + 接管实例 |
+
+去重场景证明跨实例合并：3 个进程同时对同一 key 发起请求，全局只执行 1 次底层调用；换主场景证明故障转移：首个 leader 假死不刷新心跳，其余实例检测停滞（30s）后接管执行，所有请求拿到一致结果。复现：
+
+```bash
+# 去重场景
+bash scripts/sfcluster-run.sh --instances 3 --concurrency 50 --password 123456
+# 换主场景(首个 leader 假死触发换主, 约 30s)
+bash scripts/sfcluster-run.sh --instances 3 --concurrency 50 --password 123456 --failover-worker 0
+```
+
+> 集群压测暴露并修复了一个换主竞态：新 leader 抢锁成功后清空 progressKey，但 fn 首段输出前存在空窗口，迟到的旧 follower 会误判新 leader 卡死并 cancel 它，引发连环换主。修复：新 leader 清理后立即写占位进度，消除空窗口（见 `pkg/singleflight/singleflight.go`）。
+
 ### 3. AI 记忆压缩 — 长对话上下文管理
 
 **问题**：长对话场景下全量历史消息超出模型 token 限制，且每次都传全部历史浪费成本。

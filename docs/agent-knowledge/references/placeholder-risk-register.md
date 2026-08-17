@@ -39,6 +39,8 @@
 - `services/agent/agent_scene.go`: 4 个业务场景枚举, 已完整实现, 尚未被面试模块使用。
 - `services/agent/agent_properties_loader.go`: 启动缓存 + 场景解析器, 已完整实现。
 - `pkg/singleflight/singleflight.go`: 分布式 SingleFlight, 已完整实现; 流式心跳已接入 AI 侧压缩路径（`AiMemoryService` 压缩走 `CallConfiguredAIChatStream`, `onChunk` 内调 `writer.Write` 刷新 `progressKey` 时间戳, follower 据此判停滞换主）。Agent 侧不压缩, 不走 SingleFlight。
+- `pkg/singleflight/singleflight.go` 换主竞态(已修复): 新 leader 抢锁成功后清空 `progressKey`, 但 fn 首段输出前存在空窗口, 迟到的旧 follower 会误判新 leader 卡死并 cancel 它, 引发连环换主。**修复**: `runAsLeader` 清理后立即写占位进度 `0:<now>`(TTL LockTTL*2), 消除空窗口。集群压测 `cmd/sfcluster` 暴露此 bug, 修复后换主场景 exec=2 且 0 失败。
+- `cmd/sfcluster/main.go`: 集群(多实例)压测工具, coordinator + N 个独立 worker 进程共享一个 Redis, 验证跨实例去重(exec=1)与换主故障转移(exec=2)。一键脚本 `scripts/sfcluster-run.sh`。
 - `repositories/redis.go`: 全局 `SingleFlight` 实例, 在 `InitRedis` 中初始化。
 
 替换任意占位逻辑后, 从本文件移除或改写对应条目。
