@@ -1,6 +1,7 @@
 # Go build outputs
 ai-meeting
 sfprobe
+/sfcluster
 *.exe
 *.test
 *.out
