@@ -91,7 +91,3 @@
 | GET | `/interview/interview/record/:sessionId` | `InterviewRecordController.GetInterviewRecordBySessionId` | `InterviewRecordService.GetBySessionId` |
 | POST | `/interview/interview/record/save-from-redis/:sessionId` | `InterviewRecordController.SaveInterviewRecordFromRedis` | `InterviewRecordService.SaveInterviewRecordFromRedis` |
 | GET | `/interview/sessions/:sessionId/resume/preview` | `InterviewResumeController.PreviewResume` | `InterviewSessionFacade.PreviewResume` |
-
-## Media
-
-媒体路由位于 `setupMediaRoutes`, 但对应 handler/service 文件当前不在本次知识初始覆盖范围。修改媒体接口时先补充新的 media Skill。

@@ -30,7 +30,6 @@ func SetupRouter() *gin.Engine {
 	setupAgentRoutes(authed)
 	setupAiRoutes(authed)
 	setupInterviewRoutes(authed)
-	setupMediaRoutes(authed)
 
 	return r
 }
@@ -146,13 +145,4 @@ func setupInterviewRoutes(authed *gin.RouterGroup) {
 	interview.POST("/interview/record/save-from-redis/:sessionId", recordController.SaveInterviewRecordFromRedis)
 
 	interview.GET("/sessions/:sessionId/resume/preview", resumeController.PreviewResume)
-}
-
-func setupMediaRoutes(authed *gin.RouterGroup) {
-	ttsController := handlers.NewXunfeiTtsController()
-
-	xunfeiTts := authed.Group("/xunfei/tts")
-	xunfeiTts.POST("/tasks", ttsController.CreateTask)
-	xunfeiTts.GET("/tasks/:taskId", ttsController.QueryTask)
-	xunfeiTts.POST("/synthesize", ttsController.SynthesizeAndWait)
 }

@@ -1,6 +1,6 @@
 # 项目能力演进清单
 
-最后整理: 2026-07-22
+最后整理: 2026-08-24
 
 ## 目的
 
@@ -26,7 +26,6 @@
 - 普通 AI 对话: 多模型统一接入、SSE 流式输出、DeepSeek `reasoning_content`、用户消息和助手消息落 MongoDB。
 - 面试主链路: 简历驱动出题、答题评分、追问规则、状态机、幂等、同题锁、运行态恢复、热/冷快照、最终归档、雷达图。
 - 运行时保护: AI Guard、SingleFlight、分布式锁、Fencing Token、L1 缓存、超时、重试、并发上限。
-- 媒体能力: 服务端 WebSocket 推送、长文本 TTS 异步任务和同步等待。
 - 工程化: Docker Compose、CI、测试覆盖、skills 知识体系。
 
 ## 接口覆盖情况
@@ -41,9 +40,8 @@
 - `/api/xunzhi/v1/ai/**`
 - `/api/xunzhi/v1/ai-properties/**`
 - `/api/xunzhi/v1/interview/**`
-- `/api/xunzhi/v1/xunfei/tts/**`
 
-注意: 路径存在不等于能力完成。Agent/AI/面试主链路已接真实实现，媒体(TTS)仍为 mock(WebSocket mock 接口已移除)。
+注意: 路径存在不等于能力完成。Agent/AI/面试主链路已接真实实现，媒体(TTS/WebSocket)接口已整体移除，不再提供任何媒体 REST 路径。
 
 ### 记忆阈值接口
 
@@ -203,26 +201,23 @@ AI 侧有运行时压缩阈值接口:
 - P2: 面试高成本 AI 调用接 SingleFlight。
 - P2: 为压缩、AI、面试任务引入 worker pool。
 
-### 6. 媒体与实时通信
+### 6. 媒体与实时通信(已整体移除)
 
 目标能力:
 
 - 服务端主动推送消息。
-- 长文本 TTS 真实异步任务、查询、同步等待。
+- 长文本 TTS 异步任务、查询、同步等待。
 - 在线用户连接表、心跳、事件协议。
 
 当前实现:
 
-- TTS 三个接口只返回 mock task/status。
+- 媒体能力已整体移除: WebSocket mock 与 TTS mock 接口(`/xunfei/tts/**`)均已删除，不再提供任何媒体/实时通信 REST 路径。
 - 不计划实现讯飞实时 ASR，因此不需要讯飞 ASR 客户端、二进制音频帧处理和 ASR 增量去重。
-- 没有真实 TTS 客户端。
-- 没有在线用户连接表、心跳、事件协议(WebSocket mock 接口已移除，不实现)。
 
 待办:
 
-- P1: WebSocket 在线用户表和推送服务。
-- P1: TTS 真实任务客户端。
 - 不实施: 讯飞实时 ASR WebSocket 和 ASR 增量稳定化策略。
+- 不实施: WebSocket 推送与长文本 TTS(如需语音能力，另行确定方案后再单独设计)。
 
 ### 7. 数据模型和持久化
 
@@ -281,7 +276,7 @@ AI 侧有运行时压缩阈值接口:
 | AI | REST 覆盖, SSE chat | provider handler、reasoning_content 持久化、错误消息策略、运行时保护 | P0/P1 |
 | Interview | 路由覆盖 | 会话列表/历史真相源统一、神态分析 | P0/P2 |
 | Runtime | 无独立接口 | AI Guard、worker pool、fencing token、分 stage 配置 | P1/P2 |
-| Media | REST 覆盖 | 讯飞 ASR 明确不实现; TTS/推送为 mock | P1 |
+| Media | 已移除(无路由) | 媒体能力整体移除, 不实现(TTS/推送/ASR) | - |
 | Persistence | 基本完成 | 真相源策略文档化 | P1/P2 |
 | DevOps/Test | 少量脚本 | CI、单测、压力/恢复测试 | P1/P2 |
 
@@ -292,5 +287,5 @@ AI 侧有运行时压缩阈值接口:
 3. AI 增强: reasoning content 持久化、错误消息策略和运行时保护。
 4. 面试真相源: 会话列表/历史真相源统一。
 5. 运行时保护: AI Guard 先行，worker pool 后接。
-6. 媒体: WebSocket 推送和真实 TTS。讯飞实时 ASR 不实现。
+6. 媒体: 已移除, 不实现。如需语音能力另行设计。
 7. 工程化: CI、核心测试和生成式接口索引。
