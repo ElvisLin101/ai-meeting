@@ -74,6 +74,7 @@ pre { background: #f5f5f5; padding: 10px; border-radius: 4px; font-size: 12px; o
 <div class="tab-bar">
   <div class="tab active" onclick="switchTab('interview')">📝 模拟面试</div>
   <div class="tab" onclick="switchTab('ai')">💬 AI 对话</div>
+  <div class="tab" onclick="switchTab('agent')">🤖 Agent</div>
   <div class="tab" onclick="switchTab('metrics')">📊 指标监控</div>
 </div>
 
@@ -158,6 +159,23 @@ pre { background: #f5f5f5; padding: 10px; border-radius: 4px; font-size: 12px; o
   </div>
 </div>
 
+<!-- Agent Tab -->
+<div id="tab-agent" class="tab-content">
+  <div class="panel">
+    <h2>Agent Run（自主编排）</h2>
+    <div class="row">
+      <textarea id="agentInput" placeholder="例如：帮我查一下字节跳动后端面试常考什么，然后生成一个两周复习计划，并保存到 plan.md">帮我查一下 Go 后端面试常考什么，生成一个两周复习计划并保存到 plan.md</textarea>
+    </div>
+    <div class="row">
+      <button class="success" onclick="runAgent()">▶ 运行 Agent</button>
+      <span id="agentRunInfo" style="font-size:13px;color:#999;"></span>
+    </div>
+    <div class="row">
+      <textarea id="agentOutput" style="height:220px" readonly placeholder="Agent 输出..."></textarea>
+    </div>
+  </div>
+</div>
+
 <!-- 指标 Tab -->
 <div id="tab-metrics" class="tab-content">
   <div class="panel">
@@ -198,9 +216,30 @@ async function register() {
 
 // === Tab 切换 ===
 function switchTab(name) {
-  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', t.textContent.includes(name==='interview'?'面试':name==='ai'?'AI':'指标')));
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', t.textContent.includes(name==='interview'?'面试':name==='ai'?'AI':name==='agent'?'Agent':'指标')));
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
   document.getElementById('tab-' + name).classList.add('active');
+}
+
+// === Agent ===
+async function runAgent() {
+  const input = document.getElementById('agentInput').value.trim();
+  if (!input) { alert('请输入任务'); return; }
+  const info = document.getElementById('agentRunInfo');
+  const out = document.getElementById('agentOutput');
+  info.textContent = '运行中...';
+  out.value = '';
+  try {
+    const r = await api('POST', '/agent/runs', { input: input });
+    if (r.run_id) {
+      info.textContent = '✅ run=' + r.run_id + ' steps=' + r.steps + ' stop=' + r.stop_reason;
+      out.value = r.output || '(无输出)';
+    } else {
+      info.textContent = '❌ ' + (r.error || '运行失败');
+    }
+  } catch (e) {
+    info.textContent = '❌ ' + e;
+  }
 }
 
 // === 面试 ===
