@@ -5,7 +5,6 @@ import (
 	"ai-meeting/config"
 	"ai-meeting/models"
 	"ai-meeting/repositories"
-	mongorepo "ai-meeting/repositories/mongo"
 	mysqlrepo "ai-meeting/repositories/mysql"
 	"ai-meeting/services/metric"
 	"context"
@@ -38,6 +37,7 @@ func main() {
 
 	// 注入 singleflight 指标回调
 	metricSvc := metric.GetMetricService()
+	metricSvc.Start()
 	repositories.SingleFlight.SetMetricFunc(func(module, event string, success bool, extra string) {
 		metricSvc.Record(models.MetricLog{
 			Module:  module,
@@ -46,10 +46,6 @@ func main() {
 			Extra:   extra,
 		})
 	})
-
-	if err := mongorepo.InitMongoDB(); err != nil {
-		log.Fatalf("Failed to initialize MongoDB: %v", err)
-	}
 
 	r := routes.SetupRouter()
 
@@ -104,9 +100,5 @@ func closeConnections() {
 	if repositories.RedisClient != nil {
 		_ = repositories.RedisClient.Close()
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if mongorepo.Client != nil {
-		_ = mongorepo.Client.Disconnect(ctx)
-	}
+
 }

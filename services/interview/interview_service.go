@@ -6,7 +6,7 @@ import (
 	"ai-meeting/models"
 	"ai-meeting/pkg/ecode"
 	"ai-meeting/repositories"
-	mongorepo "ai-meeting/repositories/mongo"
+	mysqlrepo "ai-meeting/repositories/mysql"
 	"ai-meeting/services/interview/evaluation"
 	"ai-meeting/services/interview/flow"
 	"ai-meeting/services/interview/runtime"
@@ -41,21 +41,22 @@ func (s *InterviewSessionFacade) CreateSession(userID string) (*dto.InterviewSes
 	session := models.InterviewSession{SessionID: sessionID, UserID: userID, Status: 1}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := mongorepo.CreateInterviewSession(ctx, &session); err != nil {
+	if err := mysqlrepo.CreateInterviewSession(ctx, &session); err != nil {
 		return nil, err
 	}
 
-	conv := models.AgentConversation{
-		SessionID:  sessionID,
-		UserID:     userID,
-		AgentID:    0, // 面试会话不绑定具体智能体
-		Title:      "模拟面试",
-		Status:     1,
-		MessageCnt: 0,
+	// 双写会话列表条目(统一 conversations 表, scene=interview)
+	conv := models.Conversation{
+		SessionID:    sessionID,
+		UserID:       userID,
+		Scene:        models.ConversationSceneInterview,
+		Title:        "模拟面试",
+		Status:       models.ConversationStatusActive,
+		MessageCount: 0,
 	}
-	if err := mongorepo.CreateAgentConversation(ctx, &conv); err != nil {
+	if err := mysqlrepo.CreateConversation(&conv); err != nil {
 		// 补偿: 删除已创建的面试会话, 保证要么全部成功要么失败
-		_ = mongorepo.DeleteInterviewSession(ctx, sessionID)
+		_ = mysqlrepo.DeleteInterviewSession(ctx, sessionID)
 		return nil, err
 	}
 	return &dto.InterviewSessionCreateRespDTO{SessionID: sessionID}, nil
@@ -64,37 +65,64 @@ func (s *InterviewSessionFacade) CreateSession(userID string) (*dto.InterviewSes
 // PageConversations 分页查询面试会话列表
 func (s *InterviewSessionFacade) PageConversations(userID string, req dto.InterviewConversationPageReqDTO) ([]models.AgentConversation, int64, error) {
 	offset := (req.Page - 1) * req.Size
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return mongorepo.PageAgentConversations(ctx, userID, offset, req.Size)
+	convs, total, err := mysqlrepo.PageConversations(userID, models.ConversationSceneInterview, offset, req.Size)
+	if err != nil {
+		return nil, 0, err
+	}
+	// 统一会话模型 -> 旧响应模型(保持接口兼容)
+	out := make([]models.AgentConversation, 0, len(convs))
+	for _, c := range convs {
+		out = append(out, models.AgentConversation{
+			SessionID: c.SessionID, UserID: c.UserID, AgentID: c.AgentID,
+			Title: c.Title, Status: c.Status, MessageCnt: c.MessageCount,
+			CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
+		})
+	}
+	return out, total, nil
 }
 
 // GetConversationHistory 获取会话历史消息
 func (s *InterviewSessionFacade) GetConversationHistory(sessionID, userID string) ([]models.AgentMessage, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return mongorepo.ListAgentMessagesAsc(ctx, sessionID, userID)
+	messages, err := mysqlrepo.ListMessagesAsc(sessionID, userID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]models.AgentMessage, 0, len(messages))
+	for _, m := range messages {
+		out = append(out, models.AgentMessage{
+			ID: m.ID, SessionID: m.SessionID, UserID: m.UserID, Role: m.Role,
+			Content: m.Content, Sequence: int(m.Sequence), CreatedAt: m.CreatedAt,
+		})
+	}
+	return out, nil
 }
 
 // PageHistoryMessages 分页查询历史消息
 func (s *InterviewSessionFacade) PageHistoryMessages(sessionID string, page, size int, userID string) ([]models.AgentMessage, int64, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return mongorepo.PageAgentMessages(ctx, sessionID, page, size, userID)
+	messages, total, err := mysqlrepo.PageMessages(sessionID, userID, page, size)
+	if err != nil {
+		return nil, 0, err
+	}
+	out := make([]models.AgentMessage, 0, len(messages))
+	for _, m := range messages {
+		out = append(out, models.AgentMessage{
+			ID: m.ID, SessionID: m.SessionID, UserID: m.UserID, Role: m.Role,
+			Content: m.Content, Sequence: int(m.Sequence), CreatedAt: m.CreatedAt,
+		})
+	}
+	return out, total, nil
 }
 
 // FinishSession 完成面试会话
 func (s *InterviewSessionFacade) FinishSession(sessionID, userID string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return mongorepo.EndInterviewSession(ctx, sessionID, userID)
+	return mysqlrepo.EndInterviewSession(ctx, sessionID, userID)
 }
 
 // EndConversation 结束会话
 func (s *InterviewSessionFacade) EndConversation(sessionID, userID string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return mongorepo.EndAgentConversation(ctx, sessionID, userID)
+	return mysqlrepo.EndConversation(sessionID, userID)
 }
 
 // ExtractInterviewQuestions 从简历提取面试问题
@@ -193,7 +221,7 @@ func (s *InterviewSessionFacade) UploadResume(sessionID, userID string, fileHead
 	// 4. 回填 ResumePath 到 Mongo
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := mongorepo.UpdateResumePath(ctx, sessionID, userID, savePath); err != nil {
+	if err := mysqlrepo.UpdateResumePath(ctx, sessionID, userID, savePath); err != nil {
 		logrus.Warnf("Failed to update resume path, session=%s, err=%v", sessionID, err)
 	}
 
@@ -362,7 +390,7 @@ func (s *InterviewSessionFacade) PreviewResume(sessionID, userID string) (string
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	session, err := mongorepo.FindInterviewSession(ctx, sessionID, userID)
+	session, err := mysqlrepo.FindInterviewSession(ctx, sessionID, userID)
 	if err != nil {
 		return "", ecode.New(ecode.ErrSessionNotFound, "面试会话不存在")
 	}
@@ -418,21 +446,21 @@ func (s *InterviewRecordService) SaveInterviewRecord(sessionID, userID string, r
 	record := models.InterviewRecord{SessionID: sessionID, UserID: userID, QuestionNum: req.QuestionNum, Question: req.Question, Answer: req.Answer, Score: req.Score, Suggestions: req.Suggestions}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return mongorepo.CreateInterviewRecord(ctx, &record)
+	return mysqlrepo.CreateInterviewRecord(ctx, &record)
 }
 
 // PageInterviewRecords 分页查询面试记录
 func (s *InterviewRecordService) PageInterviewRecords(userID string, req dto.InterviewRecordPageReqDTO) ([]models.InterviewRecord, int64, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return mongorepo.PageInterviewRecords(ctx, userID, req.SessionID, req.Page, req.Size)
+	return mysqlrepo.PageInterviewRecords(ctx, userID, req.SessionID, req.Page, req.Size)
 }
 
 // GetBySessionId 根据会话ID查询面试记录
 func (s *InterviewRecordService) GetBySessionId(sessionID, userID string) (*models.InterviewRecord, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return mongorepo.FindInterviewRecordBySessionID(ctx, sessionID, userID)
+	return mysqlrepo.FindInterviewRecordBySessionID(ctx, sessionID, userID)
 }
 
 // SaveInterviewRecordFromRedis 从 TurnArchive 汇总生成面试报告, 写入 InterviewRecord(Mongo)
@@ -441,7 +469,7 @@ func (s *InterviewRecordService) SaveInterviewRecordFromRedis(sessionID, userID 
 	defer cancel()
 
 	// 1. 从 Mongo TurnArchive 读全部轮次
-	archives, err := mongorepo.FindTurnArchives(ctx, sessionID)
+	archives, err := mysqlrepo.FindTurnArchives(ctx, sessionID)
 	if err != nil {
 		return ecode.Wrap(err, "读取轮次归档失败")
 	}
@@ -476,7 +504,7 @@ func (s *InterviewRecordService) SaveInterviewRecordFromRedis(sessionID, userID 
 		Score:       totalScore,
 		Suggestions: lastTurn.Feedback,
 	}
-	if err := mongorepo.CreateInterviewRecord(ctx, record); err != nil {
+	if err := mysqlrepo.CreateInterviewRecord(ctx, record); err != nil {
 		return ecode.Wrap(err, "保存面试报告失败")
 	}
 

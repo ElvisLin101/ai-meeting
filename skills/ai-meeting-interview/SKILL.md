@@ -22,12 +22,12 @@ description: 当需求涉及面试会话、面试题、作答评分、建议、�
 - Service: `services/interview/interview_service.go`。
 - 状态机: `services/interview/flow/flow_state_machine.go`, `services/interview/flow/follow_up_rule.go`。
 - 答题流水线: `services/interview/flow/answer_pipeline.go`(编排: 幂等→锁→评分→推进flow→写分→turn log; 失败走条件回滚), `services/interview/flow/idempotency_service.go`(processing/replay双key), `services/interview/flow/turn_repair_service.go`(turn log 写失败异步补偿)。
-- 快照/恢复: `services/interview/runtime/snapshot_service.go`(refreshSnapshot 写 Mongo CAS + ensureRuntime 从 Mongo 重建 Redis)。
+- 快照/恢复: `services/interview/runtime/snapshot_service.go`(refreshSnapshot 写 MySQL CAS + ensureRuntime 从 MySQL 重建 Redis)。
 - 通用分布式锁: `pkg/lock/lock.go`(题级锁 SetNX+Lua)。
 - AI 调用(评分/出题/追问): `services/interview/evaluation/evaluation_service.go`, `services/interview/evaluation/extraction_service.go`, `services/interview/evaluation/followup_service.go`, `services/interview/evaluation/prompt.go`, `services/interview/evaluation/response_parser.go`。走 DeepSeek(`CallConfiguredAIChat`, aiID=0)。
 - 运行态缓存: `services/interview/runtime/cache_keys.go`, `services/interview/runtime/flow_cache.go`, `services/interview/runtime/score_cache.go`, `services/interview/runtime/turn_log_cache.go`, `services/interview/runtime/question_cache.go`(题目/建议/简历上下文)。
-- Mongo 仓储: `repositories/mongo/interview_session_repository.go`, `repositories/mongo/interview_record_repository.go`, `repositories/mongo/interview_question_repository.go`。
-- 历史消息查询复用 Mongo: `repositories/mongo/agent_message_repository.go`。
+- MySQL 仓储: `repositories/mysql/interview_repository.go`, `repositories/mysql/interview_repository.go`, `repositories/mysql/interview_repository.go`。
+- 历史消息查询复用 MySQL: `repositories/mysql/message_repository.go`。
 - DTO: `dto/interview.go`。
 - 模型: `models/interview.go`(会话/记录/题目), `models/interview_runtime.go`(FlowState/TurnLog/阶段枚举)。
 - PDF 简历解析: `clients/resume_parser.go`(ledongthuc/pdf, 提取文本)。
@@ -49,7 +49,7 @@ description: 当需求涉及面试会话、面试题、作答评分、建议、�
 
 `InterviewQuestionAndAnswer`
 
-- 出题: `POST /sessions/:sessionId/interview-questions`(body: `resume_content` 文本) 或 `POST /sessions/:sessionId/resume/upload`(multipart file: PDF)。PDF 上传后解析文本→回填 `InterviewSession.ResumePath`(Mongo)→走出题流程。
+- 出题: `POST /sessions/:sessionId/interview-questions`(body: `resume_content` 文本) 或 `POST /sessions/:sessionId/resume/upload`(multipart file: PDF)。PDF 上传后解析文本→回填 `InterviewSession.ResumePath`(MySQL)→走出题流程。
 - 出题流程: `ExtractionService.ExtractQuestions`(DeepSeek) → 写 Redis(questions/suggestions/resumeScore/direction/resumeContext) → `ResetScore` + `EnsureInitialized`(flow=ASKING, Q#="1") → 返回第一题。
 - 答题: `POST /sessions/:sessionId/interview/answer-json`(body: question_number/answer_content/request_id)。走 `AnswerPipeline`: 幂等→题级锁→评分→推进flow→计分→turn log。失败语义: 评分失败回滚 `EVALUATING→ASKING`(flow 不卡死评分态); 推进后的失败走**条件回滚**(`RollbackFlowCAS`, 仅当 flow 仍是自己推进后的 version 才回滚, 已被他人推进则放弃, 不砸并发进度); 题级锁 TTL(300s) > 执行预算(120s), 锁不先于请求过期。
 - 取题: `GET /sessions/:sessionId/current-question` 或 `/next-question`。读 flow + Redis 题面。
@@ -57,19 +57,19 @@ description: 当需求涉及面试会话、面试题、作答评分、建议、�
 - 评分查询: `GET /sessions/:sessionId/interview/score`(Redis score key)、`GET /sessions/:sessionId/resume/score`(Redis resumeScore key)。
 - 题目查询: `GET /sessions/:sessionId/interview/questions`(Redis questions Hash)、`GET /sessions/:sessionId/interview/suggestions`(Redis suggestions Hash)。
 - 雷达图: `GET /sessions/:sessionId/radar-chart`。从 resumeScore + interviewScore 加权计算四维（简历匹配/面试表现/专业技能/综合潜力）。
-- 简历预览: `GET /sessions/:sessionId/resume/preview`。从 Mongo 读 ResumePath → 解析 PDF 返回文本。
+- 简历预览: `GET /sessions/:sessionId/resume/preview`。从 MySQL 读 ResumePath → 解析 PDF 返回文本。
 - 表情/神态评估已移除（不依赖多模态 API）。
 
 `InterviewRecord`
 
-- `SaveInterviewRecord` 会写入 MongoDB `interview_records`。
+- `SaveInterviewRecord` 会写入 MySQL `interview_records`。
 - `PageInterviewRecords` 可按 `session_id` 过滤。
 - `GetBySessionId` 当前只返回第一条记录。
-- `SaveInterviewRecordFromRedis` 已实现: 从 Mongo `TurnArchive` 汇总轮次算平均分, 取最后一轮作报告概要, 写入 `InterviewRecord`。
+- `SaveInterviewRecordFromRedis` 已实现: 从 MySQL `TurnArchive` 汇总轮次算平均分, 取最后一轮作报告概要, 写入 `InterviewRecord`。
 
 `ResumePreview`
 
-- 从 Mongo 读 `ResumePath` → 解析 PDF 返回文本。
+- 从 MySQL 读 `ResumePath` → 解析 PDF 返回文本。
 
 ## 修改指南
 
@@ -81,7 +81,7 @@ description: 当需求涉及面试会话、面试题、作答评分、建议、�
 
 ## 当前风险
 
-- 会话创建写 MongoDB `interview_sessions`, 会话列表却读 Mongo `agent_conversations`（数据源错位, 均在 Mongo 但表不同）。
+- 会话创建写 MySQL `interview_sessions`, 会话列表却读 MySQL `agent_conversations`（数据源错位, 均在 MySQL 但表不同）。
 - 面试记录按 session 查询只取第一条, 不适合多题记录展示。
 - **答题流水线回滚是条件回滚(CAS, `services/interview/runtime/flow_cache.go: RollbackFlowCAS`): 只有 flow 未被他人推进时才回滚, 严禁改回无条件覆盖(`SaveFlow`)——那会砸掉并发已提交的进度。**
-- 运行态治理(状态机/运行态恢复/热冷快照/轮次归档/幂等补偿)已落地, 详见 `docs/agent-knowledge/references/interview-runtime-governance.md` 及 `services/interview/flow/`、`services/interview/runtime/`、`services/interview/evaluation/` 目录。`InterviewQuestion` 已有 Mongo 仓储并被 `question_cache` 使用。
+- 运行态治理(状态机/运行态恢复/热冷快照/轮次归档/幂等补偿)已落地, 详见 `docs/agent-knowledge/references/interview-runtime-governance.md` 及 `services/interview/flow/`、`services/interview/runtime/`、`services/interview/evaluation/` 目录。`InterviewQuestion` 已有 MySQL 仓储并被 `question_cache` 使用。

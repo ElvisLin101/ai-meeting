@@ -4,10 +4,7 @@ import (
 	"ai-meeting/clients"
 	"ai-meeting/dto"
 	"ai-meeting/models"
-	mongorepo "ai-meeting/repositories/mongo"
 	mysqlrepo "ai-meeting/repositories/mysql"
-	"context"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
@@ -22,10 +19,11 @@ func (s *AiConversationService) CreateConversationWithTitle(username string, aiI
 	if len(firstMessage) > 50 {
 		title = firstMessage[:50] + "..."
 	}
-	conversation := models.AiConversation{SessionID: sessionID, UserID: username, AiID: aiID, Title: title, Status: 1, MessageCnt: 0}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := mongorepo.CreateAiConversation(ctx, &conversation); err != nil {
+	conversation := models.Conversation{
+		SessionID: sessionID, UserID: username, Scene: models.ConversationSceneAI,
+		AgentID: aiID, Title: title, Status: models.ConversationStatusActive, MessageCount: 0,
+	}
+	if err := mysqlrepo.CreateConversation(&conversation); err != nil {
 		return nil, err
 	}
 	return &dto.AiSessionCreateRespDTO{SessionID: sessionID, Title: title}, nil
@@ -34,51 +32,47 @@ func (s *AiConversationService) CreateConversationWithTitle(username string, aiI
 // PageConversations 分页查询用户的AI会话列表
 func (s *AiConversationService) PageConversations(username string, req dto.AiConversationPageReqDTO) ([]models.AiConversation, int64, error) {
 	offset := (req.Page - 1) * req.Size
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return mongorepo.PageAiConversations(ctx, username, offset, req.Size)
+	convs, total, err := mysqlrepo.PageConversations(username, models.ConversationSceneAI, offset, req.Size)
+	if err != nil {
+		return nil, 0, err
+	}
+	out := make([]models.AiConversation, 0, len(convs))
+	for _, c := range convs {
+		out = append(out, toAiConversation(c))
+	}
+	return out, total, nil
 }
 
 // UpdateConversation 更新会话信息
 func (s *AiConversationService) UpdateConversation(sessionID string, messageCount int, title, username string) error {
 	updates := map[string]interface{}{}
 	if messageCount > 0 {
-		updates["message_cnt"] = messageCount
+		updates["message_count"] = messageCount
 	}
 	if title != "" {
 		updates["title"] = title
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return mongorepo.UpdateAiConversation(ctx, sessionID, username, updates)
+	if len(updates) == 0 {
+		return nil
+	}
+	return mysqlrepo.UpdateConversation(sessionID, username, updates)
 }
 
 // UpdateConversationMessageCount 仅更新会话消息计数
 func (s *AiConversationService) UpdateConversationMessageCount(sessionID, username string, messageCount int) error {
-	updates := map[string]interface{}{
-		"message_cnt": messageCount,
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return mongorepo.UpdateAiConversation(ctx, sessionID, username, updates)
+	return mysqlrepo.UpdateConversation(sessionID, username, map[string]interface{}{
+		"message_count": messageCount,
+	})
 }
 
 // EndConversation 结束会话
 func (s *AiConversationService) EndConversation(sessionID, username string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return mongorepo.EndAiConversation(ctx, sessionID, username)
+	return mysqlrepo.EndConversation(sessionID, username)
 }
 
 // DeleteConversation 删除会话
 func (s *AiConversationService) DeleteConversation(sessionID, username string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := mongorepo.DeleteAiConversation(ctx, sessionID, username); err != nil {
-		return err
-	}
-
-	if err := mongorepo.DeleteAiMessagesBySession(ctx, sessionID, username); err != nil {
+	if err := mysqlrepo.DeleteConversation(sessionID, username); err != nil {
 		return err
 	}
 	return GetAiMemoryService().ClearCompressedContext(sessionID)
@@ -86,9 +80,12 @@ func (s *AiConversationService) DeleteConversation(sessionID, username string) e
 
 // GetConversationBySessionId 根据会话ID查询会话
 func (s *AiConversationService) GetConversationBySessionId(sessionID, username string) (*models.AiConversation, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return mongorepo.FindAiConversationBySessionID(ctx, sessionID, username)
+	conv, err := mysqlrepo.FindConversationBySessionAndUser(sessionID, username)
+	if err != nil || conv == nil {
+		return nil, err
+	}
+	out := toAiConversation(*conv)
+	return &out, nil
 }
 
 var aiConversationServiceInstance *AiConversationService
@@ -106,24 +103,52 @@ type AiMessageService struct{}
 
 // GetConversationHistory 获取会话历史消息
 func (s *AiMessageService) GetConversationHistory(sessionID, username string) ([]models.AiMessage, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return mongorepo.ListAiMessagesAsc(ctx, sessionID, username)
+	messages, err := mysqlrepo.ListMessagesAsc(sessionID, username)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]models.AiMessage, 0, len(messages))
+	for _, m := range messages {
+		out = append(out, toAiMessage(m))
+	}
+	return out, nil
 }
 
 // PageHistoryMessages 分页查询历史消息
 func (s *AiMessageService) PageHistoryMessages(sessionID string, page, size int, username string) ([]models.AiMessage, int64, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return mongorepo.PageAiMessages(ctx, sessionID, page, size, username)
+	messages, total, err := mysqlrepo.PageMessages(sessionID, username, page, size)
+	if err != nil {
+		return nil, 0, err
+	}
+	out := make([]models.AiMessage, 0, len(messages))
+	for _, m := range messages {
+		out = append(out, toAiMessage(m))
+	}
+	return out, total, nil
 }
 
 // SaveMessage 保存消息
 func (s *AiMessageService) SaveMessage(sessionID, userID, role, content string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_, err := mongorepo.SaveAiMessage(ctx, sessionID, userID, role, content)
-	return err
+	return mysqlrepo.CreateMessage(&models.Message{
+		SessionID: sessionID, UserID: userID, Role: role, Content: content,
+	})
+}
+
+// toAiConversation 统一会话模型转旧响应模型
+func toAiConversation(c models.Conversation) models.AiConversation {
+	return models.AiConversation{
+		SessionID: c.SessionID, UserID: c.UserID, AiID: c.AgentID,
+		Title: c.Title, Status: c.Status, MessageCnt: c.MessageCount,
+		CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
+	}
+}
+
+// toAiMessage 统一消息模型转旧响应模型
+func toAiMessage(m models.Message) models.AiMessage {
+	return models.AiMessage{
+		ID: m.ID, SessionID: m.SessionID, UserID: m.UserID, Role: m.Role,
+		Content: m.Content, Sequence: int(m.Sequence), CreatedAt: m.CreatedAt,
+	}
 }
 
 var aiMessageServiceInstance *AiMessageService

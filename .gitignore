@@ -19,6 +19,7 @@ tmp/
 config/*.local.yaml
 config/config.yaml
 uploads/
+sandbox/
 
 # OS and editor files
 .DS_Store

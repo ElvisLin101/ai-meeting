@@ -24,10 +24,61 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 - 启动缓存 + 场景解析器: `services/agent/agent_properties_loader.go`（sync.Map 内存缓存 + miss 查库 + ResolveRequired）。
 - 模型客户端: `clients/ai_model_client.go`（CallConfiguredAIChatStream, DeepSeek/OpenAI 兼容）。
 - MySQL 仓储: `repositories/mysql/agent_properties_repository.go`, `repositories/mysql/agent_file_asset_repository.go`。
-- Mongo 仓储: `repositories/mongo/agent_conversation_repository.go`(会话), `repositories/mongo/agent_message_repository.go`(消息)。
+- MySQL 仓储: `repositories/mysql/conversation_repository.go`(会话), `repositories/mysql/message_repository.go`(消息)。
 - DTO: `dto/agent.go`。
 - 模型: `models/agent.go`（AgentProperties 含 ApiKey/ApiSecret/ApiFlowId；AgentMessage 含 ResponseTime/ErrorMessage）。
-- 记忆: Agent 侧**不使用压缩记忆**。长对话压缩能力仅属 AI 侧（`services/ai/ai_memory_service.go`）。Agent 侧上下文未来由面试工作流状态机结构化状态管理, 不走压缩摘要。
+- 记忆: 旧 `AgentChat` 链路不使用压缩记忆；当前 `Agent Run` 链路使用 `services/agent/context/` 的压缩摘要，两者不要混用。
+
+### Agent Run 执行链（新，独立于上面的 AgentChat）
+
+- 路由: `api/routes/routes.go` 中 `setupAgentRunRoutes`。
+- Handler: `api/handlers/agent_run_handler.go`（`POST /agent/runs`、`POST /agent/runs/stream`）。
+- 编排: `services/agent/run/service.go`（会话归属 → 消息落库 → 四层上下文 → ReAct loop → run/step 落库 → 异步压缩/画像）。
+- 循环: `services/agent/loop/loop.go`（终止条件/熔断/工具批调度）。
+- 工具: `services/agent/tools/`（`services/agent/tools/tool.go` 契约与 ToolMeta、`services/agent/tools/executor.go` 单工具收口、`services/agent/tools/batch.go` 单步批调度）。
+- 上下文: `services/agent/context/`（token 预算 + 四层上下文 + 画像 + 压缩）。
+- 注意: 本节是当前 Agent 主链路；上面的 `AgentChat` 是旧 SSE 会话链路，两者不要混用。
+
+### 上下文与记忆（token 预算版）
+
+- 预算: `services/agent/context/tokens.go` 做保守估算（CJK 1 token/字，ASCII 4 字符/token，1.15 安全系数）；`services/agent/context/assembler.go` 按 token 组装 identity/profile/summary/recent，近期消息从最新往前选，放不下就停（最新一条过大才截断）。
+- 边界: `compressed_contexts.index` 是 `CoveredThroughSeq`；摘要覆盖 `sequence <= index`，短期只取 `sequence > index`，二者不重叠（`services/agent/context/store.go` 的 `LoadRecentMessagesAfter`）。
+- 压缩: `services/agent/context/compress.go` 只压缩对话消息，不压缩 identity/profile/plan/tool schema；按 token 触发，压缩较旧的 80%，保留最近 20%（最小 600 token），增量合并旧摘要；成功后用 tail 重建 Redis 近期列表。
+- 存储: 短期 Redis List + MySQL `messages` 全量；中期 Redis summary + MySQL `compressed_contexts`（一会话一行，UPDATE）；长期 Redis JSON + MySQL `user_profiles.profile_json`。
+- Redis 裁剪不变量: `PushRecentMessage` 不再 LTRIM；未摘要覆盖的消息不能从 Redis 丢弃，压缩推进边界后再重建列表。
+- 配置: `agent.context.*`（model_window_tokens / max_output_tokens / soft_limit_tokens / reserve_tokens / profile_max_tokens / summary_max_tokens / recent_max_tokens / compress_threshold_tokens）。
+- L1 候选: `services/agent/context/profile_rules.go` 在每个用户消息落库后异步跑规则，写入 MySQL `profile_candidates`（不调用 LLM、不改正式画像）；`value_hash` 去重。
+- 当前边界: L2 consolidation（每 N 轮 / 候选阈值触发、diff、冲突/确认）尚未实现；正式画像仍由旧 `ProfileExtractor` 每 run 抽取 + last-write-wins。工具大结果尚未转 artifact ref。
+
+### 单步工具批调度（BatchExecutor）
+
+- 入口: `services/agent/loop/loop.go` 中 `l.batch.Execute(runCtx, tc, resp.ToolCalls)`。
+- 策略: 整批工具都实现 `MetaProvider` 且 `Meta().ConcurrencySafe=true` → 并行（信号量限制 `agent.max_parallel_tools`）；否则整批串行。
+- 结果: 按原始 `ToolCalls` 顺序返回，`tool` message 的 `tool_call_id` 与模型返回的 call id 对齐；单个失败不取消同批其他调用。
+- 事件: `tool_call` / `tool_result` 新增 `CallID`，便于前端在同一步多个并发调用时关联。
+- 只读且无共享状态的工具（`pdf_parse`、`file_list`、`file_read`、`web_search`）已声明 `ConcurrencySafe=true`；写文件、面试状态推进默认不声明，保持串行。
+- 当前边界: 这是"并行批次"，不是带 `depends_on` 的完整 DAG；有先后依赖的调用必须由模型分步发起，后续再引入 GraphScheduler。
+
+### Plan-and-Execute 编排（plan 包）
+
+- 入口: `services/agent/run/service.go` 在创建 run 后先调用 `services/agent/plan/service.go` 的 `Run`；返回 `nil` 表示本次不进入 plan 模式，回退线性 ReAct。
+- 规划: `services/agent/plan/planner.go`。`ShouldPlan` 用关键词/长度判断；`Plan` 调 `clients.CallConfiguredAIChat` 输出 JSON，并校验 id/依赖/环/任务数/工具只读。
+- 调度: `services/agent/plan/scheduler.go`。ready-set + 有界并行；依赖非 done → skipped；单任务失败不取消独立分支；支持单任务超时与 ctx 取消。
+- 执行: `services/agent/plan/service.go`。agent 任务用独立 ReAct loop；tool 任务只允许只读工具；llm 任务无工具单次推理；最后用空工具 loop 合成最终回答。
+- 事件: `route` / `plan_ready` / `plan_task_start` / `plan_task_done` / `plan_task_failed` / `plan_task_skipped` / `plan_replanned` / `plan_done`，复用 `services/agent/loop/loop.go` 的 `Event`。
+- 前置路由: `services/agent/plan/router.go` 用规则打分决定是否进 plan，不调用 LLM。强多步信号/中信号/长度/多问号/多行加分；纯问候、明确“直接回答”、短且无强信号减分。`services/agent/run/service.go` 只有 `UsePlan=true` 才调用 `planSvc.Run`，并发送 `route` 事件；`StartResult.PlanMode` 返回 `plan` / `plan_fallback` / `direct`。
+- 路由配置: `agent.plan.mode`（auto/always/never）、`agent.plan.min_score`、`agent.plan.fast_path_runes`。规则是启发式的，边界请求可能欠/过触发；需要更准时可加 cheap classifier，但不要给每个请求都加一次模型调用。
+- 持久化: `agent_runs.plan_json` 保存任务图与每个任务的最终状态；plan 任务不写 `agent_steps`，详情接口返回 `plan_json`。
+- Replan 安全机制:
+  - `services/agent/plan/scheduler.go` 的 `RunRound` 在一批任务结束后统一评估失败/hint，多个触发合并成一次；计划修改只发生在轮次边界，由 `services/agent/plan/service.go` 单线程串行应用，不存在并发改 Plan。
+  - `services/agent/plan/replanner.go` 只产出增量 `PlanDiff`（add/update/remove），不返回整张新计划；`ApplyDiff` 拒绝修改/删除已完成任务。
+  - `PlanDiff` 必须再通过 `Validate`（依赖/环/任务数/只读工具）和计划哈希震荡检测；受 `agent.plan.max_replans` 限制。
+  - 被 update/remove 的任务会清除旧结果；新增任务重新生成幂等 key。
+- 幂等与重试:
+  - `services/agent/plan/ledger.go` 是单 run 内的幂等账本：同 `idempotency_key` 并发只跑一次，成功结果缓存供 replan 复用，失败不缓存以允许重试。
+  - `idempotency_key` 由任务语义（type/tool/goal/params/上游 key）计算，模型不能指定。
+  - `services/agent/plan/service.go` 只对 `Retryable=true` 的失败重试；默认 `agent.plan.retry_max_attempts=2`、指数退避；调用过非只读工具的 agent 任务不自动重试。
+- 当前边界: 幂等账本只在进程内、单 run 内有效，进程重启后无法续跑；任务级结果只落在 `plan_json`，没有独立 `agent_plan_tasks` 表；replan 只处理失败/hint，不做每步评估。
 
 ## 核心流程
 
@@ -46,7 +97,7 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 - Service `AgentChatSSE` 完整流程:
   1. 会话归属校验（`GetAgentConversationBySessionId`）。
   2. 解析智能体配置（`AgentPropertiesLoader.GetByAgentID`，先查 sync.Map 缓存 miss 查库）——**仅用于场景绑定, 不再校验星辰凭证**(apiKey/apiSecret/apiFlowId 校验已移除)。
-  3. 保存用户消息到 MongoDB（`SaveAgentMessage`）。
+  3. 保存用户消息到 MySQL（`SaveAgentMessage`）。
   4. 加载历史消息 → 构建 `PromptMessage` 数组（system prompt + 历史对话 + 当前用户消息）。
   5. 调用 `clients.CallConfiguredAIChatStream`（DeepSeek SSE 流式, aiID=0 走 config fallback），通过 `onChunk` 回调 `ctx.SSEvent("message", chunk)` 推送前端。
   6. 保存 assistant 回复（`SaveAgentMessageWithDetail`，含 responseTime 和 errorMessage）。
@@ -56,8 +107,8 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 
 `AgentHistory`
 
-- `GET /agents/conversations/:sessionId/messages` 从 Mongo 按 `sequence ASC` 返回完整历史。
-- `GET /agents/messages/history` 从 Mongo 按 `created_at DESC` 分页。
+- `GET /agents/conversations/:sessionId/messages` 从 MySQL 按 `sequence ASC` 返回完整历史。
+- `GET /agents/messages/history` 从 MySQL 按 `created_at DESC` 分页。
 - 两个查询都必须保留用户隔离条件。
 
 `AgentProperties`
@@ -83,8 +134,8 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 ## 影响检查
 
 - 修改 Agent Chat 时, 同步检查消息计数、会话标题、错误重试和 assistant 消息落库。
-- 修改 `AgentMessage.Sequence` 时, 检查 `repositories/mongo/agent_message_repository.go`。
-- 修改 Agent 消息存储时, 同时检查 `repositories/mongo/agent_message_repository.go`。
+- 修改 `AgentMessage.Sequence` 时, 检查 `repositories/mysql/message_repository.go`。
+- 修改 Agent 消息存储时, 同时检查 `repositories/mysql/message_repository.go`。
 - 修改 Agent 表字段时, 更新 `docs/agent-knowledge/references/data-models.md`。
 - 修改路由时, 更新 `docs/agent-knowledge/references/routes-map.md`。
 - 修改场景枚举或解析器时, 更新本 Skill 的 BusinessAgentScene 部分。

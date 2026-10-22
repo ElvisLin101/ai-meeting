@@ -98,20 +98,20 @@ func TestFallbackAiCompressedSummary(t *testing.T) {
 }
 
 func TestFormatAiMessageLine(t *testing.T) {
-	if got := formatAiMessageLine(models.AiMessage{Role: "user", Content: "hi"}); got != "user: hi\n" {
+	if got := formatAiMessageLine(models.Message{Role: "user", Content: "hi"}); got != "user: hi\n" {
 		t.Errorf("user 行 = %q", got)
 	}
-	if got := formatAiMessageLine(models.AiMessage{Role: "assistant", Content: "ok"}); got != "assistant: ok\n" {
+	if got := formatAiMessageLine(models.Message{Role: "assistant", Content: "ok"}); got != "assistant: ok\n" {
 		t.Errorf("assistant 行 = %q", got)
 	}
 	// 未知角色按 assistant 处理
-	if got := formatAiMessageLine(models.AiMessage{Role: "system", Content: "x"}); got != "assistant: x\n" {
+	if got := formatAiMessageLine(models.Message{Role: "system", Content: "x"}); got != "assistant: x\n" {
 		t.Errorf("未知角色 = %q", got)
 	}
 }
 
 func TestAiMessagesLength(t *testing.T) {
-	msgs := []models.AiMessage{
+	msgs := []models.Message{
 		{Role: "user", Content: "hi"},      // "user: hi\n" = 9 字节
 		{Role: "assistant", Content: "ok"}, // "assistant: ok\n" = 14 字节
 	}
@@ -123,7 +123,7 @@ func TestAiMessagesLength(t *testing.T) {
 
 func TestBuildAiChronologicalContext(t *testing.T) {
 	// 入参按 Mongo 查询为倒序(新→旧): 第二条在前
-	msgs := []models.AiMessage{
+	msgs := []models.Message{
 		{Role: "assistant", Content: "第二条"},
 		{Role: "user", Content: "第一条"},
 	}
@@ -155,7 +155,7 @@ func TestBuildContextWithWindow(t *testing.T) {
 	}
 
 	// 有摘要 + 消息在预算内 → 摘要头 + 消息(时间正序)
-	msgs := []models.AiMessage{
+	msgs := []models.Message{
 		{Role: "user", Content: "最近的问题"},
 		{Role: "assistant", Content: "最近的回答"},
 	}
@@ -167,7 +167,7 @@ func TestBuildContextWithWindow(t *testing.T) {
 	}
 
 	// 消息超预算 → 截断, 只保留能装下的
-	bigMsgs := []models.AiMessage{
+	bigMsgs := []models.Message{
 		{Role: "user", Content: strings.Repeat("a", 3000)},
 		{Role: "user", Content: strings.Repeat("b", 3000)},
 	}

@@ -2,56 +2,71 @@
 
 ## 目标
 
-为普通 AI 会话提供可压缩的历史上下文。
+为 AI 会话与 Agent 会话提供**可压缩、可恢复、分层**的上下文。
 
-- AI 原始消息永久存储在 MongoDB `ai_messages`, 短期压缩摘要使用独立 Redis key, 压缩快照同样持久化到 MongoDB `compressed_contexts`。
-- Agent 侧不使用压缩记忆, 不在本流程范围内。Agent 侧上下文未来由面试工作流状态机结构化状态管理。
+存储架构（已移除 MySQL）：
+
+- MySQL 是真相源：`messages` 全量消息、`compressed_contexts` 压缩快照、`user_profiles` 画像、`agent_identities` 身份。
+- Redis 是热数据：近期对话、压缩摘要、画像、身份，全部带 TTL，丢失后从 MySQL 重建。
 
 ## AI 入口链路
 
 1. `AiMessageController.Chat`
-2. `AiMessageService.Chat(ctx, sessionID, username, content)` 或 `AiMessageService.ChatStream(ctx, sessionID, username, content, onChunk)`
+2. `AiMessageService.Chat/ChatStream`
 3. `AiMemoryService.GetCompressionThreshold()`
 4. `AiMemoryService.GetContext(ctx, sessionID, username, threshold)`
-5. 保存用户消息到 MongoDB `ai_messages`
-6. 通过 OpenAI-compatible endpoint 调用模型: 会话绑定有效 `AiID` 时使用 MySQL `AiProperties`, 否则优先使用 `config.ai.deepseek`
-7. 保存 assistant 回复到 MongoDB `ai_messages`
-8. 更新 `ai_conversations.message_cnt` 和 `updated_at`
-9. 调用 `AiMemoryService.CompressContext(sessionID, username, threshold)` 异步判断是否压缩
+5. 保存用户消息到 MySQL `messages`（`session_sequences` 分配 sequence）
+6. 调模型（AiID 配置或 `config.ai.deepseek`）
+7. 保存 assistant 回复到 MySQL `messages`
+8. 更新 `conversations.message_count`
+9. `AiMemoryService.CompressContext` 异步判断压缩
 
-AI Chat 同时支持普通 JSON 响应和 SSE 流式响应; 两条链路共用同一套 memory、消息落库和压缩逻辑。
+## AI GetContext
 
-## AI GetContext 详细步骤
+1. Redis 读 `memory:ai:{sessionId}:summary` 与 `:index`。
+2. miss 时从 MySQL `compressed_contexts`（`session_id`）恢复并异步回填 Redis。
+3. 从 MySQL `messages` 查 `sequence > index` 的消息（`session_id` + `user_id`，倒序）。
+4. `buildContextWithWindow` 按预算取窗口，写入时恢复正序。
+5. `GetContext` 只拼装，不触发压缩。
 
-1. 从 Redis 读取压缩摘要 key=`memory:ai:{sessionId}:summary` 和压缩索引 key=`memory:ai:{sessionId}:index`。
-2. Redis 缺少摘要或索引时, 从 MongoDB `compressed_contexts` 按 `_id=ai:{sessionId}` 恢复。
-3. MongoDB 命中后异步同步 Redis。
-4. 从 MongoDB `ai_messages` 查询 `sequence > index` 的原始消息, 条件是 `session_id` 和 `user_id`, 排序 `sequence DESC`。
-5. `AiMemoryService.buildContextWithWindow` 采用倒序窗口取消息, 写入上下文时恢复正序。
-6. `GetContext` 只拼接上下文, 不触发压缩；压缩在 assistant 回复保存后触发, 避免只压缩半轮对话。
+## AI/Agent CompressContext
 
-## AI CompressContext 详细步骤
+1. 异步 goroutine 从 MySQL 读取全部消息。
+2. 分布式 SingleFlight（AI: `compress:ai:{sid}:{uid}`；Agent: `compress:agent:{sid}:{uid}`）防重复压缩。
+3. 低于阈值直接返回。
+4. 80/20 分割，只压旧 80%。
+5. 流式调模型生成摘要；`writer.Write` 刷新 SingleFlight 心跳；失败回退本地截断。
+6. 写 Redis 摘要 + MySQL `compressed_contexts` 快照。
 
-1. 异步 goroutine 从 MongoDB 查询当前会话和用户的全部 AI 消息。
-2. 使用分布式 SingleFlight（key=`compress:ai:{sessionID}:{userID}`）防止全集群同一会话重复压缩, Redis 不可用时降级为本地 `localGroup`。
-3. 计算消息内容长度, 低于阈值时直接返回。
-4. 按 80%/20% 分割旧消息和最近消息, 只压缩旧的 80%。
-5. 旧消息转成正序文本并通过 `CallConfiguredAIChatStream` 流式调用 OpenAI-compatible 模型压缩; `onChunk` 中累积完整结果并调 `writer.Write` 刷新 `progressKey` 心跳, `config.ai.deepseek` 配好 key 时默认走 DeepSeek; 流式失败回退 `fallbackAiCompressedSummary` 本地截断。
-6. 将摘要写入 Redis key=`memory:ai:{sessionId}:summary`, 将索引写入 Redis key=`memory:ai:{sessionId}:index`。
-7. 异步 upsert MongoDB `compressed_contexts`, 使用 `_id=ai:{sessionId}` 覆盖写入。
+## Agent 四层上下文
+
+`services/agent/context/assembler.go` 拼装顺序：
+
+1. L4 `system`：Agent 自我定位（`agent_identities`，Redis 优先）
+2. L3 `system`：用户画像（`user_profiles`，Redis 优先）
+3. L2 `system`：压缩摘要（Redis → MySQL）
+4. L1 `user/assistant`：近期全量对话（Redis List → MySQL 回填）
+
+预算不足时优先裁剪 L1；persona 与画像永不裁剪。
+
+- 画像提炼：`services/agent/context/profile.go`，模型调用后异步 + 节流 + SingleFlight 去重；冲突时新值覆盖旧值、version 递增。
+- Agent 消息写入：`services/agent/run/service.go` 先写 MySQL 再更新 Redis 热列表。
 
 ## 修改时必查
 
-- `repositories/mongo/ai_message_repository.go`: AI Mongo 消息查询、分页、保存。
-- `repositories/mongo/compressed_context_repository.go`: 压缩快照 Mongo upsert、恢复和删除。
-- `services/ai/ai_memory_service.go`: AI Redis key、Mongo `_id`、窗口选取和压缩分割。
-- `services/ai/ai_chat_service.go`: AI chat 何时读取上下文、保存消息、触发压缩。
-- `models.CompressedContext`: Mongo 字段。
-- `repositories.InitRedis` 和 `repositories/mongo.InitMongoDB`: 客户端可用性。
+- `repositories/mysql/message_repository.go`
+- `repositories/mysql/compressed_context_repository.go`
+- `repositories/mysql/user_profile_repository.go`
+- `repositories/mysql/agent_identity_repository.go`
+- `repositories/redis_hot.go`：热数据 key、TTL、回填
+- `services/ai/ai_memory_service.go`：AI 压缩与窗口
+- `services/agent/context/`：四层上下文、画像合并、压缩
+- `models/conversation.go` / `models/agent_runtime.go`：表结构
 
 ## 验证建议
 
-- 构造同一 AI session 的用户/assistant 消息, 检查 `/ai/history/:sessionId` 顺序和 `message_id`。
-- 构造超过阈值的 AI 消息, 检查 Redis `memory:ai:{sessionId}:summary` 和 `memory:ai:{sessionId}:index` 都被写入。
-- 清空 Redis 保留 MongoDB, 检查 AI `GetContext` 是否能从 `_id=ai:{sessionId}` 恢复并回填 Redis。
-- 检查压缩后 `GetContext` 不重复包含已经压缩的消息。
+- 构造同一 session 的消息，检查 `/ai/history/:sessionId` 与 `/agents/conversations/:sid/messages` 的顺序和 ID。
+- 超阈值后检查 Redis summary/index 与 MySQL `compressed_contexts` 均写入。
+- 清空 Redis 保留 MySQL，检查读路径能回填并恢复。
+- 检查压缩后 `GetContext` 不重复包含已压缩消息。
+- Agent：检查画像在跨会话可见、版本递增、冲突字段被新值覆盖。

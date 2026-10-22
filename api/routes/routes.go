@@ -28,10 +28,22 @@ func SetupRouter() *gin.Engine {
 
 	setupUserRoutes(api, authed)
 	setupAgentRoutes(authed)
+	setupAgentRunRoutes(authed)
 	setupAiRoutes(authed)
 	setupInterviewRoutes(authed)
 
 	return r
+}
+
+// setupAgentRunRoutes Agent 主入口: run 提交 / 流式 / 回放
+func setupAgentRunRoutes(authed *gin.RouterGroup) {
+	agentRunController := handlers.NewAgentRunController()
+
+	runs := authed.Group("/agent/runs")
+	runs.POST("", agentRunController.Run)
+	runs.POST("/stream", agentRunController.RunStream)
+	runs.GET("", agentRunController.Page)
+	runs.GET("/:runId", agentRunController.Get)
 }
 
 func setupUserRoutes(api, authed *gin.RouterGroup) {

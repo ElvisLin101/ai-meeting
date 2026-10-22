@@ -6,6 +6,7 @@ import (
 	"ai-meeting/dto"
 	"ai-meeting/pkg/ecode"
 	"ai-meeting/services/ai"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -267,8 +268,8 @@ func (c *AiMessageController) GetConversationHistory(ctx *gin.Context) {
 	var resp []dto.AiMessageHistoryRespDTO
 	for _, msg := range messages {
 		messageID := ""
-		if !msg.MongoID.IsZero() {
-			messageID = msg.MongoID.Hex()
+		if msg.ID > 0 {
+			messageID = fmt.Sprintf("%d", msg.ID)
 		}
 		resp = append(resp, dto.AiMessageHistoryRespDTO{
 			MessageID: messageID,
@@ -313,8 +314,8 @@ func (c *AiMessageController) PageHistoryMessages(ctx *gin.Context) {
 	var resp []dto.AiMessageHistoryRespDTO
 	for _, msg := range messages {
 		messageID := ""
-		if !msg.MongoID.IsZero() {
-			messageID = msg.MongoID.Hex()
+		if msg.ID > 0 {
+			messageID = fmt.Sprintf("%d", msg.ID)
 		}
 		resp = append(resp, dto.AiMessageHistoryRespDTO{
 			MessageID: messageID,

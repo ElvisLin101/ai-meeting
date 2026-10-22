@@ -1,106 +1,101 @@
 # Data Models Map
 
+存储架构: **MySQL 为真相源（全量历史/恢复源）+ Redis 为热数据（可丢失可重建）**。已移除 MySQL。
+
 ## User
 
 `models/user.go`
 
 - `User` -> `users`
 - 关键字段: `ID`, `Username`, `Password`, `Email`, `Phone`, `IsAdmin`, `Status`, `CreatedAt`, `UpdatedAt`
-- 注意: 当前密码字段为明文语义, 没有哈希封装。
+- 注意: 密码为 bcrypt 哈希；历史明文密码登录时自动迁移。
 
-## Agent
+## 统一会话与消息
 
-`models/agent.go`
+`models/conversation.go`
 
-- `AgentProperties` -> MySQL `agent_properties`（留 MySQL, 配置元数据）
-  - 关键字段: `ID`, `Name`, `Description`, `Config`, `IsEnabled`, `ApiKey`, `ApiSecret`, `ApiFlowId`, `CreatedAt`, `UpdatedAt`
-  - `ApiKey`/`ApiSecret`/`ApiFlowId` 为历史星辰工作流凭证, 已废弃保留字段（Agent 对话改用 DeepSeek, 走 `config.ai.deepseek`）。
-  - 启动时全量加载到 `AgentPropertiesLoader` 的 sync.Map 缓存。
-- `AgentConversation` -> MongoDB `agent_conversations`（_id=SessionID）
-- `AgentMessage` -> MongoDB `agent_messages`（_id=ObjectID）
-  - 关键字段含 `ResponseTime`(int64, 毫秒, assistant 消息专用) 和 `ErrorMessage`(string, 出错时记录)
-- `AgentFileAsset` -> MySQL `agent_file_assets`（留 MySQL, 文件资产）
+- `Conversation` -> MySQL `conversations`
+  - `SessionID`(唯一), `UserID`, `Scene`(ai/agent/interview), `AgentID`, `Title`, `Status`, `MessageCount`
+  - 原 AI/Agent/面试各自的会话集合统一到此表。
+- `Message` -> MySQL `messages`
+  - `SessionID`, `UserID`, `Role`(user/assistant/system/tool), `Content`, `Sequence`, `Metadata`(JSON), `CreatedAt`
+  - 唯一索引 `(session_id, sequence)`；`Metadata` 存 `tool_calls`/`tool_call_id`/`response_time` 等结构化扩展。
+- `SessionSequence` -> MySQL `session_sequences`
+  - `SessionID` 主键, `Seq`；用 `INSERT ... ON DUPLICATE KEY UPDATE seq = LAST_INSERT_ID(seq + 1)` 原子分配。
 
-关键关系:
+Redis 热数据（`repositories/redis_hot.go`）：
 
-- `AgentConversation.SessionID` 是 Mongo `_id`, 也是唯一业务会话 ID。
-- `AgentMessage.MongoID` 映射 Mongo `_id`, HTTP 响应通过 `message_id` 暴露。
-- `AgentMessage.SessionID` + `AgentMessage.UserID` 用于历史查询。Agent 侧不压缩。
-- `AgentMessage.Sequence` 用于会话内消息顺序。
+- `agent:session:{sid}:recent` List：近期对话（LTRIM 200），miss 从 MySQL 重建
+- `agent:session:{sid}:summary` / `:summary_idx`：压缩摘要与边界
+- `user:{uid}:profile`：用户画像 JSON
+- `agent:{aid}:identity`：Agent 自我定位 JSON
+
+## Agent 运行
+
+`models/agent_runtime.go`
+
+- `AgentRun` -> MySQL `agent_runs`
+  - `RunID`(唯一), `SessionID`, `UserID`, `AgentID`, `Input`, `Output`, `PlanJSON`, `Status`, `StopReason`, `Steps`, `Tokens`, `Error`, 起止时间
+  - `PlanJSON` 保存 Plan-and-Execute 的任务图与每个任务的最终状态；线性 ReAct 时为空。
+  - `PlanJSON` 内任务包含 `idempotency_key`、`attempts`、`status`、`result`、`error`；计划包含 `version`、`replan_count`。
+- `AgentStep` -> MySQL `agent_steps`
+  - `RunID` + `StepIndex` 唯一；`Thought`, `Action`, `ActionInput`, `Observation`, `Status`, `DurationMs`, `Error`
+  - 用于按 run 回放，回答「Agent 为什么跑偏」。
+- `AgentProperties` -> MySQL `agent_properties`（配置元数据，启动缓存到 `AgentPropertiesLoader`）
+- `AgentFileAsset` -> MySQL `agent_file_assets`
+- `CompressedContextRecord` -> MySQL `compressed_contexts`（Agent 中期摘要）
+  - 一个会话一行；再次压缩 UPDATE 同一行。
+  - `Index` 是 `CoveredThroughSeq`：摘要覆盖 `sequence <= Index`，短期消息只取 `sequence > Index`，二者不重叠。
+  - Redis key: `agent:session:{sessionID}:summary` / `:summary_idx`；短期消息 `agent:session:{sessionID}:recent`。
+
+## 跨会话结构化数据
+
+- `UserProfile` -> MySQL `user_profiles`
+  - `UserID` 唯一；`ProfileJSON` 结构见 `services/agent/context/types.go` 的 `UserProfileData`
+  - 字段: preferences / goals / constraints / background / confidence / version / schema_version / last_consolidated_seq / updated_at
+  - MySQL 是画像真相源，Redis `user:{uid}:profile` 只是缓存。
+- `ProfileCandidate` -> MySQL `profile_candidates`
+  - L1 规则候选：`user_id`, `session_id`, `message_id`, `field`, `quote`, `rule`, `confidence`, `status`(pending/promoted/rejected)
+  - `value_hash` 唯一，保证同一条消息同一字段不会重复入候选；L2 consolidation 才写正式画像。
+- `AgentIdentity` -> MySQL `agent_identities`
+  - `AgentID` 唯一；`IdentityJSON` 结构见 `AgentIdentityData`
+  - 字段: name / role / capabilities / boundaries / interaction_style / self_reflection / version
+  - 核心 persona 静态，`self_reflection` 仅低频更新，防人设漂移。
 
 ## AI
 
 `models/ai.go`
 
-- `AiProperties` -> MySQL `ai_properties`（留 MySQL, 配置元数据）
-- `AiConversation` -> MongoDB `ai_conversations`（_id=SessionID）
-- `AiMessage` -> MongoDB `ai_messages`（_id=ObjectID）
-
-关键关系:
-
-- `AiConversation.SessionID` 是 Mongo `_id`。`AiConversation.UserID` 当前存 JWT `username`。
-- `AiMessage.MongoID` 映射 Mongo `_id`, HTTP 响应通过 `message_id` 暴露。
-- `AiMessage.SessionID` + `AiMessage.UserID` 用于历史查询和 AI memory 压缩。
-- `AiMessage.Sequence` 用于消息顺序。
-- `AiProperties.ApiKey` 和 `AiProperties.ApiSecret` 当前是普通字符串字段。
-- 默认 DeepSeek 模型配置不建表, 读取 `config.AppConfig.AI.DeepSeek`; `ai.deepseek.api_key` 留空时不会启用 config fallback。
+- `AiProperties` -> MySQL `ai_properties`（配置元数据）
+- `AiConversation` / `AiMessage` 为历史响应模型，数据实际存 `conversations` / `messages`（scene=ai），服务层做转换。
+- AI 压缩快照 -> MySQL `compressed_contexts`（Redis 摘要 key: `memory:ai:{sessionId}:summary` / `:index`）。
 
 ## Interview
 
-`models/interview.go`
+领域模型：`models/interview.go`；MySQL 行模型：`models/interview_sql.go`。
 
-- `InterviewSession` -> MongoDB `interview_sessions`（_id=SessionID）
-- `InterviewRecord` -> MongoDB `interview_records`（_id=ObjectID, 按 session_id 索引）
-- `InterviewQuestion` -> MongoDB `interview_questions`（_id=ObjectID, 按 session_id 索引, 为状态机准备）
-
-当前注意点:
-
-- `InterviewSessionFacade.PageConversations` 查询 Mongo `agent_conversations`, 不查询 `interview_sessions`。
-- `InterviewSessionFacade.GetConversationHistory` 查询 Mongo `agent_messages`, 不查询面试专属消息表。
-
-## Interview Runtime
-
-`models/interview_runtime.go`
-
-面试运行态治理的模型层, 详见 `docs/agent-knowledge/references/interview-runtime-governance.md`。
-
-- `InterviewFlowStatus` -> 阶段枚举(INIT/ASKING/EVALUATING/FOLLOW_UP/COMPLETED)
-- `InterviewFlowState` -> Redis Hash `interview:flow:session:{sid}` + Mongo 热快照内嵌
-  - 关键字段: `Status`, `CurrentIndex`, `CurrentQuestionNumber`, `TotalQuestions`, `FollowUpCount`, `MaxFollowUp`, `Version`(CAS 乐观锁)
-- `InterviewTurnLog` -> Redis List `interview:turns:session:{sid}` + Mongo `TurnArchive` 内嵌
-  - 关键字段: `RequestID`(幂等键), `QuestionNumber`, `Score`, `TotalScore`, `FollowUpNeeded`, `IsFollowUp`, `Finished`
-- `InterviewRuntimeHotSnapshot` -> MongoDB `interview_session_runtime_hot_snapshot`(_id=SessionID)
-  - 高频流程态, CAS 乐观锁更新(`SnapshotVersion`), 存最近 20 轮窗口(`RecentTurns`), 靠 `ArchiveWatermark` 衔接归档。
-- `InterviewRuntimeColdSnapshot` -> MongoDB `interview_session_runtime_cold_snapshot`(_id=SessionID)
-  - 低频材料(题目/建议/简历上下文), 无 CAS(last-writer-wins)。
-- `InterviewSessionTurnArchive` -> MongoDB `interview_session_turn_archive`(_id=ObjectID, 按 session_id/seq 索引)
-  - 完整不可变轮次历史, `Seq` 单调递增, `RequestID` 幂等查重。
+- `InterviewSessionRow` -> MySQL `interview_sessions`（`SessionID` 主键）
+- `InterviewRecordRow` -> MySQL `interview_records`
+- `InterviewQuestionRow` -> MySQL `interview_questions`
+- `InterviewHotSnapshotRow` -> MySQL `interview_session_runtime_hot_snapshot`
+  - `FlowJSON`/`FollowUpQuestionsJSON`/`RecentTurnsJSON` 以 JSON 文本存储；`SnapshotVersion` 做 CAS
+- `InterviewColdSnapshotRow` -> MySQL `interview_session_runtime_cold_snapshot`
+- `InterviewTurnArchiveRow` -> MySQL `interview_session_turn_archive`
+  - 唯一索引 `(session_id, request_id)` 幂等、`(session_id, seq)` 单调；seq 由 `session_sequences`（前缀 `turn:`）分配
+- 面试会话列表复用 `conversations`（scene=interview）
 
 ## MetricLog
 
 `models/metric_log.go`
 
 - `MetricLog` -> MySQL `metric_logs`
-- 所有模块的量化指标异步写入此表, 不阻塞主流程; 通过 `module` + `event` 区分不同指标。
-- 关键字段: `Module`(ai_call/singleflight/state_machine/snapshot/repair/idempotency/lock), `Event`, `SessionID`, `Success`, `ErrorType`, `IsRetry`, `DurationMs`, `Extra`(JSON)
-- 仓储: `repositories/mysql/metric_log_repository.go`
-
-## Compressed Context
-
-`models/compressed_context.go`
-
-- Mongo 集合: `compressed_contexts`
-- AI 压缩快照 `_id` 固定为 `ai:{sessionId}`, 用于覆盖写入同一 AI 会话的最新压缩快照。
-- 关键字段: `_id`, `session_id`, `memory_scope`, `compressed_content`, `index`, `total_token_count`, `message_count`, `created_at`, `updated_at`
-- AI 压缩快照额外写入 `memory_scope=ai`, 用于排查共享集合中的来源。
-- AI Redis key: 压缩摘要为 `memory:ai:{sessionId}:summary`, 压缩索引为 `memory:ai:{sessionId}:index`。
-- 仅 AI 侧使用压缩; Agent 侧不写压缩快照、不占 Redis 压缩 key。
+- 关键字段: `Module`(ai_call/singleflight/state_machine/snapshot/repair/idempotency/lock/agent/agent_tool), `Event`, `SessionID`, `Success`, `ErrorType`, `IsRetry`, `DurationMs`, `Extra`(JSON)
 
 ## Repository Clients
 
 - MySQL: `repositories/mysql.DB`
 - Redis: `repositories.RedisClient`
-- MongoDB: `repositories/mongo.GetCollection(name)`
-- AI provider config: `config.AppConfig.AI`, 当前预留 DeepSeek OpenAI-compatible 配置。
+- AI provider config: `config.AppConfig.AI`
+- Agent 运行时配置: `config.AppConfig.Agent`（max_steps/tool_timeout/sandbox_root/search 等）
 
-改任一模型字段、表名或集合名时, 同步更新对应 Skill。
+改任一模型字段或表名时, 同步更新对应 Skill。

@@ -6,6 +6,7 @@ import (
 	"ai-meeting/models"
 	"ai-meeting/pkg/ecode"
 	agent "ai-meeting/services/agent"
+	"fmt"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -208,8 +209,8 @@ func toAgentMessageHistoryResp(msg models.AgentMessage) dto.AgentMessageHistoryR
 		Sequence:  msg.Sequence,
 		CreatedAt: msg.CreatedAt.Format("2006-01-02 15:04:05"),
 	}
-	if !msg.MongoID.IsZero() {
-		resp.MessageID = msg.MongoID.Hex()
+	if msg.ID > 0 {
+		resp.MessageID = fmt.Sprintf("%d", msg.ID)
 	}
 	return resp
 }

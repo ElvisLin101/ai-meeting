@@ -2,8 +2,6 @@ package models
 
 import (
 	"time"
-
-	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 type AgentProperties struct {
@@ -35,15 +33,16 @@ type AgentConversation struct {
 }
 
 type AgentMessage struct {
-	MongoID      primitive.ObjectID `json:"-" bson:"_id,omitempty"`
-	SessionID    string             `json:"session_id" bson:"session_id"`
-	UserID       string             `json:"user_id" bson:"user_id"`
-	Role         string             `json:"role" bson:"role"`
-	Content      string             `json:"content" bson:"content"`
-	Sequence     int                `json:"sequence" bson:"sequence"`
-	ResponseTime int64              `json:"response_time,omitempty" bson:"response_time,omitempty"`
-	ErrorMessage string             `json:"error_message,omitempty" bson:"error_message,omitempty"`
-	CreatedAt    time.Time          `json:"created_at" bson:"created_at"`
+	ID uint `json:"-"`
+
+	SessionID    string    `json:"session_id" bson:"session_id"`
+	UserID       string    `json:"user_id" bson:"user_id"`
+	Role         string    `json:"role" bson:"role"`
+	Content      string    `json:"content" bson:"content"`
+	Sequence     int       `json:"sequence" bson:"sequence"`
+	ResponseTime int64     `json:"response_time,omitempty" bson:"response_time,omitempty"`
+	ErrorMessage string    `json:"error_message,omitempty" bson:"error_message,omitempty"`
+	CreatedAt    time.Time `json:"created_at" bson:"created_at"`
 }
 
 type AgentFileAsset struct {

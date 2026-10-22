@@ -4,8 +4,8 @@
 
 - 使用 Go 1.24.1, 保持现有 `handlers -> services -> repositories/models` 分层。
 - Handler 只处理 HTTP 入参、认证上下文、状态码和 DTO 转换。
-- Service 放业务流程和跨仓储编排, 不直接依赖 Gin, 不直接拼 Mongo/MySQL 查询。
-- MySQL 读写放 `repositories/mysql`, MongoDB 读写放 `repositories/mongo`。
+- Service 放业务流程和跨仓储编排, 不直接依赖 Gin, 不直接拼 MySQL/MySQL 查询。
+- 持久化读写放 `repositories/mysql`; Redis 热数据放 `repositories/redis_hot.go`; 不要在 service 里直接拼 SQL。
 - Redis 当前仍在根 `repositories`, 通过 `repositories.RedisClient` 使用。
 - 外部 HTTP/API 调用放 `clients`, 不放在 service 或 repository。
 - 错误返回给调用方, 不在普通业务流程里 `panic`。

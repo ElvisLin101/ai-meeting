@@ -5,9 +5,10 @@ import (
 	"ai-meeting/dto"
 	"ai-meeting/models"
 	"ai-meeting/pkg/ecode"
-	mongorepo "ai-meeting/repositories/mongo"
+
 	mysqlrepo "ai-meeting/repositories/mysql"
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -32,10 +33,11 @@ func (s *AgentConversationService) CreateConversationWithTitle(username, agentID
 	if len(firstMessage) > 50 {
 		title = firstMessage[:50] + "..."
 	}
-	conversation := models.AgentConversation{SessionID: sessionID, UserID: username, AgentID: agentIDUint, Title: title, Status: 1, MessageCnt: 0}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := mongorepo.CreateAgentConversation(ctx, &conversation); err != nil {
+	conversation := models.Conversation{
+		SessionID: sessionID, UserID: username, Scene: models.ConversationSceneAgent,
+		AgentID: agentIDUint, Title: title, Status: models.ConversationStatusActive, MessageCount: 0,
+	}
+	if err := mysqlrepo.CreateConversation(&conversation); err != nil {
 		return nil, err
 	}
 	return &dto.AgentSessionCreateRespDTO{SessionID: sessionID, Title: title}, nil
@@ -59,16 +61,20 @@ func resolveAgentID(agentID string) (uint, error) {
 // PageConversations 分页查询用户的Agent会话列表
 func (s *AgentConversationService) PageConversations(username string, req dto.AgentConversationPageReqDTO) ([]models.AgentConversation, int64, error) {
 	offset := (req.Page - 1) * req.Size
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return mongorepo.PageAgentConversations(ctx, username, offset, req.Size)
+	convs, total, err := mysqlrepo.PageConversations(username, models.ConversationSceneAgent, offset, req.Size)
+	if err != nil {
+		return nil, 0, err
+	}
+	out := make([]models.AgentConversation, 0, len(convs))
+	for _, c := range convs {
+		out = append(out, toAgentConversation(c))
+	}
+	return out, total, nil
 }
 
 // EndConversation 结束会话
 func (s *AgentConversationService) EndConversation(sessionID, userID string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return mongorepo.EndAgentConversation(ctx, sessionID, userID)
+	return mysqlrepo.EndConversation(sessionID, userID)
 }
 
 var agentConversationServiceInstance *AgentConversationService
@@ -86,26 +92,35 @@ type AgentMessageService struct{}
 
 // GetConversationHistory 获取会话历史消息
 func (s *AgentMessageService) GetConversationHistory(sessionID, userID string) ([]models.AgentMessage, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	return mongorepo.ListAgentMessagesAsc(ctx, sessionID, userID)
+	messages, err := mysqlrepo.ListMessagesAsc(sessionID, userID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]models.AgentMessage, 0, len(messages))
+	for _, m := range messages {
+		out = append(out, toAgentMessage(m))
+	}
+	return out, nil
 }
 
 // PageHistoryMessages 分页查询历史消息
 func (s *AgentMessageService) PageHistoryMessages(sessionID string, page, size int, userID string) ([]models.AgentMessage, int64, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	return mongorepo.PageAgentMessages(ctx, sessionID, page, size, userID)
+	messages, total, err := mysqlrepo.PageMessages(sessionID, userID, page, size)
+	if err != nil {
+		return nil, 0, err
+	}
+	out := make([]models.AgentMessage, 0, len(messages))
+	for _, m := range messages {
+		out = append(out, toAgentMessage(m))
+	}
+	return out, total, nil
 }
 
 // SaveMessage 保存消息
 func (s *AgentMessageService) SaveMessage(sessionID, userID, role, content string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	return mongorepo.SaveAgentMessage(ctx, sessionID, userID, role, content)
+	return mysqlrepo.CreateMessage(&models.Message{
+		SessionID: sessionID, UserID: userID, Role: role, Content: content,
+	})
 }
 
 // GetConversationHistoryWithContext 获取带上下文的历史消息
@@ -116,9 +131,7 @@ func (s *AgentMessageService) SaveMessage(sessionID, userID, role, content strin
 // 返回完整回复内容
 func (s *AgentMessageService) AgentChatSSE(sessionID, userID, content string, onChunk func(chunk string)) (string, error) {
 	// 1. 会话归属校验
-	convCtx, convCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	conv, err := mongorepo.GetAgentConversationBySessionId(convCtx, sessionID, userID)
-	convCancel()
+	conv, err := mysqlrepo.FindConversationBySessionAndUser(sessionID, userID)
 	if err != nil || conv == nil {
 		return "", ecode.New(ecode.ErrSessionNotFound, "会话不存在或无权限")
 	}
@@ -132,16 +145,20 @@ func (s *AgentMessageService) AgentChatSSE(sessionID, userID, content string, on
 	// 3. 保存用户消息
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := mongorepo.SaveAgentMessage(ctx, sessionID, userID, "user", content); err != nil {
+	if err := mysqlrepo.CreateMessage(&models.Message{
+		SessionID: sessionID, UserID: userID, Role: "user", Content: content,
+	}); err != nil {
 		return "", ecode.Wrap(err, "保存用户消息失败")
 	}
 
 	// 4. 加载历史消息构建 prompt messages
-	historyCtx, historyCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer historyCancel()
-	messages, err := mongorepo.ListAgentMessagesAsc(historyCtx, sessionID, userID)
+	rawMessages, err := mysqlrepo.ListMessagesAsc(sessionID, userID)
 	if err != nil {
 		return "", ecode.Wrap(err, "加载历史消息失败")
+	}
+	messages := make([]models.AgentMessage, 0, len(rawMessages))
+	for _, m := range rawMessages {
+		messages = append(messages, toAgentMessage(m))
 	}
 	promptMessages := buildAgentPromptMessages(agentProps, messages, content)
 
@@ -161,24 +178,29 @@ func (s *AgentMessageService) AgentChatSSE(sessionID, userID, content string, on
 
 	if err != nil {
 		// 6a. 出错也保存一条错误 assistant 消息
-		saveCtx, saveCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer saveCancel()
-		mongorepo.SaveAgentMessageWithDetail(saveCtx, sessionID, userID, "assistant", "Sorry, an error occurred while processing your request.", responseTime, err.Error())
+		meta, _ := json.Marshal(map[string]interface{}{"response_time": responseTime, "error": err.Error()})
+		_ = mysqlrepo.CreateMessage(&models.Message{
+			SessionID: sessionID, UserID: userID, Role: "assistant",
+			Content: "Sorry, an error occurred while processing your request.", Metadata: string(meta),
+		})
 		logrus.Errorf("Agent chat failed, session=%s, err=%v", sessionID, err)
 		return "", ecode.New(ecode.ErrDeepSeekCall, "调用 DeepSeek 失败")
 	}
 
 	// 6b. 保存 assistant 回复
-	saveCtx, saveCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer saveCancel()
-	assistantSeq, err := mongorepo.SaveAgentMessageWithDetail(saveCtx, sessionID, userID, "assistant", fullContent.String(), responseTime, "")
-	if err != nil {
+	meta, _ := json.Marshal(map[string]interface{}{"response_time": responseTime})
+	if err := mysqlrepo.CreateMessage(&models.Message{
+		SessionID: sessionID, UserID: userID, Role: "assistant",
+		Content: fullContent.String(), Metadata: string(meta),
+	}); err != nil {
 		logrus.Errorf("Failed to save assistant message, session=%s, err=%v", sessionID, err)
 	}
 
 	// 7. 更新会话消息计数
-	if err := mongorepo.UpdateAgentConversationMessageCount(saveCtx, sessionID, assistantSeq); err != nil {
-		logrus.Errorf("Failed to update conversation message count, session=%s, err=%v", sessionID, err)
+	if total, err := mysqlrepo.CountMessages(sessionID, userID); err == nil {
+		if err := mysqlrepo.UpdateConversationMessageCount(sessionID, userID, int(total)); err != nil {
+			logrus.Errorf("Failed to update conversation message count, session=%s, err=%v", sessionID, err)
+		}
 	}
 
 	logrus.Infof("Agent chat completed, session=%s, responseTime=%dms, contentLen=%d",
@@ -289,4 +311,21 @@ func GetAgentFileAssetService() *AgentFileAssetService {
 	}
 	logrus.Info("AgentFileAssetService instance created")
 	return agentFileAssetServiceInstance
+}
+
+// toAgentConversation 统一会话模型转旧响应模型
+func toAgentConversation(c models.Conversation) models.AgentConversation {
+	return models.AgentConversation{
+		SessionID: c.SessionID, UserID: c.UserID, AgentID: c.AgentID,
+		Title: c.Title, Status: c.Status, MessageCnt: c.MessageCount,
+		CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
+	}
+}
+
+// toAgentMessage 统一消息模型转旧响应模型
+func toAgentMessage(m models.Message) models.AgentMessage {
+	return models.AgentMessage{
+		ID: m.ID, SessionID: m.SessionID, UserID: m.UserID, Role: m.Role,
+		Content: m.Content, Sequence: int(m.Sequence), CreatedAt: m.CreatedAt,
+	}
 }

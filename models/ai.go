@@ -2,8 +2,6 @@ package models
 
 import (
 	"time"
-
-	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 type AiProperties struct {
@@ -35,11 +33,12 @@ type AiConversation struct {
 }
 
 type AiMessage struct {
-	MongoID   primitive.ObjectID `json:"-" bson:"_id,omitempty"`
-	SessionID string             `json:"session_id" bson:"session_id"`
-	UserID    string             `json:"user_id" bson:"user_id"`
-	Role      string             `json:"role" bson:"role"`
-	Content   string             `json:"content" bson:"content"`
-	Sequence  int                `json:"sequence" bson:"sequence"`
-	CreatedAt time.Time          `json:"created_at" bson:"created_at"`
+	ID uint `json:"-"`
+
+	SessionID string    `json:"session_id" bson:"session_id"`
+	UserID    string    `json:"user_id" bson:"user_id"`
+	Role      string    `json:"role" bson:"role"`
+	Content   string    `json:"content" bson:"content"`
+	Sequence  int       `json:"sequence" bson:"sequence"`
+	CreatedAt time.Time `json:"created_at" bson:"created_at"`
 }
