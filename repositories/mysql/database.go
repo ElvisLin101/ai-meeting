@@ -44,6 +44,23 @@ func InitDB() error {
 		&models.AiProperties{},
 		&models.AgentProperties{},
 		&models.AgentFileAsset{},
+		// Agent-first 改造: 统一会话/消息 + 跨会话画像 + run 可观测
+		&models.Conversation{},
+		&models.Message{},
+		&models.SessionSequence{},
+		&models.CompressedContextRecord{},
+		&models.UserProfile{},
+		&models.ProfileCandidate{},
+		&models.AgentIdentity{},
+		&models.AgentRun{},
+		&models.AgentStep{},
+		// 面试模块从 Mongo 迁移到 MySQL 的行模型
+		&models.InterviewSessionRow{},
+		&models.InterviewRecordRow{},
+		&models.InterviewQuestionRow{},
+		&models.InterviewHotSnapshotRow{},
+		&models.InterviewColdSnapshotRow{},
+		&models.InterviewTurnArchiveRow{},
 	); err != nil {
 		logrus.Warnf("Failed to auto migrate tables: %v", err)
 	}

@@ -5,9 +5,10 @@ import (
 	"ai-meeting/dto"
 	"ai-meeting/models"
 	"ai-meeting/pkg/ecode"
-	mongorepo "ai-meeting/repositories/mongo"
+	mysqlrepo "ai-meeting/repositories/mysql"
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -24,7 +25,7 @@ type AiChatStreamChunk struct {
 type aiChatRequestContext struct {
 	aiID          uint
 	memoryContext string
-	userMessage   *models.AiMessage
+	userMessage   *models.Message
 	threshold     int
 }
 
@@ -103,8 +104,8 @@ func (s *AiMessageService) prepareAiChat(ctx context.Context, sessionID, userID,
 		return nil, "", err
 	}
 
-	userMessage, err := mongorepo.SaveAiMessage(dbCtx, sessionID, userID, "user", content)
-	if err != nil {
+	userMessage := &models.Message{SessionID: sessionID, UserID: userID, Role: "user", Content: content}
+	if err := mysqlrepo.CreateMessage(userMessage); err != nil {
 		return nil, "", err
 	}
 
@@ -117,18 +118,14 @@ func (s *AiMessageService) prepareAiChat(ctx context.Context, sessionID, userID,
 }
 
 // finishAiChat 完成聊天：保存 assistant 消息 → 更新会话消息数 → 异步触发记忆压缩 → 返回响应 DTO
-func (s *AiMessageService) finishAiChat(ctx context.Context, sessionID, userID string, userMessage *models.AiMessage, reply string, threshold int) (*dto.AiChatRespDTO, error) {
-	// 派生 5s 超时: Mongo 挂起时快速失败, 避免请求无限挂起
-	dbCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	assistantMessage, err := mongorepo.SaveAiMessage(dbCtx, sessionID, userID, "assistant", reply)
-	if err != nil {
+func (s *AiMessageService) finishAiChat(ctx context.Context, sessionID, userID string, userMessage *models.Message, reply string, threshold int) (*dto.AiChatRespDTO, error) {
+	assistantMessage := &models.Message{SessionID: sessionID, UserID: userID, Role: "assistant", Content: reply}
+	if err := mysqlrepo.CreateMessage(assistantMessage); err != nil {
 		return nil, err
 	}
 
-	if total, err := mongorepo.CountAiMessages(dbCtx, sessionID, userID); err == nil {
-		if err := GetAiConversationService().UpdateConversationMessageCount(sessionID, userID, total); err != nil {
+	if total, err := mysqlrepo.CountMessages(sessionID, userID); err == nil {
+		if err := GetAiConversationService().UpdateConversationMessageCount(sessionID, userID, int(total)); err != nil {
 			logrus.Warnf("Failed to update AI conversation message count, session=%s, err=%v", sessionID, err)
 		}
 	} else {
@@ -139,8 +136,8 @@ func (s *AiMessageService) finishAiChat(ctx context.Context, sessionID, userID s
 
 	return &dto.AiChatRespDTO{
 		SessionID:          sessionID,
-		UserMessageID:      userMessage.MongoID.Hex(),
-		AssistantMessageID: assistantMessage.MongoID.Hex(),
+		UserMessageID:      fmt.Sprintf("%d", userMessage.ID),
+		AssistantMessageID: fmt.Sprintf("%d", assistantMessage.ID),
 		Content:            reply,
 	}, nil
 }

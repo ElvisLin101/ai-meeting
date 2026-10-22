@@ -35,6 +35,15 @@ const (
 	// Agent
 	ErrAgentPropertyNotFound = -4001 // 智能体配置不存在
 	ErrDeepSeekCall          = -4002 // 调用 DeepSeek 失败
+	ErrAgentToolNotFound     = -4003 // 工具不存在
+	ErrAgentToolTimeout      = -4004 // 工具执行超时
+	ErrAgentToolFailed       = -4005 // 工具执行失败
+	ErrAgentMaxSteps         = -4006 // Agent 达到最大迭代步数
+	ErrAgentRunNotFound      = -4007 // Agent run 不存在
+	ErrAgentRunBusy          = -4008 // 同一请求正在处理中
+	ErrAgentSandboxViolation = -4009 // 文件操作越界(沙箱)
+	ErrAgentInvalidInput     = -4010 // Agent 入参非法
+	ErrAgentProfileInvalid   = -4011 // 画像/身份数据非法
 )
 
 // init 注册业务码的 HTTP 状态码
@@ -62,4 +71,13 @@ func init() {
 	// Agent: 配置不存在 → 404; DeepSeek 上游失败 → 502
 	RegisterHTTPStatus(ErrAgentPropertyNotFound, http.StatusNotFound)
 	RegisterHTTPStatus(ErrDeepSeekCall, http.StatusBadGateway)
+	RegisterHTTPStatus(ErrAgentToolNotFound, http.StatusBadRequest)
+	RegisterHTTPStatus(ErrAgentToolTimeout, http.StatusGatewayTimeout)
+	RegisterHTTPStatus(ErrAgentToolFailed, http.StatusBadGateway)
+	RegisterHTTPStatus(ErrAgentMaxSteps, http.StatusBadRequest)
+	RegisterHTTPStatus(ErrAgentRunNotFound, http.StatusNotFound)
+	RegisterHTTPStatus(ErrAgentRunBusy, http.StatusConflict)
+	RegisterHTTPStatus(ErrAgentSandboxViolation, http.StatusBadRequest)
+	RegisterHTTPStatus(ErrAgentInvalidInput, http.StatusBadRequest)
+	RegisterHTTPStatus(ErrAgentProfileInvalid, http.StatusBadRequest)
 }

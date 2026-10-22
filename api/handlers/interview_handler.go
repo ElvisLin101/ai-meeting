@@ -6,6 +6,7 @@ import (
 	"ai-meeting/models"
 	"ai-meeting/pkg/ecode"
 	"ai-meeting/services/interview"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -543,8 +544,8 @@ func toInterviewMessageHistoryResp(msg models.AgentMessage) dto.AgentMessageHist
 		Sequence:  msg.Sequence,
 		CreatedAt: msg.CreatedAt.Format("2006-01-02 15:04:05"),
 	}
-	if !msg.MongoID.IsZero() {
-		resp.MessageID = msg.MongoID.Hex()
+	if msg.ID > 0 {
+		resp.MessageID = fmt.Sprintf("%d", msg.ID)
 	}
 	return resp
 }
@@ -558,8 +559,8 @@ func toInterviewRecordResp(record models.InterviewRecord) dto.InterviewRecordRes
 		Score:       record.Score,
 		Suggestions: record.Suggestions,
 	}
-	if !record.MongoID.IsZero() {
-		resp.RecordID = record.MongoID.Hex()
+	if record.ID > 0 {
+		resp.RecordID = fmt.Sprintf("%d", record.ID)
 	}
 	return resp
 }

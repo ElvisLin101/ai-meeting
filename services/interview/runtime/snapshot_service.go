@@ -2,7 +2,7 @@ package runtime
 
 import (
 	"ai-meeting/models"
-	mongorepo "ai-meeting/repositories/mongo"
+	mysqlrepo "ai-meeting/repositories/mysql"
 	"ai-meeting/services/metric"
 	"context"
 	"fmt"
@@ -53,7 +53,7 @@ func NewSnapshotService(rdb *redis.Client, flowCache *FlowCache, scoreCache *Sco
 func (s *SnapshotService) RefreshAfterAnswerCommitted(ctx context.Context, sessionID, userID, requestID string, flow *models.InterviewFlowState, turn *models.InterviewTurnLog) {
 	for attempt := 0; attempt < casMaxRetries; attempt++ {
 		// 读当前热快照
-		hot, err := mongorepo.FindHotSnapshot(ctx, sessionID)
+		hot, err := mysqlrepo.FindHotSnapshot(ctx, sessionID)
 		if err != nil {
 			// 读快照失败(如 Mongo 抖动): 跳过本轮刷新, 绝不能走 Upsert 把现有快照覆盖成 version=1
 			logrus.Warnf("Failed to read hot snapshot, skip refresh, session=%s, err=%v", sessionID, err)
@@ -72,7 +72,7 @@ func (s *SnapshotService) RefreshAfterAnswerCommitted(ctx context.Context, sessi
 			snapshotVersion = hot.SnapshotVersion + 1
 		}
 		if turn != nil {
-			seq, err := mongorepo.ArchiveTurn(ctx, sessionID, requestID, *turn, snapshotVersion)
+			seq, err := mysqlrepo.ArchiveTurn(ctx, sessionID, requestID, *turn, snapshotVersion)
 			if err != nil {
 				logrus.Warnf("Failed to archive turn, session=%s, err=%v", sessionID, err)
 			} else {
@@ -86,9 +86,9 @@ func (s *SnapshotService) RefreshAfterAnswerCommitted(ctx context.Context, sessi
 		// CAS 写入
 		var ok bool
 		if hot != nil {
-			ok, err = mongorepo.CompareAndSetHotSnapshot(ctx, sessionID, hot.SnapshotVersion, newSnap)
+			ok, err = mysqlrepo.CompareAndSetHotSnapshot(ctx, sessionID, hot.SnapshotVersion, newSnap)
 		} else {
-			err = mongorepo.UpsertHotSnapshot(ctx, newSnap)
+			err = mysqlrepo.UpsertHotSnapshot(ctx, newSnap)
 			ok = err == nil
 		}
 		if err != nil {
@@ -120,10 +120,10 @@ func (s *SnapshotService) RefreshColdSnapshot(ctx context.Context, sessionID, us
 		ResumeScore:     resumeScore,
 	}
 	// 已存在则只递增 materialVersion
-	if existing, err := mongorepo.FindColdSnapshot(ctx, sessionID); err == nil && existing != nil {
+	if existing, err := mysqlrepo.FindColdSnapshot(ctx, sessionID); err == nil && existing != nil {
 		snap.MaterialVersion = existing.MaterialVersion + 1
 	}
-	if err := mongorepo.UpsertColdSnapshot(ctx, snap); err != nil {
+	if err := mysqlrepo.UpsertColdSnapshot(ctx, snap); err != nil {
 		logrus.Warnf("Failed to upsert cold snapshot, session=%s, err=%v", sessionID, err)
 	}
 }
@@ -141,7 +141,7 @@ func (s *SnapshotService) EnsureRuntime(ctx context.Context, sessionID string) (
 	}
 
 	// 2. 从热快照重建
-	hot, err := mongorepo.FindHotSnapshot(ctx, sessionID)
+	hot, err := mysqlrepo.FindHotSnapshot(ctx, sessionID)
 	if err == nil && hot != nil {
 		// 写回 Redis
 		if err := s.flowCache.SaveFlow(ctx, sessionID, &hot.Flow); err != nil {
@@ -168,7 +168,7 @@ func (s *SnapshotService) EnsureRuntime(ctx context.Context, sessionID string) (
 	}
 
 	// 3. 从冷快照恢复材料
-	cold, err := mongorepo.FindColdSnapshot(ctx, sessionID)
+	cold, err := mysqlrepo.FindColdSnapshot(ctx, sessionID)
 	if err != nil {
 		logrus.Warnf("Failed to read cold snapshot, session=%s, err=%v", sessionID, err)
 	} else if cold != nil {
@@ -180,7 +180,7 @@ func (s *SnapshotService) EnsureRuntime(ctx context.Context, sessionID string) (
 	}
 
 	// 4. 从 TurnArchive 恢复轮次
-	archives, err := mongorepo.FindTurnArchives(ctx, sessionID)
+	archives, err := mysqlrepo.FindTurnArchives(ctx, sessionID)
 	if err != nil {
 		logrus.Warnf("Failed to read turn archives, session=%s, err=%v", sessionID, err)
 	} else if len(archives) > 0 {

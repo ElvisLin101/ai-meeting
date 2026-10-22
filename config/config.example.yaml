@@ -14,13 +14,6 @@ redis:
   password: "your-password"
   db: 0
 
-mongodb:
-  host: "localhost"
-  port: 27017
-  username: "root"
-  password: "your-password"
-  dbname: "ai_meeting"
-
 jwt:
   secret: "your-secret-key-here"
   expire: 7200
@@ -33,3 +26,44 @@ ai:
     model: "deepseek-chat"
     api_key: "your-api-key"
     api_secret: ""
+
+agent:
+  max_steps: 8
+  tool_timeout: 15
+  total_timeout: 120
+  max_tool_result_bytes: 32768
+  max_parallel_tools: 4         # 单步内并行工具数上限（仅对声明 ConcurrencySafe 的工具生效）
+  sandbox_root: "./sandbox"
+  context_budget: 12288        # Deprecated: 旧字节预算，兼容保留
+  profile_extract_every: 3
+  context:
+    model_window_tokens: 64000
+    max_output_tokens: 4096
+    soft_limit_tokens: 16000    # 日常目标预算；硬安全线仍看 model_window_tokens
+    safety_margin_tokens: 1024
+    reserve_tokens: 2048        # 工具 schema + query + 协议预留
+    identity_max_tokens: 500
+    profile_max_tokens: 600
+    summary_max_tokens: 1000
+    recent_max_tokens: 6000
+    compress_threshold_tokens: 4800  # 未压缩对话超过该 token 开始压缩
+  search:
+    provider: "tavily"          # tavily | serper
+    endpoint: "https://api.tavily.com/search"
+    api_key: ""                 # 也可用 AGENT_SEARCH_API_KEY 覆盖
+    max_results: 5
+  plan:
+    enabled: true               # 复杂任务先规划再执行；失败自动回退线性 ReAct
+    max_tasks: 6                # 单次计划最大任务数
+    max_parallel: 2             # 计划内最大并行任务数
+    task_timeout: 60            # 单个子任务超时（秒）
+    total_timeout: 180          # 计划总超时（秒，含最终合成）
+    max_steps_per_task: 4       # agent 子任务的最大 ReAct 步数
+    long_query_runes: 40        # 超过该长度视为复杂查询
+    replan_enabled: true        # 任务失败/hint 时允许在轮次边界增量重规划
+    max_replans: 2              # 单次 run 最大 replan 次数
+    retry_max_attempts: 2       # 任务最大尝试次数（含首次，仅对可重试错误生效）
+    retry_backoff_ms: 500       # 重试基础退避（毫秒，指数退避）
+    mode: "auto"                # auto（规则打分）| always（总是 plan）| never（从不 plan）
+    min_score: 2                # 进入 plan 的最低规则得分
+    fast_path_runes: 24         # 短查询快速通道阈值（无强信号时直接 ReAct）
