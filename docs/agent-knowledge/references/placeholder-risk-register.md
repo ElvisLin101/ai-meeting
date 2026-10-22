@@ -51,8 +51,8 @@
 - `services/agent/tools/`: 工具注册/执行(JSON Schema 校验、超时、panic 恢复、结果截断、审计) + PDF/搜索/沙箱文件/面试工具。
 - `services/agent/tools/batch.go`: 单步 tool call 批调度; 全部工具声明 `ConcurrencySafe` 时并行, 否则整批串行; 结果按原始 call 顺序回填, 失败隔离。
 - `services/agent/plan/`: Plan-and-Execute 编排 (planner/scheduler/service/replanner/ledger); 规划失败回退线性 ReAct; 任务图与结果落 `agent_runs.plan_json`; tool 任务强制只读; replan 在轮次边界串行应用, 受 `max_replans`/计划哈希约束; 幂等账本仅在单 run 进程内有效, 不支持重启续跑。
-- `services/agent/context/`: 四层上下文(短期/远期压缩/用户画像/Agent 自我定位) + 画像异步提炼 + 压缩。
+- `services/agent/context/`: token 预算四层上下文 + 对话压缩 + L1 规则候选 + L2 画像 consolidation (diff/冲突/确认/CAS)。
 - `services/agent/run/service.go`: run 编排、MySQL 落库、SSE 事件、SingleFlight 去重/幂等锁。
-- `repositories/mysql/`: 会话/消息/压缩快照/画像/身份/run/step/面试行模型。
+- `repositories/mysql/`: 会话/消息/压缩快照/画像/候选/确认/审计/身份/run/step/面试行模型。
 - `repositories/redis_hot.go`: 热数据 key 与 MySQL 回填。
-- 已知边界: 流式 run 的 SingleFlight 仅做幂等(不复用 chunk); 画像提炼为异步+节流; 换主机制为概率性收敛; 工具批调度尚无 `depends_on` 依赖图与 async 模式。
+- 已知边界: 流式 run 的 SingleFlight 仅做幂等(不复用 chunk); 画像 L2 为异步、确认项尚无前端消费; 工具批调度尚无 `depends_on` 依赖图与 async 模式。
