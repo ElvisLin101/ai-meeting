@@ -34,10 +34,21 @@ func CountPendingProfileCandidates(userID string) (int64, error) {
 }
 
 // MarkProfileCandidates 批量更新候选状态（promoted / rejected）。
-func MarkProfileCandidates(ids []uint, status string) error {
-	if len(ids) == 0 {
+// userID 过滤防止跨用户误更新。
+func MarkProfileCandidates(userID string, ids []uint, status string) error {
+	if userID == "" || len(ids) == 0 {
 		return nil
 	}
 	return DB.Model(&models.ProfileCandidate{}).
-		Where("id IN ?", ids).Update("status", status).Error
+		Where("user_id = ? AND id IN ?", userID, ids).Update("status", status).Error
+}
+
+// CreateProfileConfirmation 写入待用户确认的画像项。
+func CreateProfileConfirmation(c *models.ProfileConfirmation) error {
+	return DB.Create(c).Error
+}
+
+// CreateProfileEvent 写入 L2 consolidation 审计记录。
+func CreateProfileEvent(e *models.ProfileEvent) error {
+	return DB.Create(e).Error
 }

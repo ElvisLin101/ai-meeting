@@ -62,8 +62,8 @@ func (a *Assembler) Build(ctx context.Context, in BuildInput) (*Assembled, error
 
 	// profile：结构化长期记忆，按上限截断。
 	if profile != nil {
-		if raw, err := json.Marshal(profile); err == nil {
-			addSystem("【用户画像（跨会话结构化记忆）】\n"+string(raw), a.cfg.ProfileMaxTokens)
+		if text := renderProfile(profile); text != "" {
+			addSystem(text, a.cfg.ProfileMaxTokens)
 			out.UsedProfile = true
 		}
 	}
@@ -137,6 +137,30 @@ func selectRecentByTokens(messages []Message, budget int) ([]Message, int) {
 		selected[i], selected[j] = selected[j], selected[i]
 	}
 	return selected, len(messages) - len(selected)
+}
+
+// renderProfile 渲染 active facts；没有 facts 时回退到旧 JSON 画像。
+func renderProfile(p *UserProfileData) string {
+	if p == nil {
+		return ""
+	}
+	facts := p.ActiveFacts()
+	if len(facts) == 0 {
+		raw, err := json.Marshal(p)
+		if err != nil {
+			return ""
+		}
+		return "【用户画像（跨会话结构化记忆）】\n" + string(raw)
+	}
+	var b strings.Builder
+	b.WriteString("【用户画像（结构化长期记忆）】\n")
+	for i, f := range facts {
+		if i >= 30 {
+			break
+		}
+		fmt.Fprintf(&b, "- [%s] %s（置信度 %.2f）\n", displayFactKey(f), f.Value, f.Confidence)
+	}
+	return b.String()
 }
 
 // buildIdentityPrompt 生成 Agent 自我定位 system prompt

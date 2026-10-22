@@ -101,6 +101,34 @@ type ProfileCandidate struct {
 // TableName 指定表名
 func (ProfileCandidate) TableName() string { return "profile_candidates" }
 
+// ProfileConfirmation 保存需要用户确认的模糊/冲突画像项。
+type ProfileConfirmation struct {
+	ID         uint       `gorm:"primaryKey" json:"id"`
+	UserID     string     `gorm:"size:128;index;not null" json:"user_id"`
+	Field      string     `gorm:"size:64" json:"field"`
+	Key        string     `gorm:"size:64" json:"key"`
+	Value      string     `gorm:"type:text" json:"value"`
+	Question   string     `gorm:"type:text" json:"question"`
+	Status     string     `gorm:"size:32;index;default:'pending'" json:"status"` // pending/confirmed/rejected
+	CreatedAt  time.Time  `json:"created_at"`
+	ResolvedAt *time.Time `json:"resolved_at"`
+}
+
+// TableName 指定表名
+func (ProfileConfirmation) TableName() string { return "profile_confirmations" }
+
+// ProfileEvent 记录每次 L2 consolidation 的审计摘要。
+type ProfileEvent struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	UserID    string    `gorm:"size:128;index;not null" json:"user_id"`
+	Reason    string    `gorm:"size:255" json:"reason"`
+	DiffJSON  string    `gorm:"type:longtext" json:"diff_json"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// TableName 指定表名
+func (ProfileEvent) TableName() string { return "profile_events" }
+
 // AgentIdentity Agent 自我定位（静态 persona + 低频自省）
 type AgentIdentity struct {
 	ID           uint      `gorm:"primaryKey" json:"id"`
