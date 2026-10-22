@@ -37,6 +37,17 @@
 | GET | `/agent-properties/byName` | `AgentPropertiesController.GetByName` | `AgentPropertiesService.GetByName` |
 | GET | `/agent-properties` | `AgentPropertiesController.GetByPage` | `AgentPropertiesService.GetByPage` |
 
+## Agent Run（Agent 主入口）
+
+| Method | Path | Handler | Service |
+| --- | --- | --- | --- |
+| POST | `/agent/runs` | `AgentRunController.Run` | `run.Service.Start` |
+| POST | `/agent/runs/stream` | `AgentRunController.RunStream` | `run.Service.StartStream` |
+| GET | `/agent/runs` | `AgentRunController.Page` | `mysql.PageAgentRuns` |
+| GET | `/agent/runs/:runId` | `AgentRunController.Get` | `mysql.FindAgentRun/ListAgentSteps` |
+
+SSE 事件: `step` / `tool_call` / `tool_result` / `message` / `done` / `error`。
+
 ## AI
 
 | Method | Path | Handler | Service |

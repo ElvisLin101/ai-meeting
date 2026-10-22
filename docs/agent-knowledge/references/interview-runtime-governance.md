@@ -40,17 +40,17 @@
 - **恢复机制**: 以 `ensureRuntime(...)` 为核心
 - **数据更新机制**: 以 `refreshSnapshot(...)` / Patch + CAS + 幂等补偿 为核心
 
-## 2. 分层: 什么放 Redis, 什么放 Mongo
+## 2. 分层: 什么放 Redis, 什么放 MySQL
 
 ### 2.1 四层存储 + 主数据源
 
 | 层 | 存储 | 存什么 | 变化频率 | 恢复角色 |
 |---|---|---|---|---|
 | 在线运行态 | Redis(TTL 24h) | flow/分数/最近轮次/幂等集/材料 | 每轮都改 | 命中即零开销 |
-| 热快照 | Mongo `interview_session_runtime_hot_snapshot` | flow/分数聚合/最近20轮窗口/幂等控制字段/snapshotVersion | 每轮答题 commit 后刷 | Redis miss 后第一重建源 |
-| 冷快照 | Mongo `interview_session_runtime_cold_snapshot` | 题面/建议/简历上下文/评分材料 | 出题/评价/finalize 时刷 | 补充材料 |
-| 轮次归档 | Mongo `interview_session_turn_archive` | 完整不可变的轮次历史, 按 seq 单调 | 每轮一条 | 热快照窗口溢出后的权威源 |
-| Mongo 主数据 | Mongo `interview_sessions`/`interview_questions` | 会话身份/题目材料 | 低频 | 快照+归档全空时的最后重建源 |
+| 热快照 | MySQL `interview_session_runtime_hot_snapshot` | flow/分数聚合/最近20轮窗口/幂等控制字段/snapshotVersion | 每轮答题 commit 后刷 | Redis miss 后第一重建源 |
+| 冷快照 | MySQL `interview_session_runtime_cold_snapshot` | 题面/建议/简历上下文/评分材料 | 出题/评价/finalize 时刷 | 补充材料 |
+| 轮次归档 | MySQL `interview_session_turn_archive` | 完整不可变的轮次历史, 按 seq 单调 | 每轮一条 | 热快照窗口溢出后的权威源 |
+| MySQL 主数据 | MySQL `interview_sessions`/`interview_questions` | 会话身份/题目材料 | 低频 | 快照+归档全空时的最后重建源 |
 | MySQL 最终报告 | MySQL `interview_records` | 面试结束总结报告 | finalize 一次 | 不参与运行态恢复, 仅业务展示 |
 
 ### 2.2 热冷快照的分工(关键设计)
@@ -89,7 +89,7 @@
 
 ### 3.1 核心原则
 
-**恢复只写 Redis, 绝不回写 Mongo 快照。** 避免恢复路径触发写放大, 快照由业务节点的协调器异步刷。
+**恢复只写 Redis, 绝不回写 MySQL 快照。** 避免恢复路径触发写放大, 快照由业务节点的协调器异步刷。
 
 ### 3.2 恢复链路
 
@@ -102,7 +102,7 @@ ensureRuntime(sessionId, loadMode, scope)
   ├─ 3. 双重检查(拿锁后再查一次, 防 leader 已建好)
   └─ 4. rebuildRuntime
        ├─ 4a. findSnapshot(热+冷组装) → 够用 → writeSnapshotToCache → RUNTIME_SNAPSHOT
-       └─ 4b. 不够 → 下钻 Mongo 主数据(Session/Question + loadPersistedTurns)
+       └─ 4b. 不够 → 下钻 MySQL 主数据(Session/Question + loadPersistedTurns)
               → buildRuntimeMaterial(每个字段多级回退) → writePartialMaterial
               → 全空 → NONE/READ_ONLY(不下钻 MySQL, 宁可只读)
 ```
@@ -128,7 +128,7 @@ ensureRuntime(sessionId, loadMode, scope)
 `HotRefreshCoordinator` 是单节点本地协调(非全异步队列):
 - 普通中间态(出题/神态评价) → 防抖延迟刷(150ms 窗口, 最大聚合 500ms), 同 session 多次意图合并。
 - 答题 commit / finalize → `forceFlush=true`, 调用线程同步等(最多 600ms), 保证检查点及时落盘。
-- 跨节点并发靠 Mongo CAS 兜底, 不靠这个协调器。
+- 跨节点并发靠 MySQL CAS 兜底, 不靠这个协调器。
 
 ### 4.2 落盘: CAS + 单调性 + 幂等短路
 
@@ -166,7 +166,7 @@ ensureRuntime(sessionId, loadMode, scope)
 
 ### 5.1 现状评估
 
-Go 侧面试模块会话/题目/记录已迁 Mongo, 运行态状态机 P0 骨架已落地。
+Go 侧面试模块会话/题目/记录已迁 MySQL, 运行态状态机 P0 骨架已落地。
 
 **已落地(P0)**:
 - 状态机模型: `models/interview_runtime.go`(`InterviewFlowState` + `InterviewTurnLog` + 阶段枚举)
@@ -192,10 +192,10 @@ Go 侧面试模块会话/题目/记录已迁 Mongo, 运行态状态机 P0 骨架
 
 **需要新建(P1/P2)**:
 - 通用分布式锁(同题锁/幂等锁/状态机推进锁, 语义是"拒绝/排队"不是"去重")
-- Mongo CAS / FindOneAndUpdate 带条件(状态机原子推进)
-- ~~原子 sequence 生成(`$inc` 计数器, 当前 `nextXxxSequence` 非原子)~~ **已完成: `repositories/mongo/counter.go`(`counters` 集合 `findOneAndUpdate`+`$inc`, 覆盖 TurnArchive/AiMessage/AgentMessage)**
+- MySQL CAS / FindOneAndUpdate 带条件(状态机原子推进)
+- ~~原子 sequence 生成(`$inc` 计数器, 当前 `nextXxxSequence` 非原子)~~ **已完成: `repositories/mysql/sequence_repository.go`(`counters` 集合 `findOneAndUpdate`+`$inc`, 覆盖 TurnArchive/AiMessage/AgentMessage)**
 - 面试配置块(singleflight 常量改可配)
-- 面试运行态 repository(Mongo 热/冷快照 + TurnArchive 持久化)
+- 面试运行态 repository(MySQL 热/冷快照 + TurnArchive 持久化)
 - 幂等机制(processing/replay 双 key)
 - 答题流水线(pipeline 编排)
 - 评分/出题的 AI 调用接 DeepSeek(CallConfiguredAIChatStream, aiID=0 走 config fallback)
@@ -209,7 +209,7 @@ Go 侧面试模块会话/题目/记录已迁 Mongo, 运行态状态机 P0 骨架
 ### 5.3 落地优先级
 
 - **P0(已完成)**: 状态机模型 + Redis key 常量 + flow cache(CAS) + score cache(Lua 原子) + turn log cache + 状态机转移方法 + 追问规则链
-- **P1(部分完成)**: 通用分布式锁 `pkg/lock` ✅ + 幂等机制 ✅ + 答题流水线(条件回滚) ✅ + 评分/出题/追问 AI 调用 ✅ + Mongo 热冷快照 + TurnArchive ✅ + ensureRuntime 恢复 ✅ + refreshSnapshot 更新 ✅ + turn log 异步补偿 ✅ + 面试报告归档 ✅ + 原子 sequence(`repositories/mongo/counter.go`) ✅ + 复合索引(`repositories/mongo/client.go: ensureIndexes`) ✅ | 待做: 出题流程的冷快照在 ensureRuntime 中恢复材料的完善
+- **P1(部分完成)**: 通用分布式锁 `pkg/lock` ✅ + 幂等机制 ✅ + 答题流水线(条件回滚) ✅ + 评分/出题/追问 AI 调用 ✅ + MySQL 热冷快照 + TurnArchive ✅ + ensureRuntime 恢复 ✅ + refreshSnapshot 更新 ✅ + turn log 异步补偿 ✅ + 面试报告归档 ✅ + 原子 sequence(`repositories/mysql/sequence_repository.go`) ✅ + 复合索引(`repositories/mysql/database.go` AutoMigrate) ✅ | 待做: 出题流程的冷快照在 ensureRuntime 中恢复材料的完善
 - **P2(待做)**: singleflight 分 stage 可配 + Fencing Token + worker pool/AI Guard
 
 ## 6. 修改时必查

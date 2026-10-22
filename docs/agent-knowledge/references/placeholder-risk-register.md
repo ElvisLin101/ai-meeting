@@ -11,15 +11,15 @@
 ## AI
 
 - `api/handlers/ai_handler.go`: `AiMessageController.ChatStream` 已接 SSE, 但流式中断时不会保存不完整 assistant 回复。
-- ~~`repositories/mongo/ai_message_repository.go`: `AiMessage.Sequence` 通过查询当前最大值后加一生成, 高并发同会话写入时可能重复。~~ **已完成: `AiMessage`/`AgentMessage`/`TurnArchive` 的 seq 均改用 Mongo 计数器(`counters` 集合, `findOneAndUpdate` + `$inc` 原子递增)分配, 并发不再重复; 相关集合已建复合索引(见 `repositories/mongo/client.go: ensureIndexes`)。**
+- ~~`repositories/mysql/message_repository.go`: `AiMessage.Sequence` 通过查询当前最大值后加一生成, 高并发同会话写入时可能重复。~~ **已完成: 统一 `messages` 与 `TurnArchive` 的 seq 改用 MySQL `session_sequences` 原子分配(`LAST_INSERT_ID` 技巧), 并发不重复; 相关唯一索引见 `repositories/mysql/database.go` AutoMigrate。**
 - `clients/ai_model_client.go`: 模型调用按 OpenAI-compatible endpoint 解析, 非兼容 provider 需要适配。
 - `config/config.yaml`: `ai.deepseek.api_key` 当前预留为空, 本地运行真实模型前需要填入或通过 `AI_DEEPSEEK_API_KEY` 覆盖。
 
 ## Interview
 
 - `services/interview/interview_service.go`: `ExtractInterviewQuestions`, `AnswerInterviewQuestion`, `GetNextQuestion`, `GetCurrentQuestion`, `RestoreInterviewSession`, `GetSessionInterviewQuestions`, `GetSessionTotalScore`, `GetSessionInterviewSuggestions`, `GetSessionResumeScore`, `GetRadarChartData` 已接入真实实现。神态评估已移除。
-- ~~`services/interview/interview_service.go`: `SaveInterviewRecordFromRedis` 是空实现。~~ **已完成: 从 Mongo `TurnArchive` 汇总轮次算平均分, 取最后一轮作报告概要, 写入 `InterviewRecord`。**
-- ~~`api/handlers/interview_handler.go`: `PreviewResume` 只返回固定提示。~~ **已完成: 从 Mongo 读 `ResumePath` → 解析 PDF 返回文本。**
+- ~~`services/interview/interview_service.go`: `SaveInterviewRecordFromRedis` 是空实现。~~ **已完成: 从 MySQL `TurnArchive` 汇总轮次算平均分, 取最后一轮作报告概要, 写入 `InterviewRecord`。**
+- ~~`api/handlers/interview_handler.go`: `PreviewResume` 只返回固定提示。~~ **已完成: 从 MySQL 读 `ResumePath` → 解析 PDF 返回文本。**
 - ~~`InterviewSessionFacade.CreateSession` 写 `InterviewSession`, 但 `PageConversations` 读 `AgentConversation`。~~ **已完成: `CreateSession` 双写 AgentConversation 列表条目(标题"模拟面试"), 保证新建面试会话在列表中可见; 列表条目创建失败时补偿删除 InterviewSession, 保持要么全成功要么失败。**
 
 ## Memory
@@ -44,3 +44,15 @@
 - `repositories/redis.go`: 全局 `SingleFlight` 实例, 在 `InitRedis` 中初始化。
 
 替换任意占位逻辑后, 从本文件移除或改写对应条目。
+
+## Agent 模块（新增）
+
+- `services/agent/loop/loop.go`: 手写 ReAct 循环, 终止条件(最终回答/max_steps/重复动作/连续工具失败/超时)已实现。
+- `services/agent/tools/`: 工具注册/执行(JSON Schema 校验、超时、panic 恢复、结果截断、审计) + PDF/搜索/沙箱文件/面试工具。
+- `services/agent/tools/batch.go`: 单步 tool call 批调度; 全部工具声明 `ConcurrencySafe` 时并行, 否则整批串行; 结果按原始 call 顺序回填, 失败隔离。
+- `services/agent/plan/`: Plan-and-Execute 编排 (planner/scheduler/service/replanner/ledger); 规划失败回退线性 ReAct; 任务图与结果落 `agent_runs.plan_json`; tool 任务强制只读; replan 在轮次边界串行应用, 受 `max_replans`/计划哈希约束; 幂等账本仅在单 run 进程内有效, 不支持重启续跑。
+- `services/agent/context/`: 四层上下文(短期/远期压缩/用户画像/Agent 自我定位) + 画像异步提炼 + 压缩。
+- `services/agent/run/service.go`: run 编排、MySQL 落库、SSE 事件、SingleFlight 去重/幂等锁。
+- `repositories/mysql/`: 会话/消息/压缩快照/画像/身份/run/step/面试行模型。
+- `repositories/redis_hot.go`: 热数据 key 与 MySQL 回填。
+- 已知边界: 流式 run 的 SingleFlight 仅做幂等(不复用 chunk); 画像提炼为异步+节流; 换主机制为概率性收敛; 工具批调度尚无 `depends_on` 依赖图与 async 模式。

@@ -23,7 +23,7 @@
 
 - 用户与权限: 登录态、共享 session、当前用户注入、管理员角色、WebSocket 鉴权。
 - 通用 Agent: 会话创建、SSE 聊天、模型调用、上下文历史、用户归属校验、助手消息落库、会话 messageSeq 回写、文件上传。
-- 普通 AI 对话: 多模型统一接入、SSE 流式输出、DeepSeek `reasoning_content`、用户消息和助手消息落 MongoDB。
+- 普通 AI 对话: 多模型统一接入、SSE 流式输出、DeepSeek `reasoning_content`、用户消息和助手消息落 MySQL。
 - 面试主链路: 简历驱动出题、答题评分、追问规则、状态机、幂等、同题锁、运行态恢复、热/冷快照、最终归档、雷达图。
 - 运行时保护: AI Guard、SingleFlight、分布式锁、Fencing Token、L1 缓存、超时、重试、并发上限。
 - 工程化: Docker Compose、CI、测试覆盖、skills 知识体系。
@@ -95,17 +95,17 @@ AI 侧有运行时压缩阈值接口:
 - `POST /agents/sessions/{sessionId}/chat` 是 SSE 流式接口。
 - 聊天前校验 `sessionId` 和用户归属。
 - 读取历史消息后调用模型。
-- 用户消息和助手消息都落 MongoDB。
+- 用户消息和助手消息都落 MySQL。
 - 出错时也会保存默认错误 assistant 消息。
 - 成功后发送 `end` 事件 `[DONE]`。
 - 回写会话 `messageSeq` / message count。
-- `AgentConversation` 和 `AgentMessage` 均为 MongoDB 主记录。
+- `AgentConversation` 和 `AgentMessage` 均为 MySQL 主记录。
 
 当前实现:
 
 - Agent Chat 已实现 SSE 流式闭环，调用配置的模型，保存 user/assistant 两类消息并回写会话计数。
-- `AgentMessage` 在 MongoDB `agent_messages`。
-- `AgentConversation` 已迁 MongoDB `agent_conversations`。
+- `AgentMessage` 在 MySQL `agent_messages`。
+- `AgentConversation` 已迁 MySQL `agent_conversations`。
 - 已做上下文压缩记忆系统，Chat 后异步触发压缩判断（Agent 侧当前不压缩，仅 AI 侧压缩）。
 - 没有独立的会话归属服务。
 - `CreateConversationWithTitle` 忽略入参 `agentID`，固定写 1。
@@ -126,17 +126,17 @@ AI 侧有运行时压缩阈值接口:
 - 支持 DeepSeek 等 OpenAI-compatible 模型。
 - 支持 `reasoning_content` 思维链内容。
 - 用户消息、助手消息、错误消息都持久化。
-- 历史消息来自 MongoDB。
+- 历史消息来自 MySQL。
 - 会话归属校验和会话更新完整。
 
 当前实现:
 
 - AI Chat 已接入 OpenAI-compatible 模型调用，同时支持普通 JSON 和 SSE 流式输出。
-- `AiMessage` 已迁 MongoDB `ai_messages`。
-- `AiConversation` 已迁 MongoDB `ai_conversations`。
-- 已有 AI 会话级长期记忆: MongoDB 原始消息、Redis 压缩摘要、MongoDB 压缩快照 `_id=ai:{sessionId}`。
+- `AiMessage` 已迁 MySQL `ai_messages`。
+- `AiConversation` 已迁 MySQL `ai_conversations`。
+- 已有 AI 会话级长期记忆: MySQL 原始消息、Redis 压缩摘要、MySQL 压缩快照 `session_id=ai:{sessionId}`。
 - 用户消息和 assistant 回复都会持久化。
-- 删除会话会清理 MongoDB `ai_messages` 和 AI 压缩上下文。
+- 删除会话会清理 MySQL `ai_messages` 和 AI 压缩上下文。
 - SSE 支持 `message` 增量事件和 `reasoning` 增量事件，但 reasoning content 当前只流式透出，不单独持久化。
 - 没有错误消息持久化。
 - AI 配置 CRUD 基础可用，但没有 provider handler/factory。
@@ -151,11 +151,11 @@ AI 侧有运行时压缩阈值接口:
 
 目标能力:
 
-- `InterviewSession`、`InterviewQuestion` 等核心对象走 MongoDB。
+- `InterviewSession`、`InterviewQuestion` 等核心对象走 MySQL。
 - 简历提题调用模型，写题目、建议和简历分。
 - 答题链路有完整 pipeline: 参数校验、`requestId` 幂等、当前题校验、同题锁、AI 评分、追问规则、主问题计分、条件回滚、快照刷新。回滚为条件回滚(`RollbackFlowCAS`): 评分失败回滚 `EVALUATING→ASKING`, 推进后的失败仅在 flow 未被他人推进时回滚; 题级锁 TTL(300s) > 执行预算(120s)。
 - 规则链决定是否追问。
-- Redis 存热运行态，MongoDB 存热/冷快照和轮次归档。
+- Redis 存热运行态，MySQL 存热/冷快照和轮次归档。
 - 恢复支持 `READ_ONLY` / `READ_WRITE_REQUIRED` 和不同恢复范围。
 - `finishSession` 从运行态落正式记录。
 - 雷达图、总分、建议优先读运行态，再回退记录。
@@ -164,10 +164,10 @@ AI 侧有运行时压缩阈值接口:
 当前实现:
 
 - 路由齐全，面试主链路已落地: 出题、答题评分、追问、状态机、运行态恢复、热冷快照、轮次归档、幂等补偿。
-- `CreateSession` 写 Mongo `interview_sessions`，但 `PageConversations` 查 Mongo `agent_conversations`，`GetConversationHistory` 查 Mongo `agent_messages`（会话列表与历史消息分属不同集合，非同一真相源）。
-- `SaveInterviewRecordFromRedis` 已实现: 从 Mongo `TurnArchive` 汇总轮次算平均分，写 `InterviewRecord`。
-- `PreviewResume` 已实现: 从 Mongo 读 `ResumePath` → 解析 PDF 返回文本。
-- `InterviewQuestion` 已有 Mongo 仓储并被 `question_cache` 使用。
+- `CreateSession` 写 MySQL `interview_sessions`，但 `PageConversations` 查 MySQL `agent_conversations`，`GetConversationHistory` 查 MySQL `agent_messages`（会话列表与历史消息分属不同集合，非同一真相源）。
+- `SaveInterviewRecordFromRedis` 已实现: 从 MySQL `TurnArchive` 汇总轮次算平均分，写 `InterviewRecord`。
+- `PreviewResume` 已实现: 从 MySQL 读 `ResumePath` → 解析 PDF 返回文本。
+- `InterviewQuestion` 已有 MySQL 仓储并被 `question_cache` 使用。
 - 神态分析未实现。
 
 待办:
@@ -224,18 +224,18 @@ AI 侧有运行时压缩阈值接口:
 目标策略:
 
 - 用户/权限/AgentProperties/AiProperties 等配置类走 MySQL。
-- Agent/Ai conversation/message 走 MongoDB。
-- 面试 session/question/runtime snapshot/turn archive 走 MongoDB。
+- Agent/Ai conversation/message 走 MySQL。
+- 面试 session/question/runtime snapshot/turn archive 走 MySQL。
 - Redis 负责运行态、锁、缓存、SingleFlight。
 
 当前实现:
 
-- `AgentConversation` 已迁 MongoDB `agent_conversations`。
-- `AgentMessage` 已迁 MongoDB `agent_messages`。
-- `AiConversation` 已迁 MongoDB `ai_conversations`。
-- `AiMessage` 已迁 MongoDB `ai_messages`。
-- `InterviewSession`/`InterviewRecord`/`InterviewQuestion` 均在 MongoDB。
-- `CompressedContext` 用 MongoDB 覆盖写入: AI `_id=ai:{sessionId}`（Agent 侧不写压缩快照）。
+- `AgentConversation` 已迁 MySQL `agent_conversations`。
+- `AgentMessage` 已迁 MySQL `agent_messages`。
+- `AiConversation` 已迁 MySQL `ai_conversations`。
+- `AiMessage` 已迁 MySQL `ai_messages`。
+- `InterviewSession`/`InterviewRecord`/`InterviewQuestion` 均在 MySQL。
+- `CompressedContext` 用 MySQL 覆盖写入: AI `session_id=ai:{sessionId}`（Agent 侧不写压缩快照）。
 - 用户/AiProperties/AgentProperties/文件资产仍在 MySQL。
 
 待办:
@@ -247,7 +247,7 @@ AI 侧有运行时压缩阈值接口:
 
 目标能力:
 
-- Docker Compose: MySQL + MongoDB + Redis + App。
+- Docker Compose: MySQL + MySQL + Redis + App。
 - `.env.example`。
 - CI。
 - 单元测试、压力测试、恢复一致性测试。

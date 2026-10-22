@@ -1,11 +1,11 @@
-# AI-Meeting
+# CareerAgent
 
 ![CI](https://img.shields.io/github/actions/workflow/status/ElvisLin101/ai-meeting/ci.yml?branch=main&label=CI)
 [![Go Version](https://img.shields.io/badge/Go-1.24.1-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 
-> 本项目主要面向集群分布式开发，旨在解决分布式场景下后端服务的稳定性与可用性（如 AI 调用去重、长会话状态恢复、并发一致性保障）。项目不依赖任何 Agent 框架，面试流程通过本地状态机 + DeepSeek API 直接编排，是一个纯后端基础设施项目，面试业务场景是这些分布式机制的载体。
-
-基于 Go + Gin 的 AI 面试平台后端，包含通用 AI 对话和模拟面试两大模块，支持对接 DeepSeek 等 OpenAI 兼容模型，支持简历驱动的面试出题、评分、追问全流程编排。
+> 一个面向长任务的自主 Agent 后端：手写 ReAct 循环 + Function Calling 工具编排 + 四层上下文管理。
+> 求职/面试是示例领域；结构化模拟面试作为「确定性流程工具」接入，用来展示自主编排与确定性编排的边界。
+> 不依赖任何 Agent 框架，存储统一为 Redis（热数据）+ MySQL（真相源 / 全量历史 / 恢复源）。
 
 ## 技术栈
 
@@ -13,249 +13,189 @@
 |------|------|
 | 语言 | Go 1.24.1 |
 | Web 框架 | Gin |
-| ORM | GORM（MySQL：用户/管理员、AI/Agent 配置、文件资产、指标日志） |
-| 文档存储 | MongoDB（会话、消息、压缩上下文、面试记录、面试运行态热冷快照/轮次归档） |
-| 缓存 | Redis（在线运行态、热缓存、分布式锁、SingleFlight） |
+| 关系存储（真相源） | MySQL + GORM（会话/消息/画像/身份/run/step/压缩快照/面试数据） |
+| 热缓存 | Redis（近期对话、压缩摘要、画像、身份、运行态、分布式 SingleFlight） |
 | 配置 | Viper |
 | 认证 | JWT |
-| AI 模型 | DeepSeek（OpenAI 兼容协议，全链路统一） |
-| PDF 解析 | ledongthuc/pdf（简历文本提取） |
+| AI 模型 | DeepSeek（OpenAI 兼容协议，Function Calling） |
+| 文件工具 | 独立沙箱目录（路径校验 + 原子写 + 写前备份） |
+| PDF 解析 | ledongthuc/pdf |
 
 ## 项目结构
 
 ```
-├── api/                    # HTTP 路由、中间件、Handler
-│   ├── handlers/           # 请求处理与 DTO 组装
-│   ├── middleware/         # JWT 认证、CORS
-│   └── routes/             # 路由注册
-├── services/               # 业务逻辑层（按业务域拆分）
-│   ├── agent/              # Agent 对话 + 场景绑定 + 启动缓存
-│   ├── ai/                 # AI 对话 + 记忆压缩
-│   ├── interview/          # 面试模块
-│   │   ├── flow/           # 状态机 + 答题流水线 + 幂等 + 补偿队列
-│   │   ├── runtime/        # Redis 缓存层 + 快照/恢复服务
-│   │   └── evaluation/     # AI 评分/出题/追问 + JSON 解析容错
-│   ├── metric/             # 异步指标服务
+├── api/                    # 路由、中间件、Handler
+├── services/
+│   ├── agent/
+│   │   ├── loop/           # ReAct 循环（终止条件/熔断/工具调度）
+│   │   ├── tools/          # 工具注册与执行（PDF/搜索/文件/面试）
+│   │   ├── context/        # 四层上下文 + 画像提炼 + 压缩
+│   │   └── run/            # run 编排、持久化、SingleFlight
+│   ├── interview/          # 确定性面试流程（状态机 + 答题流水线）
+│   ├── ai/                 # 通用 AI 对话与记忆
+│   ├── metric/             # 异步指标
 │   └── user/               # 用户管理
-├── clients/                # 外部 API 客户端
-│   ├── ai_model_client.go  # DeepSeek/OpenAI 兼容调用（普通 + SSE 流式 + JSON mode）
-│   └── resume_parser.go    # PDF 简历解析
+├── clients/                # 模型客户端（普通/流式/JSON/Function Calling）
 ├── pkg/
 │   ├── singleflight/       # 分布式 SingleFlight
-│   └── lock/               # 通用分布式锁
-├── repositories/           # 数据访问层
-│   ├── mysql/              # MySQL 仓储（用户/配置/指标日志）
-│   ├── mongo/              # MongoDB 仓储（会话/消息/运行态快照/归档）
-│   └── redis.go            # Redis 初始化 + SingleFlight 全局实例
-├── models/                 # 数据模型（GORM + BSON）
-├── dto/                    # 请求/响应结构体
-├── config/                 # 配置加载
-├── static/                 # 调试用单页前端（登录/面试/AI 对话/指标入口，未接入 SSE 流式）
-├── skills/                 # Skill 知识工程文档
-└── docs/agent-knowledge/   # reference 文档（路由表/数据模型/运行态治理/风险登记）
+│   ├── lock/               # 分布式锁
+│   └── ecode/              # 统一错误码
+├── repositories/
+│   ├── mysql/              # MySQL 真相源仓储
+│   └── redis_hot.go        # Redis 热数据（可重建）
+├── models/                 # GORM 模型
+├── dto/                    # 请求/响应
+├── config/                 # 配置
+├── static/                 # 调试用单页前端
+└── docs/agent-knowledge/   # 知识文档
 ```
 
-## 核心亮点
+## 核心设计
 
-### 1. 面试长会话运行态治理 — 可恢复的状态机
+### 1. 自主 Agent：手写 ReAct 循环 + 工具编排
 
-**问题**：模拟面试是 10-20 分钟的长会话，运行态（题号/追问轮次/分数/轮次日志）高频变化且强状态依赖。Redis 缓存过期或实例抖动会导致系统丢失"进行到哪一步"的认知，出现题号错乱、重复评分。
-
-**方案**：Redis 在线态 + Mongo 热冷快照 + 轮次归档三层存储，Lazy Rehydrate 按需恢复。
+**为什么手写而不是套框架**：Agent 的关键不是「调通 function calling」，而是**什么时候停、工具失败怎么办、上下文怎么不爆**。这些边界只有自己实现才能讲清楚。
 
 ```
-Redis 在线运行态（TTL 24h）
-  ↓ miss 后从 Mongo 重建
-Mongo 热快照（CAS 乐观锁）    ← flow/分数/最近20轮窗口
-Mongo 冷快照（无 CAS）         ← 题面/建议/简历上下文
-Mongo 轮次归档（不可变）       ← 完整轮次历史
+组装四层上下文 → 调模型(tools) → 无 tool_calls ? 最终回答
+                              → 有 tool_calls ? 执行工具 → 结果回填 → 继续
 ```
 
-**关键设计**：
+**终止条件**：
 
-- **热冷分层快照**：热快照存高频流程态（CAS 乐观锁），冷快照存低频材料（无 CAS，出题时刷新一次）
-- **Lazy Rehydrate 恢复**：Redis miss 后从 Mongo 热快照恢复 flow/分数/追问题，冷快照恢复材料，TurnArchive 恢复完整轮次历史
-- **条件回滚**：先拍 flow 快照后推进，失败时 RestoreFlow 走 CAS 条件回滚（仅当 flow 未被他人推进才回滚，不砸并发进度）；评分失败回滚 `EVALUATING→ASKING` 不卡死流程；题级锁 TTL(300s) > 执行预算(120s)，锁不先于请求过期
-- **turn log 异步补偿**：写失败入 Redis 队列，定时重试最多 6 次，不阻断主流程返回
-- **幂等三层防线**：Redis replay key（24h）→ 热快照 lastMutationId → TurnArchive 按 requestId 查重防重复归档
-- **seq 原子分配 + 复合索引**：TurnArchive/AiMessage/AgentMessage 的 sequence 用 Mongo `counters` 集合计数器原子递增（并发不重复），高频查询集合启动时自动建复合索引
+- 模型给出最终回答
+- 达到最大步数（默认 8）
+- 连续重复同一工具 + 参数（防死循环）
+- 工具连续失败达到上限（默认 3）
+- ctx 取消 / 总超时（默认 120s）
 
-**代码位置**：`services/interview/flow/`、`services/interview/runtime/`
+**工具执行统一收口**：JSON Schema 校验（required + 顶层类型）、单工具超时、panic recovery、结果 32KB 截断、审计日志。
 
-### 2. 分布式 SingleFlight — AI 调用去重 + 流式心跳
+**单步工具批调度**：同一条 assistant 消息里的多个 tool call 默认并行；只有整批工具都声明 `ConcurrencySafe` 才并行，任一工具未声明（如写文件、面试状态推进）则整批串行。结果按原始 call 顺序回填，单个工具失败不取消同批兄弟调用。并行上限由 `agent.max_parallel_tools` 控制（默认 4）。
 
-**问题**：负载均衡下，前端网络抖动导致同一用户同一 prompt 的请求分散到不同实例，每个实例各调一次 AI，成本翻倍。
+**Plan-and-Execute（可选）**：复杂任务先由 planner 生成带 `depends_on` 的任务图，再按依赖并行执行；每个任务内部复用 ReAct（agent）、单次只读工具（tool）或纯文本推理（llm），最后统一合成。规划失败/不需要计划时自动回退线性 ReAct。配置见 `agent.plan.*`，任务图与结果持久化在 `agent_runs.plan_json`。
 
-**方案**：基于 Redis SET NX + Pub/Sub 实现分布式请求合并。
+**Replan 与重试（谨慎模式）**：任务失败或返回 `ReplanHint` 时，调度器在一批任务结束后统一评估，多个失败合并为一次 replan；计划修改只在轮次边界单线程串行应用，已完成任务冻结。diff 必须通过依赖/环/只读工具校验，并受 `max_replans` 和计划哈希震荡检测约束。每个任务有基于语义的 `idempotency_key`，同 key 的成功结果在本次 run 内复用；失败任务只有 `Retryable=true` 才重试（默认最多 2 次，指数退避），调用过有副作用工具的 agent 任务不会自动重试。
 
-```
-实例A 抢到锁 → 成为主节点 → 执行 AI 调用 → 写结果 → Pub 通知
-实例B 没抢到 → 成为从节点 → Sub 等待 → 读结果复用
-```
+**前置路由**：不是每个请求都进 Plan。`services/agent/plan/router.go` 用规则打分（强多步信号、中信号、长度、多问号/多行加分；纯问候、明确要求直接回答、短且无强信号减分），只有 `score >= min_score` 才调用 planner。`agent.plan.mode=auto|always|never` 可强制开关；SSE 的 `route` 事件和返回的 `plan_mode` 字段会暴露本次选择。
 
-**关键设计**：
+**内置工具**：
 
-- **主从选举**：Redis `SET NX` 抢锁，第一个成功的是主节点，其余为从节点
-- **AI 流式输出作心跳**：主节点每收到 AI 一段输出就写 Redis 进度（`字节数:时间戳`），从节点检测进度变化，30s 无变化判定卡死
-- **自动换主**：从节点检测到主节点卡死后写 `cancelKey`（携带旧主 nodeID 做身份校验），旧主 cancel context 断开 SSE 不浪费 token，从节点重新抢锁成为新主
-- **降级策略**：Redis 不可用时自动降级为本地 SingleFlight（`sync.Mutex` + `map` + `WaitGroup`）
+| 工具 | 能力 | 安全边界 |
+|---|---|---|
+| `pdf_parse` | 解析沙箱内 PDF | 扩展名 + `%PDF-` 魔数 + 10MB 上限 |
+| `web_search` | 真实搜索 API（Tavily/Serper） | 超时、条数/长度限制、结果标记为不可信 |
+| `file_list/read/write/edit` | 沙箱内文本文件操作 | 拒绝绝对路径/`..`/符号链接逃逸；原子写 + 写前备份 |
+| `interview_*` | 结构化模拟面试 | 包装确定性状态机 + 会话归属校验 |
 
-**代码位置**：`pkg/singleflight/singleflight.go`
+### 2. 四层上下文管理
 
-**实测验证**：`cmd/sfprobe` 对真实 Redis 发起 N 个并发同 key 请求（模拟单次约 300ms 的 AI 流式调用）：
+| 层 | 内容 | 存储 |
+|---|---|---|
+| L1 短期 | 近期全量对话（按预算取最近消息） | Redis List（miss 从 MySQL 重建） |
+| L2 远期 | 80/20 压缩摘要 | Redis + MySQL 快照 |
+| L3 跨会话 | 结构化用户画像（偏好/目标/约束/背景 + 置信度） | Redis + MySQL |
+| L4 自我定位 | Agent persona（角色/能力边界/风格）+ 低频自省 | Redis + MySQL |
 
-| 并发数 | 实际执行次数 | 去重率 | 结果一致 | 失败 | 总耗时 |
-|---|---|---|---|---|---|
-| 100 | 1 | 99.0%（省 99 次） | 100/100 | 0 | ~362ms |
-| 500 | 1 | 99.8%（省 499 次） | 500/500 | 0 | ~404ms |
+拼装顺序：`system(persona) → 用户画像 → 压缩摘要 → 近期对话`。预算按 token 计算（`agent.context.*`），不足时优先裁剪近期对话，persona 与画像不丢弃、只按上限截断。
 
-总耗时约等于单次底层调用耗时，说明并发请求被真正合并；事件统计 `leader_elected=1 / follower_waiting=N-1 / leader_completed=1`，无换主（leader 健康）。复现：
+- **画像提炼**：模型调用后异步、节流触发；同一用户通过分布式 SingleFlight 去重；新值覆盖旧值并递增版本。
+- **短期/中期边界**：`compressed_contexts.index` 是 `CoveredThroughSeq`；摘要覆盖 `sequence <= index`，短期只取 `sequence > index`，二者不重叠。
+- **压缩**：只压缩对话消息，不压缩 identity/profile/plan/tool schema；按 token 触发，压缩较旧的 80%，保留最近 20% 原文（有最小尾部），增量合并旧摘要，避免每次重压全部。
+- **存储**：短期 Redis List + MySQL 全量消息；中期 Redis 摘要 + MySQL 一会话一行；长期 Redis JSON + MySQL `user_profiles.profile_json`。
 
-```bash
-go run ./cmd/sfprobe --addr localhost:6379 --password 123456 --concurrency 500
-```
+### 3. 确定性编排工具：状态机不删，降级为工具
 
-**集群（多实例）压测**：`cmd/sfcluster` 启动 N 个独立 worker 进程（各自独立 DistributedGroup / 独立 nodeID / 进程隔离），仅共享一个 Redis，等价于真实集群中请求被打到不同实例：
+模拟面试仍由显式状态机驱动（`INIT/ASKING/EVALUATING/FOLLOW_UP/COMPLETED` + CAS 乐观锁 + 条件回滚 + 幂等三层防线）。
 
-| 场景 | 实例数 | 每实例并发 | 总请求 | 实际执行 | 结果一致 | 失败 | 总耗时 | 执行实例 |
-|---|---|---|---|---|---|---|---|---|
-| 去重 | 3 | 50 | 150 | 1 | 150/150 | 0 | ~0.9s | 单实例 |
-| 换主（首个 leader 假死 40s） | 3 | 50 | 150 | 2 | 150/150 | 0 | ~30.5s | 假死实例 + 接管实例 |
+差异在于：**Agent 判断何时进入结构化面试，进入后由状态机保证一致性**。这体现了架构判断——评分、计分、流程推进这类强一致任务不交给模型自由发挥。
 
-去重场景证明跨实例合并：3 个进程同时对同一 key 发起请求，全局只执行 1 次底层调用；换主场景证明故障转移：首个 leader 假死不刷新心跳，其余实例检测停滞（30s）后接管执行，所有请求拿到一致结果。复现：
+### 4. 分布式 SingleFlight — 跨实例 Agent run 去重
 
-```bash
-# 去重场景
-bash scripts/sfcluster-run.sh --instances 3 --concurrency 50 --password 123456
-# 换主场景(首个 leader 假死触发换主, 约 30s)
-bash scripts/sfcluster-run.sh --instances 3 --concurrency 50 --password 123456 --failover-worker 0
-```
+Agent run 动辄数十秒，前端重试概率高。基于 Redis 实现跨实例请求合并：
 
-> 集群压测暴露并修复了一个换主竞态：新 leader 抢锁成功后清空 progressKey，但 fn 首段输出前存在空窗口，迟到的旧 follower 会误判新 leader 卡死并 cancel 它，引发连环换主。修复：新 leader 清理后立即写占位进度，消除空窗口（见 `pkg/singleflight/singleflight.go`）。
+- 主从选举（`SET NX`）、流式输出作心跳、停滞后自动换主、双通道取消（Pub/Sub + 轮询）、Redis 不可用降级本地
+- 非流式 run 走 SingleFlight 合并；流式 run 用 Redis 幂等锁拒绝重复提交（SingleFlight 无法复用流式 chunk）
 
-### 3. AI 记忆压缩 — 长对话上下文管理
+**集群实测**（`cmd/sfcluster`：N 个独立进程共享一个 Redis）：
 
-**问题**：长对话场景下全量历史消息超出模型 token 限制，且每次都传全部历史浪费成本。
+| 场景 | 实例数 | 每实例并发 | 总请求 | 实际执行 | 结果一致 | 失败 |
+|---|---|---|---|---|---|---|
+| 去重 | 3 | 50 | 150 | 1 | 150/150 | 0 |
+| 换主（首个 leader 假死） | 3 | 50 | 150 | 2 | 150/150 | 0 |
 
-**方案**：MongoDB 原始消息 + Redis 热缓存 + Mongo 冷恢复三级存储 + 80/20 压缩策略。
+> 集群压测还发现并修复了一个换主竞态：新 leader 抢锁后清空 `progressKey`，但首段输出前存在空窗口，迟到的旧 follower 会误判新 leader 卡死并 cancel 它。修复方式：新 leader 清理后立即写占位进度（见 `pkg/singleflight/singleflight.go`）。
 
-```
-MongoDB 原始消息（真相源）
-  ↓ 80/20 压缩
-Redis 压缩摘要（热缓存，7 天 TTL）
-  ↓ 持久化
-MongoDB 压缩快照（冷恢复）
-```
-
-**关键设计**：
-
-- **80/20 压缩**：旧 80% 消息通过 AI 流式生成摘要（temperature=0.2），新 20% 保留原文，用 `index` 标记分界点
-- **Redis 优先**：读取时先查 Redis 热缓存，miss 从 MongoDB 恢复并异步回填 Redis
-- **分布式去重**：压缩请求接入分布式 SingleFlight，全集群同一会话只压缩一次，流式 chunk 作心跳
-- **本地兜底**：AI 压缩失败时截取首尾 450 字作为 fallback，不因模型故障导致记忆链断裂
-- **AI 侧专属**：记忆压缩仅服务 AI 对话；Agent 对话不压缩，直接拼接全量历史进 prompt（Agent 上下文由会话消息承载）
-
-**代码位置**：`services/ai/ai_memory_service.go`
-
-### 4. Skill 知识工程 — AI 辅助开发的文档防腐
-
-**问题**：AI 辅助开发时文档容易和代码脱节，改了代码忘了改文档，文档变成"过期的谎言"。
-
-**方案**：结构化的 Skill 知识体系 + 反向校验机制。
+### 5. 存储：MySQL 真相源 + Redis 热数据
 
 ```
-AGENTS.md（全局路由表 + 硬性约束）
-  ↓ 按关键词路由
-skills/<module>/SKILL.md（5 个模块级 Skill）
-  ├── 代码地图（文件路径锚点）
-  ├── 核心流程（业务链路描述）
-  ├── 影响检查（改动时需同步检查什么）
-  └── 当前风险（占位/未完成项登记）
-  ↓ 按需加载
-docs/agent-knowledge/references/（路由表、数据模型、运行态治理、风险登记）
+写: MySQL(事务) → Redis(失败仅告警, 不阻断)
+读: Redis → miss → MySQL 回填并重建
 ```
 
-**关键机制**：
-
-- **反向校验**：改代码前用实际代码校验 Skill 中的代码锚点，不一致时先信代码再修文档
-- **同步更新**：新增接口同步更新 `routes-map.md`，改字段同步更新 `data-models.md`，完成占位同步更新 `placeholder-risk-register.md`
-- **防腐脚本**：`knowledge-check.sh` 检查文档引用的 `.go` 文件是否仍存在，`diff` 模式根据 git 变更推荐需更新的 Skill
-
-**代码位置**：`AGENTS.md`、`skills/`、`docs/agent-knowledge/`、`scripts/knowledge-check.sh`
+- 会话/消息/压缩快照/画像/身份/run/step/面试数据全部落 MySQL
+- 序列号用 `session_sequences` 的 `INSERT ... ON DUPLICATE KEY UPDATE seq=seq+1` 原子分配
+- Redis 全部带 TTL，丢失后可从 MySQL 重建；已移除 MongoDB
 
 ## 已实现功能
 
-### AI 对话
+### Agent
+- `POST /agent/runs` 非流式执行、`POST /agent/runs/stream` SSE
+- `GET /agent/runs/:runId` 查看 run 与 step 回放、`GET /agent/runs` 分页
+- SSE 事件：`step` / `tool_call` / `tool_result` / `message` / `done` / `error`
+- 每步落 `agent_steps`，支持分析「Agent 为什么跑偏」
 
-- SSE 流式聊天（支持 DeepSeek reasoning_content 深度思考）
-- 多模型支持（7 个预设模板 + 自定义 endpoint/apiKey）
-- 双消息持久化（MongoDB，正常完成时双写；流式中断不保存不完整回复）
-- 上下文记忆压缩（80/20 策略 + 分布式 SingleFlight 去重 + 流式心跳）
+### 面试（确定性工具）
+- 简历驱动出题、AI 评分、追问规则链、状态机、运行态恢复（Redis + MySQL 快照/归档）
+- 面试报告、当前题/总分/建议/雷达图
 
-### Agent 对话
-
-- SSE 流式聊天（DeepSeek config fallback）
-- 双消息持久化 + 会话归属校验（MongoDB）
-- 场景机制（4 个业务场景枚举 + 候选名称匹配 + 启动缓存）已实现；创建会话支持指定 AgentID（默认 1），聊天链路按会话绑定的 AgentID 调用，场景解析（ResolveRequired）尚未接入
-
-### 模拟面试
-
-- **简历驱动出题**：PDF 上传解析 / 文本输入 → DeepSeek 流式出题 → 写 Redis → 初始化状态机
-- **AI 评分**：DeepSeek 流式评分 + JSON mode + schema 校验 + 失败重试 + 字段别名归一化
-- **追问机制**：纯 Go 规则链（完成态→上限→AI建议→低分→缺失点）+ DeepSeek 生成追问题
-- **状态机**：5 阶段（INIT/ASKING/EVALUATING/FOLLOW_UP/COMPLETED）+ 合法转移约束 + CAS 乐观锁
-- **答题流水线**：幂等 → 题级锁 → ensureRuntime → 评分 → 追问判定 → 推进flow → 计分 → turn log → 标记成功
-- **运行态恢复**：Redis miss 从 Mongo 热冷快照 + 轮次归档重建
-- **快照持久化**：答题 commit 后异步刷新热快照（CAS + 幂等短路）+ turn 归档
-- **异步补偿**：turn log 写失败入队列重试
-- **面试报告**：手动接口 `POST /interview/record/save-from-redis/:sessionId` 从 TurnArchive 汇总生成（写 Mongo）
-- **查询接口**：当前题/总分/题目/建议/简历分/雷达图（四维）/简历预览/恢复会话
-
-### 基础设施
-
-- 分布式 SingleFlight（主从选举 + 流式心跳 + 换主 + 降级）
-- 通用分布式锁（SetNX + Lua 释放）
-- 异步指标系统（channel + 批量 flush MySQL，全链路埋点）
-- DeepSeek 客户端（普通调用 + SSE 流式 + JSON mode + reasoning 透传）
-- PDF 简历解析（ledongthuc/pdf）
-- Skill 知识工程体系（5 个 Skill + 反向校验 + 防腐脚本）
+### 通用 AI 与基础设施
+- SSE 流式聊天、记忆压缩、统一错误码、异步指标、优雅停机
+- 用户认证（JWT + bcrypt）、上传校验
 
 ## 快速开始
 
-> ⚠️ `config/config.yaml` 中 `ai.deepseek.api_key` 默认为空，不填入真实 key 时 AI 对话/面试出题/评分等依赖模型的功能不可用；其余接口（用户/会话/面试流程骨架）可正常使用。
-
-### Docker Compose 一键启动
+### Docker Compose
 
 ```bash
-# 1. 复制配置模板并填入密码和 API key
-cp config/config.example.yaml config/config.yaml
-
-# 2. 一键启动（App + MySQL + Redis + MongoDB，MySQL 首次启动自动建库）
-docker-compose up -d
-
-# 3. 访问调试用前端页面
+cp config/config.example.yaml config/config.yaml   # 填入 MySQL/Redis 密码与 DeepSeek key
+docker-compose up -d                                # App + MySQL + Redis
 open http://localhost:8080
 ```
 
 ### 本地开发
 
 ```bash
-# 1. 启动 MySQL / Redis / MongoDB（MySQL 需手动建库）
-#    mysql -uroot -p -e "CREATE DATABASE IF NOT EXISTS ai_meeting DEFAULT CHARSET utf8mb4;"
-# 2. 复制配置模板
+# 1. 启动 MySQL / Redis（MySQL 需建库）
+mysql -uroot -p -e "CREATE DATABASE IF NOT EXISTS ai_meeting DEFAULT CHARSET utf8mb4;"
+# 2. 配置
 cp config/config.example.yaml config/config.yaml
-# 3. 填入连接信息和 DeepSeek API key
-# 4. 运行（启动时 AutoMigrate 自动建表）
+# 3. 运行（启动时 AutoMigrate 自动建表）
 go run main.go
-# 服务监听 :8080
 ```
+
+> `ai.deepseek.api_key` 为空时，依赖模型的功能不可用；`agent.search.api_key` 为空时 `web_search` 工具不会注册。
+> 文件工具只能操作 `agent.sandbox_root`（默认 `./sandbox`）内的相对路径。
 
 ## 测试与 CI
 
-- 单元测试：32 个测试文件，`go test -race ./...` 全绿；核心分布式组件（SingleFlight 85%+、分布式锁 90%、错误码 93%、认证中间件 100%）有专门测试
-- 覆盖率：整体语句覆盖率约 27%（`go test -cover ./...` 统计），主要缺口在 handler / 仓储层
-- CI：GitHub Actions（`.github/workflows/ci.yml`）在 push/PR 时自动执行 gofmt 检查 → build → vet → race 测试 → 覆盖率统计，测试全部走 miniredis/httptest，无需外部服务
-- 集成测试：`pkg/singleflight` 带 `//go:build integration` tag 的真实 Redis 测试，需手动加 `-tags=integration` 运行
+```bash
+go build ./...
+go test ./...
+go vet ./...
+scripts/knowledge-check.sh diff
+```
+
+- 单元测试覆盖：循环终止/熔断/重复动作、工具参数校验、沙箱路径逃逸、上下文预算与画像合并、路由鉴权
+- 分布式组件：SingleFlight 单测 + 真实 Redis 集成测试 + 集群压测脚本
+- CI：gofmt → build → vet → race 测试 → 覆盖率
+
+## 已知边界
+
+- 流式 run 的 SingleFlight 只做幂等，不复用 chunk（如实说明）
+- 换主机制基于租约，安全性是概率性收敛，不是强一致（边界见 `docs/agent-knowledge/references/`）
+- 画像「每次模型调用提炼」采用异步 + 节流，避免成本翻倍
+- 网页搜索依赖外部 API key 与网络
 
 ## License
 

@@ -18,11 +18,10 @@ AI-Meeting 是一个 Go 1.24.1 + Gin 后端。入口在 `main.go`, 路由集中�
 
 - `api/handlers`: HTTP 入参、认证上下文读取、DTO 响应组装。
 - `services`: 业务流程和跨仓储编排。
-- `models`: GORM 模型和 Mongo 模型。
+- `models`: GORM 模型和 MySQL 模型。
 - `dto`: HTTP 请求/响应结构。
-- `repositories/mysql`: MySQL 初始化与用户/AI配置/Agent配置/文件资产读写(会话/消息/面试数据已迁 Mongo)。
-- `repositories/mongo`: MongoDB 初始化与集合级读写。
-- `repositories`: 其他基础设施客户端, 当前包含 Redis。
+- `repositories/mysql`: MySQL 初始化与用户/AI配置/Agent配置/文件资产读写(会话/消息/面试数据已迁 MySQL)。
+- `repositories`: Redis 热数据（近期对话/摘要/画像/身份）与 SingleFlight。
 - `clients`: 外部 HTTP/API 客户端, 例如 OpenAI-compatible 模型调用。
 - `config`: Viper 配置加载。
 
@@ -31,10 +30,11 @@ AI-Meeting 是一个 Go 1.24.1 + Gin 后端。入口在 `main.go`, 路由集中�
 | 需求关键词 | 先读 Skill | 典型代码锚点 |
 | --- | --- | --- |
 | Agent 聊天、Agent 会话、Agent 配置、文件上传 | `skills/ai-meeting-agent/SKILL.md` | `api/handlers/agent_handler.go`, `services/agent/agent_service.go`, `models/agent.go` |
-| 长上下文、压缩摘要、Redis/Mongo 恢复、历史窗口 | `skills/ai-meeting-memory/SKILL.md` | `services/ai/ai_memory_service.go`, `models/compressed_context.go`, `repositories/redis.go`, `repositories/mongo/*.go` |
+| 长上下文、压缩摘要、Redis/MySQL 恢复、历史窗口 | `skills/ai-meeting-memory/SKILL.md` | `services/ai/ai_memory_service.go`, `models/agent_runtime.go`, `repositories/redis.go`, `repositories/mysql/*.go` |
 | 面试会话、题目、评分、建议、简历预览、面试记录 | `skills/ai-meeting-interview/SKILL.md` | `api/handlers/interview_handler.go`, `services/interview/interview_service.go`, `models/interview.go` |
 | 登录、注册、JWT、用户资料、管理员 | `skills/ai-meeting-user-auth/SKILL.md` | `api/middleware/auth.go`, `api/handlers/user_handler.go`, `services/user/user_service.go`, `models/user.go` |
 | AI 会话、AI 消息、AI 模型配置 | `skills/ai-meeting-ai/SKILL.md` | `api/handlers/ai_handler.go`, `services/ai/ai_service.go`, `models/ai.go` |
+| Agent 循环、工具调用、四层上下文、Agent run | `skills/ai-meeting-agent/SKILL.md` | `services/agent/loop/`, `services/agent/tools/`, `services/agent/context/`, `services/agent/run/` |
 | 路由、模型、跨模块影响 | `docs/agent-knowledge/references/routes-map.md`, `docs/agent-knowledge/references/data-models.md` | `api/routes/routes.go`, `models/*.go` |
 
 ## 全局术语
@@ -44,7 +44,7 @@ AI-Meeting 是一个 Go 1.24.1 + Gin 后端。入口在 `main.go`, 路由集中�
 - `user_id`: JWT 中的用户 ID 字符串, 面试模块主要读取该上下文键。
 - `conversation`: 会话列表记录, 记录标题、状态、消息数。
 - `message`: 用户或助手单条消息, 通过 `sequence` 维护会话内顺序。
-- `compressed context`: Agent 或 AI 历史消息压缩摘要, Redis 做热缓存, MongoDB 做持久恢复。
+- `compressed context`: Agent 或 AI 历史消息压缩摘要, Redis 做热缓存, MySQL 做持久恢复。
 
 ## 硬性约束
 
