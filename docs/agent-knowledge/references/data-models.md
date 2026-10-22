@@ -52,11 +52,15 @@ Redis 热数据（`repositories/redis_hot.go`）：
 
 - `UserProfile` -> MySQL `user_profiles`
   - `UserID` 唯一；`ProfileJSON` 结构见 `services/agent/context/types.go` 的 `UserProfileData`
-  - 字段: preferences / goals / constraints / background / confidence / version / schema_version / last_consolidated_seq / updated_at
-  - MySQL 是画像真相源，Redis `user:{uid}:profile` 只是缓存。
+  - 字段: facts（结构化事实）/ preferences / goals / constraints / background / confidence / version / schema_version / last_consolidated_seq / updated_at
+  - MySQL 是画像真相源，Redis `user:{uid}:profile` 只是缓存；L2 用 version CAS 更新。
 - `ProfileCandidate` -> MySQL `profile_candidates`
   - L1 规则候选：`user_id`, `session_id`, `message_id`, `field`, `quote`, `rule`, `confidence`, `status`(pending/promoted/rejected)
   - `value_hash` 唯一，保证同一条消息同一字段不会重复入候选；L2 consolidation 才写正式画像。
+- `ProfileConfirmation` -> MySQL `profile_confirmations`
+  - L2 冲突/模糊项：`user_id`, `field`, `key`, `value`, `question`, `status`(pending/confirmed/rejected)
+- `ProfileEvent` -> MySQL `profile_events`
+  - 每次 L2 consolidation 的审计：`user_id`, `reason`, `diff_json`, `created_at`
 - `AgentIdentity` -> MySQL `agent_identities`
   - `AgentID` 唯一；`IdentityJSON` 结构见 `AgentIdentityData`
   - 字段: name / role / capabilities / boundaries / interaction_style / self_reflection / version
