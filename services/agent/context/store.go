@@ -96,6 +96,7 @@ func LoadProfile(ctx context.Context, userID string) *UserProfileData {
 	if raw, ok := repositories.GetUserProfile(ctx, userID); ok {
 		var profile UserProfileData
 		if err := json.Unmarshal([]byte(raw), &profile); err == nil {
+			NormalizeProfile(&profile)
 			return &profile
 		}
 	}
@@ -108,6 +109,10 @@ func LoadProfile(ctx context.Context, userID string) *UserProfileData {
 		logrus.Warnf("[agent-ctx] unmarshal user profile failed: %v", err)
 		return nil
 	}
+	NormalizeProfile(&profile)
+	if profile.LastConsolidatedSeq == 0 {
+		profile.LastConsolidatedSeq = record.LastConsolidatedSeq
+	}
 	if err := repositories.SetUserProfile(ctx, userID, record.ProfileJSON); err != nil {
 		logrus.Warnf("[agent-ctx] backfill profile to redis failed: %v", err)
 	}
@@ -116,6 +121,7 @@ func LoadProfile(ctx context.Context, userID string) *UserProfileData {
 
 // SaveProfile 写入用户画像（MySQL 先写, Redis 后写）
 func SaveProfile(ctx context.Context, userID string, profile *UserProfileData) error {
+	NormalizeProfile(profile)
 	profile.UpdatedAt = nowString()
 	if profile.Version <= 0 {
 		profile.Version = 1
@@ -125,9 +131,11 @@ func SaveProfile(ctx context.Context, userID string, profile *UserProfileData) e
 		return err
 	}
 	record := &models.UserProfile{
-		UserID:      userID,
-		ProfileJSON: string(raw),
-		Version:     profile.Version,
+		UserID:              userID,
+		ProfileJSON:         string(raw),
+		SchemaVersion:       1,
+		Version:             profile.Version,
+		LastConsolidatedSeq: profile.LastConsolidatedSeq,
 	}
 	if err := mysqlrepo.UpsertUserProfile(record); err != nil {
 		return err

@@ -59,7 +59,6 @@ type Service struct {
 	registry  *tools.Registry
 	executor  *tools.Executor
 	assembler *agentctx.Assembler
-	extractor *agentctx.ProfileExtractor
 	cfg       config.AgentConfig
 	planCfg   planpkg.Config
 }
@@ -90,8 +89,7 @@ func GetService() *Service {
 				RecentMaxTokens:         cfg.Context.RecentMaxTokens,
 				CompressThresholdTokens: cfg.Context.CompressThresholdTokens,
 			}),
-			extractor: agentctx.NewProfileExtractor(cfg.ProfileExtractEvery),
-			cfg:       cfg,
+			cfg: cfg,
 			planCfg: planpkg.Config{
 				Enabled:          cfg.Plan.Enabled,
 				MaxTasks:         cfg.Plan.MaxTasks,
@@ -323,9 +321,9 @@ func (s *Service) execute(ctx context.Context, req StartRequest, emit func(loop.
 			loopResult.Steps, loopResult.Tokens, loopResult.StopReason),
 	})
 
-	// 5. 异步压缩 + 画像提炼
+	// 5. 异步压缩 + 画像 L2 consolidation
 	agentctx.CompressAsync(conv.SessionID, req.Username, s.cfg.Context.CompressThresholdTokens)
-	s.extractor.ExtractAsync(req.Username, toContextMessages(loopResult.Transcript))
+	agentctx.ConsolidateAsync(req.Username, conv.SessionID)
 
 	return &StartResult{
 		RunID: runID, SessionID: conv.SessionID, Status: status,
@@ -376,10 +374,7 @@ func (s *Service) finishPlanRun(req StartRequest, conv *models.Conversation, run
 	})
 
 	agentctx.CompressAsync(conv.SessionID, req.Username, s.cfg.Context.CompressThresholdTokens)
-	s.extractor.ExtractAsync(req.Username, []agentctx.Message{
-		{Role: "user", Content: req.Input},
-		{Role: "assistant", Content: result.Answer},
-	})
+	agentctx.ConsolidateAsync(req.Username, conv.SessionID)
 
 	return &StartResult{
 		RunID: runID, SessionID: conv.SessionID, Status: status,
@@ -511,21 +506,6 @@ func truncateTitle(input string) string {
 		return "新会话"
 	}
 	return string(r)
-}
-
-func toContextMessages(transcript []clients.ToolMessage) []agentctx.Message {
-	start := 0
-	if len(transcript) > 40 {
-		start = len(transcript) - 40
-	}
-	out := make([]agentctx.Message, 0, len(transcript)-start)
-	for _, m := range transcript[start:] {
-		if m.Content == "" {
-			continue
-		}
-		out = append(out, agentctx.Message{Role: m.Role, Content: m.Content})
-	}
-	return out
 }
 
 // ============================================================

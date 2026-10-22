@@ -51,6 +51,8 @@ func InitDB() error {
 		&models.CompressedContextRecord{},
 		&models.UserProfile{},
 		&models.ProfileCandidate{},
+		&models.ProfileConfirmation{},
+		&models.ProfileEvent{},
 		&models.AgentIdentity{},
 		&models.AgentRun{},
 		&models.AgentStep{},

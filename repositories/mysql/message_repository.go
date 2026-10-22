@@ -68,6 +68,15 @@ func ListRecentMessagesAfter(sessionID, userID string, afterSeq int64, limit int
 	return messages, result.Error
 }
 
+// CountUserMessagesAfter 统计 sequence > afterSeq 的用户消息数。
+func CountUserMessagesAfter(sessionID, userID string, afterSeq int64) (int64, error) {
+	var count int64
+	result := DB.Model(&models.Message{}).
+		Where("session_id = ? AND user_id = ? AND sequence > ? AND role = ?", sessionID, userID, afterSeq, "user").
+		Count(&count)
+	return count, result.Error
+}
+
 // PageMessages 分页查询消息
 func PageMessages(sessionID, userID string, page, size int) ([]models.Message, int64, error) {
 	if page < 1 {
