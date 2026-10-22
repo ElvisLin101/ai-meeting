@@ -43,6 +43,9 @@ func TestProtectedRoutesRequireAuth(t *testing.T) {
 		path   string
 	}{
 		{http.MethodPost, "/api/xunzhi/v1/agents/sessions/s1/chat"},
+		{http.MethodPost, "/api/xunzhi/v1/agent/runs"},
+		{http.MethodPost, "/api/xunzhi/v1/agent/runs/stream"},
+		{http.MethodGet, "/api/xunzhi/v1/agent/runs/demo"},
 		{http.MethodPost, "/api/xunzhi/v1/ai/sessions/s1/chat"},
 		{http.MethodPost, "/api/xunzhi/v1/interview/sessions"},
 		{http.MethodGet, "/api/xunzhi/v1/users/page"},
