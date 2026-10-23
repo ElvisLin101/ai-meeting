@@ -38,12 +38,17 @@ func SetupRouter() *gin.Engine {
 // setupAgentRunRoutes Agent 主入口: run 提交 / 流式 / 回放
 func setupAgentRunRoutes(authed *gin.RouterGroup) {
 	agentRunController := handlers.NewAgentRunController()
+	profileController := handlers.NewProfileController()
 
 	runs := authed.Group("/agent/runs")
 	runs.POST("", agentRunController.Run)
 	runs.POST("/stream", agentRunController.RunStream)
 	runs.GET("", agentRunController.Page)
 	runs.GET("/:runId", agentRunController.Get)
+
+	memory := authed.Group("/agent/memory")
+	memory.GET("/confirmations", profileController.ListConfirmations)
+	memory.POST("/confirmations/:id/resolve", profileController.ResolveConfirmation)
 }
 
 func setupUserRoutes(api, authed *gin.RouterGroup) {

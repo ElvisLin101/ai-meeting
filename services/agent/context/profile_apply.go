@@ -23,6 +23,8 @@ type ProfileDiff struct {
 	Used       []uint            `json:"used,omitempty"`
 	AskConfirm []ProfileQuestion `json:"ask_confirm,omitempty"`
 	NoChange   bool              `json:"no_change,omitempty"`
+	// Force 表示用户已确认，允许覆盖同主题的旧事实（即使置信度相同）。
+	Force bool `json:"force,omitempty"`
 }
 
 // ApplyProfileDiff 把 L2 diff 应用到画像副本。
@@ -126,7 +128,7 @@ func ApplyProfileDiff(p *UserProfileData, diff ProfileDiff) (*UserProfileData, [
 				changed = true
 				continue
 			}
-			if f.Confidence >= existing.Confidence+0.05 {
+			if diff.Force || f.Confidence >= existing.Confidence+0.05 {
 				next.Facts[idx].Status = "superseded"
 				next.Facts[idx].UpdatedAt = nowString()
 				next.Facts = append(next.Facts, f)

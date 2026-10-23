@@ -46,6 +46,8 @@ func TestProtectedRoutesRequireAuth(t *testing.T) {
 		{http.MethodPost, "/api/xunzhi/v1/agent/runs"},
 		{http.MethodPost, "/api/xunzhi/v1/agent/runs/stream"},
 		{http.MethodGet, "/api/xunzhi/v1/agent/runs/demo"},
+		{http.MethodGet, "/api/xunzhi/v1/agent/memory/confirmations"},
+		{http.MethodPost, "/api/xunzhi/v1/agent/memory/confirmations/1/resolve"},
 		{http.MethodPost, "/api/xunzhi/v1/ai/sessions/s1/chat"},
 		{http.MethodPost, "/api/xunzhi/v1/interview/sessions"},
 		{http.MethodGet, "/api/xunzhi/v1/users/page"},

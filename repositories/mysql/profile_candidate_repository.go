@@ -2,7 +2,9 @@ package mysql
 
 import (
 	"ai-meeting/models"
+	"time"
 
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -51,4 +53,39 @@ func CreateProfileConfirmation(c *models.ProfileConfirmation) error {
 // CreateProfileEvent 写入 L2 consolidation 审计记录。
 func CreateProfileEvent(e *models.ProfileEvent) error {
 	return DB.Create(e).Error
+}
+
+// ListPendingProfileConfirmations 读取待用户确认的画像项。
+func ListPendingProfileConfirmations(userID string, limit int) ([]models.ProfileConfirmation, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	var items []models.ProfileConfirmation
+	result := DB.Where("user_id = ? AND status = ?", userID, "pending").
+		Order("id ASC").Limit(limit).Find(&items)
+	return items, result.Error
+}
+
+// FindProfileConfirmation 按 id + 用户读取确认项。
+func FindProfileConfirmation(id uint, userID string) (*models.ProfileConfirmation, error) {
+	var item models.ProfileConfirmation
+	result := DB.Where("id = ? AND user_id = ?", id, userID).First(&item)
+	if result.Error == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	return &item, nil
+}
+
+// MarkProfileConfirmation 只允许把 pending 改为目标状态；返回是否命中。
+func MarkProfileConfirmation(id uint, userID, status string) (bool, error) {
+	res := DB.Model(&models.ProfileConfirmation{}).
+		Where("id = ? AND user_id = ? AND status = ?", id, userID, "pending").
+		Updates(map[string]interface{}{"status": status, "resolved_at": time.Now()})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
 }

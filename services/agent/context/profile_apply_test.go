@@ -142,3 +142,25 @@ func TestDiffEmptyIgnoresCandidateMarks(t *testing.T) {
 		t.Fatal("add should not be empty")
 	}
 }
+
+func TestApplyProfileDiffForceOverridesEqualConfidence(t *testing.T) {
+	p := &UserProfileData{Version: 1, Facts: []ProfileFact{
+		{ID: "old", Field: "constraint", Key: "location", Value: "上海", Confidence: 1.0, Status: "active"},
+	}}
+	next, questions, _, err := ApplyProfileDiff(p, ProfileDiff{
+		Force: true,
+		Add: []ProfileFact{
+			{Field: "constraint", Key: "location", Value: "北京", Confidence: 1.0},
+		},
+	})
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if len(questions) != 0 {
+		t.Fatalf("force confirm should not ask questions: %+v", questions)
+	}
+	active := next.ActiveFacts()
+	if len(active) != 1 || active[0].Value != "北京" {
+		t.Fatalf("confirmed fact should override: %+v", active)
+	}
+}
