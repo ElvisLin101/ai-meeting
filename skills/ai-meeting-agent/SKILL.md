@@ -47,6 +47,7 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 - 存储: 短期 Redis List + MySQL `messages` 全量；中期 Redis summary + MySQL `compressed_contexts`（一会话一行，UPDATE）；长期 Redis JSON + MySQL `user_profiles.profile_json`。
 - Redis 裁剪不变量: `PushRecentMessage` 不再 LTRIM；未摘要覆盖的消息不能从 Redis 丢弃，压缩推进边界后再重建列表。
 - 配置: `agent.context.*`（model_window_tokens / max_output_tokens / soft_limit_tokens / reserve_tokens / profile_max_tokens / summary_max_tokens / recent_max_tokens / compress_threshold_tokens）。
+- ContextReport: `services/agent/context/assembler.go` 产出 `Report`（预算/各段 token/丢弃条数/covered seq/画像事实数），`services/agent/run/service.go` 写入 `agent_runs.context_report_json`，run 详情接口透出。
 - L1 候选: `services/agent/context/profile_rules.go` 在每个用户消息落库后异步跑规则，写入 MySQL `profile_candidates`（不调用 LLM、不改正式画像）；`value_hash` 去重。
 - L2 consolidation: `services/agent/context/profile_consolidate.go` 每 3 个用户回合或 pending 候选 ≥5 触发；输入当前 active facts、候选和最近 user/assistant 对话，输出 `ProfileDiff`；`services/agent/context/profile_apply.go` 负责 add/update/supersede/ask_confirm，冲突低置信不覆盖；`user_profiles` 用 version CAS 更新，确认项落 `profile_confirmations`，审计落 `profile_events`。
 - 画像注入: `services/agent/context/assembler.go` 的 `renderProfile` 只渲染 active facts；旧 `ProfileExtractor` 已不再由 run 服务调用。
