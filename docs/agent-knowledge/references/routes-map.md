@@ -45,8 +45,10 @@
 | POST | `/agent/runs/stream` | `AgentRunController.RunStream` | `run.Service.StartStream` |
 | GET | `/agent/runs` | `AgentRunController.Page` | `mysql.PageAgentRuns` |
 | GET | `/agent/runs/:runId` | `AgentRunController.Get` | `mysql.FindAgentRun/ListAgentSteps` |
+| GET | `/agent/memory/confirmations` | `ProfileController.ListConfirmations` | `agentctx.ListPendingProfileConfirmations` |
+| POST | `/agent/memory/confirmations/:id/resolve` | `ProfileController.ResolveConfirmation` | `agentctx.ResolveProfileConfirmation` |
 
-SSE 事件: `step` / `tool_call` / `tool_result` / `message` / `done` / `error`。
+SSE 事件: `route` / `step` / `tool_call` / `tool_result` / `message` / `plan_ready` / `plan_task_start` / `plan_task_done` / `plan_task_failed` / `plan_task_skipped` / `plan_replanned` / `plan_done` / `done` / `error`。
 
 ## AI
 
