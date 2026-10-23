@@ -185,12 +185,14 @@ go run main.go
 go build ./...
 go test ./...
 go vet ./...
+go run ./cmd/eval          # 确定性 eval：路由/画像规则/画像冲突
 scripts/knowledge-check.sh diff
 ```
 
 - 单元测试覆盖：循环终止/熔断/重复动作、工具参数校验、沙箱路径逃逸、上下文预算与画像合并、路由鉴权
+- 确定性 eval：15 条路由、10 条画像规则、5 条冲突用例，CI 直接跑
 - 分布式组件：SingleFlight 单测 + 真实 Redis 集成测试 + 集群压测脚本
-- CI：gofmt → build → vet → race 测试 → 覆盖率
+- CI：gofmt → build → vet → race 测试 → eval → 覆盖率
 
 ## 已知边界
 

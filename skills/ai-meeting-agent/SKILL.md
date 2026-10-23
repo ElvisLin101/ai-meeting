@@ -51,7 +51,8 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 - L1 候选: `services/agent/context/profile_rules.go` 在每个用户消息落库后异步跑规则，写入 MySQL `profile_candidates`（不调用 LLM、不改正式画像）；`value_hash` 去重。
 - L2 consolidation: `services/agent/context/profile_consolidate.go` 每 3 个用户回合或 pending 候选 ≥5 触发；输入当前 active facts、候选和最近 user/assistant 对话，输出 `ProfileDiff`；`services/agent/context/profile_apply.go` 负责 add/update/supersede/ask_confirm，冲突低置信不覆盖；`user_profiles` 用 version CAS 更新，确认项落 `profile_confirmations`，审计落 `profile_events`。
 - 画像注入: `services/agent/context/assembler.go` 的 `renderProfile` 只渲染 active facts；旧 `ProfileExtractor` 已不再由 run 服务调用。
-- 当前边界: 确认项还没有前端/接口消费；工具大结果尚未转 artifact ref。
+- 当前边界: 确认项已有查询/确认接口，暂无前端页面；工具大结果尚未转 artifact ref。
+- 确定性 eval: `internal/eval/cases.json` + `go run ./cmd/eval`，覆盖路由（15）、画像规则（10）、画像冲突（5）；CI 在 race 测试后执行。
 
 ### 单步工具批调度（BatchExecutor）
 
