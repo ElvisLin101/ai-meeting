@@ -172,6 +172,24 @@ type BuildInput struct {
 }
 
 // Assembled 拼装结果
+// Report 是本次上下文装配的可观测快照。
+type Report struct {
+	Mode              string `json:"mode"`
+	BudgetTokens      int    `json:"budget_tokens"`
+	UsedTokens        int    `json:"used_tokens"`
+	IdentityTokens    int    `json:"identity_tokens"`
+	ProfileTokens     int    `json:"profile_tokens"`
+	SummaryTokens     int    `json:"summary_tokens"`
+	RecentTokens      int    `json:"recent_tokens"`
+	RecentMessages    int    `json:"recent_messages"`
+	DroppedMessages   int    `json:"dropped_messages"`
+	ProfileFacts      int    `json:"profile_facts"`
+	UsedProfile       bool   `json:"used_profile"`
+	UsedSummary       bool   `json:"used_summary"`
+	CoveredThroughSeq int64  `json:"covered_through_seq"`
+	GeneratedAt       string `json:"generated_at"`
+}
+
 type Assembled struct {
 	Messages          []Message
 	UsedSummary       bool
@@ -180,6 +198,7 @@ type Assembled struct {
 	DroppedMessages   int
 	TotalTokens       int
 	CoveredThroughSeq int64
+	Report            Report
 	// TotalBytes 仅保留给旧日志/调试使用；预算判断一律用 TotalTokens。
 	TotalBytes int
 }

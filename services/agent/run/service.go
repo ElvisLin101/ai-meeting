@@ -225,6 +225,15 @@ func (s *Service) execute(ctx context.Context, req StartRequest, emit func(loop.
 	if err := mysqlrepo.CreateAgentRun(runRecord); err != nil {
 		return nil, ecode.Wrap(err, "创建 run 失败")
 	}
+	if raw, err := json.Marshal(assembled.Report); err == nil {
+		if err := mysqlrepo.UpdateAgentRunContextReport(runID, string(raw)); err != nil {
+			logrus.Warnf("[agent-run] persist context report failed: %v", err)
+		}
+	}
+	logrus.Infof("[agent-run] context report: mode=%s used=%d/%d identity=%d profile=%d summary=%d recent=%d dropped=%d",
+		assembled.Report.Mode, assembled.Report.UsedTokens, assembled.Report.BudgetTokens,
+		assembled.Report.IdentityTokens, assembled.Report.ProfileTokens,
+		assembled.Report.SummaryTokens, assembled.Report.RecentTokens, assembled.Report.DroppedMessages)
 
 	tc := &tools.Context{
 		UserID: req.UserID, Username: req.Username,

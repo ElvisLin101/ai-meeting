@@ -33,16 +33,18 @@ type AgentRun struct {
 	Input     string `gorm:"type:longtext" json:"input"`
 	Output    string `gorm:"type:longtext" json:"output"`
 	// PlanJSON 保存 Plan-and-Execute 的任务图与每个任务的最终状态；线性 ReAct 时为空。
-	PlanJSON   string     `gorm:"type:longtext" json:"plan_json"`
-	Status     string     `gorm:"size:32;index;not null" json:"status"`
-	StopReason string     `gorm:"size:64" json:"stop_reason"`
-	Steps      int        `gorm:"default:0" json:"steps"`
-	Tokens     int        `gorm:"default:0" json:"tokens"`
-	Error      string     `gorm:"type:text" json:"error"`
-	StartedAt  time.Time  `json:"started_at"`
-	FinishedAt *time.Time `json:"finished_at"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	PlanJSON string `gorm:"type:longtext" json:"plan_json"`
+	// ContextReportJSON 保存本次根上下文装配的 token/丢弃/压缩/画像快照。
+	ContextReportJSON string     `gorm:"type:longtext" json:"context_report_json"`
+	Status            string     `gorm:"size:32;index;not null" json:"status"`
+	StopReason        string     `gorm:"size:64" json:"stop_reason"`
+	Steps             int        `gorm:"default:0" json:"steps"`
+	Tokens            int        `gorm:"default:0" json:"tokens"`
+	Error             string     `gorm:"type:text" json:"error"`
+	StartedAt         time.Time  `json:"started_at"`
+	FinishedAt        *time.Time `json:"finished_at"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
 // TableName 指定表名
