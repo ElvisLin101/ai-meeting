@@ -35,9 +35,10 @@ Redis 热数据（`repositories/redis_hot.go`）：
 `models/agent_runtime.go`
 
 - `AgentRun` -> MySQL `agent_runs`
-  - `RunID`(唯一), `SessionID`, `UserID`, `AgentID`, `Input`, `Output`, `PlanJSON`, `Status`, `StopReason`, `Steps`, `Tokens`, `Error`, 起止时间
+  - `RunID`(唯一), `SessionID`, `UserID`, `AgentID`, `Input`, `Output`, `PlanJSON`, `ContextReportJSON`, `Status`, `StopReason`, `Steps`, `Tokens`, `Error`, 起止时间
   - `PlanJSON` 保存 Plan-and-Execute 的任务图与每个任务的最终状态；线性 ReAct 时为空。
   - `PlanJSON` 内任务包含 `idempotency_key`、`attempts`、`status`、`result`、`error`；计划包含 `version`、`replan_count`。
+  - `ContextReportJSON` 保存本次根上下文装配的预算/各段 token/丢弃条数/压缩边界/画像事实数。
 - `AgentStep` -> MySQL `agent_steps`
   - `RunID` + `StepIndex` 唯一；`Thought`, `Action`, `ActionInput`, `Observation`, `Status`, `DurationMs`, `Error`
   - 用于按 run 回放，回答「Agent 为什么跑偏」。

@@ -103,6 +103,7 @@
 - **短期/中期边界**：`compressed_contexts.index` 是 `CoveredThroughSeq`；摘要覆盖 `sequence <= index`，短期只取 `sequence > index`，二者不重叠。
 - **压缩**：只压缩对话消息，不压缩 identity/profile/plan/tool schema；按 token 触发，压缩较旧的 80%，保留最近 20% 原文（有最小尾部），增量合并旧摘要，避免每次重压全部。
 - **存储**：短期 Redis List + MySQL 全量消息；中期 Redis 摘要 + MySQL 一会话一行；长期 Redis JSON + MySQL `user_profiles.profile_json`（带 version CAS），候选/确认/审计分别落 MySQL。
+- **ContextReport**：每次根上下文装配记录预算、各段 token、丢弃条数、摘要边界和画像事实数，写入 `agent_runs.context_report_json`，run 详情可查。
 
 ### 3. 确定性编排工具：状态机不删，降级为工具
 
