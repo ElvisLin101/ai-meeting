@@ -100,8 +100,9 @@ func (c *AgentRunController) Get(ctx *gin.Context) {
 		RunID: record.RunID, SessionID: record.SessionID, Status: record.Status,
 		StopReason: record.StopReason, Input: record.Input, Output: record.Output,
 		Steps: record.Steps, Tokens: record.Tokens, Error: record.Error,
-		PlanJSON:  record.PlanJSON,
-		StartedAt: record.StartedAt.Format("2006-01-02 15:04:05"),
+		PlanJSON:          record.PlanJSON,
+		ContextReportJSON: record.ContextReportJSON,
+		StartedAt:         record.StartedAt.Format("2006-01-02 15:04:05"),
 	}
 	if record.FinishedAt != nil {
 		detail.FinishedAt = record.FinishedAt.Format("2006-01-02 15:04:05")

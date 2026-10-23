@@ -32,17 +32,18 @@ type AgentRunStepRespDTO struct {
 
 // AgentRunDetailRespDTO run 详情（含步骤回放）
 type AgentRunDetailRespDTO struct {
-	RunID      string                `json:"run_id"`
-	SessionID  string                `json:"session_id"`
-	Status     string                `json:"status"`
-	StopReason string                `json:"stop_reason"`
-	Input      string                `json:"input"`
-	Output     string                `json:"output"`
-	Steps      int                   `json:"steps"`
-	Tokens     int                   `json:"tokens"`
-	Error      string                `json:"error"`
-	StartedAt  string                `json:"started_at"`
-	FinishedAt string                `json:"finished_at"`
-	PlanJSON   string                `json:"plan_json,omitempty"`
-	StepDetail []AgentRunStepRespDTO `json:"step_detail"`
+	RunID             string                `json:"run_id"`
+	SessionID         string                `json:"session_id"`
+	Status            string                `json:"status"`
+	StopReason        string                `json:"stop_reason"`
+	Input             string                `json:"input"`
+	Output            string                `json:"output"`
+	Steps             int                   `json:"steps"`
+	Tokens            int                   `json:"tokens"`
+	Error             string                `json:"error"`
+	StartedAt         string                `json:"started_at"`
+	FinishedAt        string                `json:"finished_at"`
+	PlanJSON          string                `json:"plan_json,omitempty"`
+	ContextReportJSON string                `json:"context_report_json,omitempty"`
+	StepDetail        []AgentRunStepRespDTO `json:"step_detail"`
 }
