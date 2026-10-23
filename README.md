@@ -143,7 +143,8 @@ Agent run 动辄数十秒，前端重试概率高。基于 Redis 实现跨实例
 ### Agent
 - `POST /agent/runs` 非流式执行、`POST /agent/runs/stream` SSE
 - `GET /agent/runs/:runId` 查看 run 与 step 回放、`GET /agent/runs` 分页
-- SSE 事件：`step` / `tool_call` / `tool_result` / `message` / `done` / `error`
+- `GET /agent/memory/confirmations` 查询待确认画像项、`POST /agent/memory/confirmations/:id/resolve` 确认/拒绝
+- SSE 事件：`route` / `step` / `tool_call` / `tool_result` / `message` / `plan_*` / `done` / `error`
 - 每步落 `agent_steps`，支持分析「Agent 为什么跑偏」
 
 ### 面试（确定性工具）
