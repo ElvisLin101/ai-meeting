@@ -51,9 +51,11 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 - L1 候选: `services/agent/context/profile_rules.go` 在每个用户消息落库后异步跑规则，写入 MySQL `profile_candidates`（不调用 LLM、不改正式画像）；`value_hash` 去重。
 - L2 consolidation: `services/agent/context/profile_consolidate.go` 每 3 个用户回合或 pending 候选 ≥5 触发；输入当前 active facts、候选和最近 user/assistant 对话，输出 `ProfileDiff`；`services/agent/context/profile_apply.go` 负责 add/update/supersede/ask_confirm，冲突低置信不覆盖；`user_profiles` 用 version CAS 更新，确认项落 `profile_confirmations`，审计落 `profile_events`。
 - 画像注入: `services/agent/context/assembler.go` 的 `renderProfile` 只渲染 active facts；旧 `ProfileExtractor` 已不再由 run 服务调用。
-- 当前边界: 确认项已有查询/确认接口，暂无前端页面；工具大结果尚未转 artifact ref。
+- 当前边界: 确认项已有查询/确认接口和调试页入口；工具大结果尚未转 artifact ref。
 - 确定性 eval: `internal/eval/cases.json` + `go run ./cmd/eval`，覆盖路由（15）、画像规则（10）、画像冲突（5）；CI 在 race 测试后执行。
 - Live eval: `test/eval/live_cases.json` + `go run ./cmd/liveeval`，用真实模型和 MySQL/Redis 跑 10 条任务，输出 `tmp/live_eval_report.json`；需要配置和 key，不进 CI。
+- 配额: `services/agent/run/quota.go` 用 Redis 计数控制单用户并发 run 与每日 token；`agent.quota.*` 配置，0 表示不限制；超限返回 `-4012`/429，Redis 故障降级放行。
+- 前端: `static/index.html` Agent tab 支持查看 run 详情（`context_report_json`/`plan_json`）和待确认画像的确认/拒绝。
 
 ### 单步工具批调度（BatchExecutor）
 
