@@ -63,7 +63,8 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 - 策略: 整批工具都实现 `MetaProvider` 且 `Meta().ConcurrencySafe=true` → 并行（信号量限制 `agent.max_parallel_tools`）；否则整批串行。
 - 结果: 按原始 `ToolCalls` 顺序返回，`tool` message 的 `tool_call_id` 与模型返回的 call id 对齐；单个失败不取消同批其他调用。
 - 事件: `tool_call` / `tool_result` 新增 `CallID`，便于前端在同一步多个并发调用时关联。
-- 只读且无共享状态的工具（`pdf_parse`、`file_list`、`file_read`、`web_search`）已声明 `ConcurrencySafe=true`；写文件、面试状态推进默认不声明，保持串行。
+- 只读且无共享状态的工具（`pdf_parse`、`file_list`、`file_read`、`web_search`、`web_fetch`）已声明 `ConcurrencySafe=true`；写文件、面试状态推进默认不声明，保持串行。
+- 搜索/抓取: `web_search` 支持 `deepseek` / `tavily` / `serper`；`deepseek` 复用 `ai.deepseek.api_key`，搜索走 `/v1/tools/search`，`web_fetch` 走 `/v1/tools/fetch` 返回 Markdown。`web_fetch` 只放行公网 http/https，拒绝 localhost/内网/元数据 IP/非标准端口，正文截断 12000 rune 并标记不可信。
 - 当前边界: 这是"并行批次"，不是带 `depends_on` 的完整 DAG；有先后依赖的调用必须由模型分步发起，后续再引入 GraphScheduler。
 
 ### Plan-and-Execute 编排（plan 包）

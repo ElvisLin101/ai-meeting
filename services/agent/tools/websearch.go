@@ -19,6 +19,14 @@ import (
 // 搜索结果属于不可信外部输入, 输出时显式标注, 避免提示注入。
 // ============================================================
 
+const (
+	deepSeekSearchEndpoint = "https://api.deepseek.com/v1/tools/search"
+	deepSeekFetchEndpoint  = "https://api.deepseek.com/v1/tools/fetch"
+	tavilySearchEndpoint   = "https://api.tavily.com/search"
+	serperSearchEndpoint   = "https://google.serper.dev/search"
+	maxSearchResponseBytes = 4 << 20
+)
+
 // SearchResult 单条搜索结果
 type SearchResult struct {
 	Title   string
@@ -26,9 +34,21 @@ type SearchResult struct {
 	Snippet string
 }
 
+// FetchedPage 是抓取到的一页正文。
+type FetchedPage struct {
+	URL     string
+	Title   string
+	Content string
+}
+
 // SearchProvider 搜索提供方接口
 type SearchProvider interface {
 	Search(ctx context.Context, query string, maxResults int) ([]SearchResult, error)
+}
+
+// PageFetcher 是可选的网页正文抓取接口；DeepSeek provider 同时实现搜索与抓取。
+type PageFetcher interface {
+	Fetch(ctx context.Context, pageURL string) (FetchedPage, error)
 }
 
 // NewSearchProvider 按配置创建 provider；未配置 key 时返回错误
@@ -37,22 +57,57 @@ func NewSearchProvider(cfg config.SearchConfig) (SearchProvider, error) {
 		return nil, ecode.New(ecode.ErrAgentInvalidInput,
 			"未配置搜索 API key (agent.search.api_key / AGENT_SEARCH_API_KEY)")
 	}
-	switch strings.ToLower(cfg.Provider) {
+	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
+	if provider == "" {
+		provider = "deepseek"
+	}
+	switch provider {
+	case "deepseek":
+		fetchEndpoint := strings.TrimSpace(cfg.FetchEndpoint)
+		if fetchEndpoint == "" {
+			fetchEndpoint = deepSeekFetchEndpoint
+		}
+		return &deepSeekProvider{
+			searchEndpoint: resolveSearchEndpoint(provider, cfg.Endpoint),
+			fetchEndpoint:  fetchEndpoint,
+			apiKey:         cfg.APIKey,
+			client:         &http.Client{Timeout: 20 * time.Second},
+		}, nil
 	case "serper":
-		endpoint := cfg.Endpoint
-		if endpoint == "" {
-			endpoint = "https://google.serper.dev/search"
-		}
-		return &serperProvider{endpoint: endpoint, apiKey: cfg.APIKey, client: &http.Client{Timeout: 15 * time.Second}}, nil
-	case "", "tavily":
-		endpoint := cfg.Endpoint
-		if endpoint == "" {
-			endpoint = "https://api.tavily.com/search"
-		}
-		return &tavilyProvider{endpoint: endpoint, apiKey: cfg.APIKey, client: &http.Client{Timeout: 15 * time.Second}}, nil
+		return &serperProvider{
+			endpoint: resolveSearchEndpoint(provider, cfg.Endpoint),
+			apiKey:   cfg.APIKey,
+			client:   &http.Client{Timeout: 15 * time.Second},
+		}, nil
+	case "tavily":
+		return &tavilyProvider{
+			endpoint: resolveSearchEndpoint(provider, cfg.Endpoint),
+			apiKey:   cfg.APIKey,
+			client:   &http.Client{Timeout: 15 * time.Second},
+		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported search provider: %s", cfg.Provider)
 	}
+}
+
+// resolveSearchEndpoint 兼容旧配置：切 provider 但没改 endpoint 时使用新 provider 默认地址。
+func resolveSearchEndpoint(provider, endpoint string) string {
+	e := strings.TrimSpace(endpoint)
+	switch provider {
+	case "deepseek":
+		if e == "" || strings.Contains(e, "tavily.com") || strings.Contains(e, "serper.dev") {
+			return deepSeekSearchEndpoint
+		}
+	case "tavily":
+		if e == "" || strings.Contains(e, "api.deepseek.com") {
+			return tavilySearchEndpoint
+		}
+	case "serper":
+		if e == "" || strings.Contains(e, "api.deepseek.com") || strings.Contains(e, "tavily.com") {
+			return serperSearchEndpoint
+		}
+	}
+	return e
 }
 
 // WebSearchTool 网页搜索工具
@@ -129,6 +184,109 @@ func (t *WebSearchTool) Execute(ctx context.Context, tc *Context, args json.RawM
 		Content: b.String(),
 		Meta:    map[string]interface{}{"query": input.Query, "count": len(results)},
 	}, nil
+}
+
+// ============================================================
+// DeepSeek Search / Fetch
+// ============================================================
+
+type deepSeekProvider struct {
+	searchEndpoint string
+	fetchEndpoint  string
+	apiKey         string
+	client         *http.Client
+}
+
+func (p *deepSeekProvider) Search(ctx context.Context, query string, maxResults int) ([]SearchResult, error) {
+	body, err := p.postJSON(ctx, p.searchEndpoint, map[string]interface{}{
+		"query":        query,
+		"count":        maxResults,
+		"need_content": false,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var out struct {
+		Results []struct {
+			Title   string `json:"title"`
+			URL     string `json:"url"`
+			Snippet string `json:"snippet"`
+			Summary string `json:"summary"`
+			Content string `json:"content"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, err
+	}
+	results := make([]SearchResult, 0, len(out.Results))
+	for _, r := range out.Results {
+		snippet := strings.TrimSpace(r.Snippet)
+		if snippet == "" {
+			snippet = strings.TrimSpace(r.Summary)
+		}
+		if snippet == "" {
+			snippet = strings.TrimSpace(r.Content)
+		}
+		results = append(results, SearchResult{
+			Title: r.Title, URL: r.URL, Snippet: truncateSnippet(snippet, 600),
+		})
+	}
+	return results, nil
+}
+
+func (p *deepSeekProvider) Fetch(ctx context.Context, pageURL string) (FetchedPage, error) {
+	body, err := p.postJSON(ctx, p.fetchEndpoint, map[string]interface{}{"url": pageURL})
+	if err != nil {
+		return FetchedPage{}, err
+	}
+	var out struct {
+		Title   string `json:"title"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return FetchedPage{}, err
+	}
+	if strings.TrimSpace(out.Content) == "" {
+		return FetchedPage{}, fmt.Errorf("deepseek fetch returned empty content")
+	}
+	return FetchedPage{URL: pageURL, Title: out.Title, Content: out.Content}, nil
+}
+
+func (p *deepSeekProvider) postJSON(ctx context.Context, endpoint string, payload interface{}) ([]byte, error) {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	req.Header.Set("User-Agent", "ai-meeting/1.0")
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxSearchResponseBytes))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf("deepseek tools status %d: %s", resp.StatusCode, truncateSnippet(string(body), 500))
+	}
+	return body, nil
+}
+
+func truncateSnippet(text string, maxRunes int) string {
+	r := []rune(strings.TrimSpace(text))
+	if len(r) <= maxRunes {
+		return string(r)
+	}
+	return string(r[:maxRunes]) + "…"
 }
 
 // ============================================================

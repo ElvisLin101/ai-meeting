@@ -95,10 +95,11 @@ type PlanConfig struct {
 
 // SearchConfig 网页搜索配置
 type SearchConfig struct {
-	Provider   string `mapstructure:"provider"` // tavily/serper/bing
-	APIKey     string `mapstructure:"api_key"`
-	Endpoint   string `mapstructure:"endpoint"`
-	MaxResults int    `mapstructure:"max_results"`
+	Provider      string `mapstructure:"provider"` // deepseek/tavily/serper
+	APIKey        string `mapstructure:"api_key"`
+	Endpoint      string `mapstructure:"endpoint"`
+	FetchEndpoint string `mapstructure:"fetch_endpoint"` // deepseek: /v1/tools/fetch
+	MaxResults    int    `mapstructure:"max_results"`
 }
 
 type AppConfigType struct {
@@ -162,8 +163,9 @@ func LoadConfig() error {
 	viper.SetDefault("agent.context.compress_threshold_tokens", 4800)
 	viper.SetDefault("agent.quota.max_concurrent_runs", 0)
 	viper.SetDefault("agent.quota.daily_token_limit", 0)
-	viper.SetDefault("agent.search.provider", "tavily")
-	viper.SetDefault("agent.search.endpoint", "https://api.tavily.com/search")
+	viper.SetDefault("agent.search.provider", "deepseek")
+	viper.SetDefault("agent.search.endpoint", "")
+	viper.SetDefault("agent.search.fetch_endpoint", "")
 	viper.SetDefault("agent.search.api_key", "")
 	viper.SetDefault("agent.search.max_results", 5)
 	viper.SetDefault("agent.plan.enabled", true)

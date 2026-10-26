@@ -126,10 +126,24 @@ func buildRegistry(cfg config.AgentConfig) *tools.Registry {
 	registry.Register(tools.NewInterviewCurrentQuestionTool())
 	registry.Register(tools.NewInterviewSubmitAnswerTool())
 
-	if provider, err := tools.NewSearchProvider(cfg.Search); err != nil {
+	searchCfg := cfg.Search
+	providerName := strings.ToLower(strings.TrimSpace(searchCfg.Provider))
+	if providerName == "" {
+		providerName = "deepseek"
+	}
+	// DeepSeek 的 Search/Fetch 复用模型 API key，不要求用户再配一份搜索 key。
+	if providerName == "deepseek" && strings.TrimSpace(searchCfg.APIKey) == "" {
+		searchCfg.APIKey = config.GetConfig().AI.DeepSeek.APIKey
+	}
+	if provider, err := tools.NewSearchProvider(searchCfg); err != nil {
 		logrus.Warnf("[agent] web_search disabled: %v", err)
 	} else {
-		registry.Register(tools.NewWebSearchTool(provider, cfg.Search.MaxResults))
+		registry.Register(tools.NewWebSearchTool(provider, searchCfg.MaxResults))
+		if fetcher, ok := provider.(tools.PageFetcher); ok {
+			registry.Register(tools.NewWebFetchTool(fetcher))
+		} else {
+			logrus.Infof("[agent] web_fetch disabled: provider %s does not implement fetch", providerName)
+		}
 	}
 	return registry
 }

@@ -141,3 +141,22 @@ func TestStepRecorderKeepsDirectStepIndex(t *testing.T) {
 		t.Fatalf("direct run should keep loop step index: %+v", step)
 	}
 }
+
+func TestBuildRegistryRegistersDeepSeekSearchAndFetch(t *testing.T) {
+	oldKey := config.AppConfig.AI.DeepSeek.APIKey
+	config.AppConfig.AI.DeepSeek.APIKey = "test-key"
+	t.Cleanup(func() { config.AppConfig.AI.DeepSeek.APIKey = oldKey })
+
+	registry := buildRegistry(config.AgentConfig{
+		SandboxRoot: t.TempDir(),
+		Search: config.SearchConfig{
+			Provider:   "deepseek",
+			MaxResults: 5,
+		},
+	})
+	for _, name := range []string{"web_search", "web_fetch"} {
+		if _, ok := registry.Get(name); !ok {
+			t.Fatalf("tool %s should be registered", name)
+		}
+	}
+}

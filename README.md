@@ -84,7 +84,8 @@
 | 工具 | 能力 | 安全边界 |
 |---|---|---|
 | `pdf_parse` | 解析沙箱内 PDF | 扩展名 + `%PDF-` 魔数 + 10MB 上限 |
-| `web_search` | 真实搜索 API（Tavily/Serper） | 超时、条数/长度限制、结果标记为不可信 |
+| `web_search` | 搜索公开网页（DeepSeek / Tavily / Serper） | 超时、条数/长度限制、结果标记为不可信 |
+| `web_fetch` | 抓取公开网页正文（DeepSeek Fetch，返回 Markdown） | 仅 http/https；拒绝 localhost/内网/元数据 IP/非标准端口；正文截断并标记不可信 |
 | `file_list/read/write/edit` | 沙箱内文本文件操作 | 拒绝绝对路径/`..`/符号链接逃逸；原子写 + 写前备份 |
 | `interview_*` | 结构化模拟面试 | 包装确定性状态机 + 会话归属校验 |
 
@@ -177,7 +178,7 @@ cp config/config.example.yaml config/config.yaml
 go run main.go
 ```
 
-> `ai.deepseek.api_key` 为空时，依赖模型的功能不可用；`agent.search.api_key` 为空时 `web_search` 工具不会注册。
+> `ai.deepseek.api_key` 为空时，依赖模型的功能不可用。搜索 provider 默认 `deepseek`，`agent.search.api_key` 留空会复用 `ai.deepseek.api_key`，同时启用 `web_search` 与 `web_fetch`；切到 Tavily/Serper 时需单独配置 `agent.search.api_key`，且只启用 `web_search`。
 > 文件工具只能操作 `agent.sandbox_root`（默认 `./sandbox`）内的相对路径。
 
 ## 测试与 CI
@@ -207,7 +208,7 @@ scripts/knowledge-check.sh diff
 - 流式 run 的 SingleFlight 只做幂等，不复用 chunk（如实说明）
 - 换主机制基于租约，安全性是概率性收敛，不是强一致（边界见 `docs/agent-knowledge/references/`）
 - 画像「每次模型调用提炼」采用异步 + 节流，避免成本翻倍
-- 网页搜索依赖外部 API key 与网络
+- 网页搜索/抓取依赖外部 API、额度与网络；DeepSeek Search/Fetch 与模型共用 API key，但按请求单独计费
 
 ## License
 
