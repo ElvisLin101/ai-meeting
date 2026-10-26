@@ -31,14 +31,13 @@ func (c *AiConversationController) CreateConversation(ctx *gin.Context) {
 		return
 	}
 
-	username, exists := ctx.Get("username")
-	if !exists || username == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	username, ok := mustUsername(ctx)
+	if !ok {
 		return
 	}
 
 	result, err := c.conversationService.CreateConversationWithTitle(
-		username.(string),
+		username,
 		req.AiId,
 		req.FirstMessage,
 	)
@@ -57,13 +56,12 @@ func (c *AiConversationController) PageConversations(ctx *gin.Context) {
 		return
 	}
 
-	username, exists := ctx.Get("username")
-	if !exists || username == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	username, ok := mustUsername(ctx)
+	if !ok {
 		return
 	}
 
-	conversations, total, err := c.conversationService.PageConversations(username.(string), req)
+	conversations, total, err := c.conversationService.PageConversations(username, req)
 	if err != nil {
 		respx.Respond(ctx, err, nil)
 		return
@@ -92,13 +90,12 @@ func (c *AiConversationController) UpdateConversation(ctx *gin.Context) {
 	messageCount, _ := strconv.Atoi(ctx.Query("messageCount"))
 	title := ctx.Query("title")
 
-	username, exists := ctx.Get("username")
-	if !exists || username == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	username, ok := mustUsername(ctx)
+	if !ok {
 		return
 	}
 
-	if err := c.conversationService.UpdateConversation(sessionID, messageCount, title, username.(string)); err != nil {
+	if err := c.conversationService.UpdateConversation(sessionID, messageCount, title, username); err != nil {
 		respx.Respond(ctx, err, nil)
 		return
 	}
@@ -108,13 +105,12 @@ func (c *AiConversationController) UpdateConversation(ctx *gin.Context) {
 
 func (c *AiConversationController) EndConversation(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
-	username, exists := ctx.Get("username")
-	if !exists || username == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	username, ok := mustUsername(ctx)
+	if !ok {
 		return
 	}
 
-	if err := c.conversationService.EndConversation(sessionID, username.(string)); err != nil {
+	if err := c.conversationService.EndConversation(sessionID, username); err != nil {
 		respx.Respond(ctx, err, nil)
 		return
 	}
@@ -124,13 +120,12 @@ func (c *AiConversationController) EndConversation(ctx *gin.Context) {
 
 func (c *AiConversationController) DeleteConversation(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
-	username, exists := ctx.Get("username")
-	if !exists || username == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	username, ok := mustUsername(ctx)
+	if !ok {
 		return
 	}
 
-	if err := c.conversationService.DeleteConversation(sessionID, username.(string)); err != nil {
+	if err := c.conversationService.DeleteConversation(sessionID, username); err != nil {
 		respx.Respond(ctx, err, nil)
 		return
 	}
@@ -140,13 +135,12 @@ func (c *AiConversationController) DeleteConversation(ctx *gin.Context) {
 
 func (c *AiConversationController) GetConversationById(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
-	username, exists := ctx.Get("username")
-	if !exists || username == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	username, ok := mustUsername(ctx)
+	if !ok {
 		return
 	}
 
-	conv, err := c.conversationService.GetConversationBySessionId(sessionID, username.(string))
+	conv, err := c.conversationService.GetConversationBySessionId(sessionID, username)
 	if err != nil {
 		respx.Fail(ctx, ecode.NotExist, "Not found")
 		return
@@ -182,15 +176,14 @@ func (c *AiMessageController) Chat(ctx *gin.Context) {
 		return
 	}
 
-	username, exists := ctx.Get("username")
-	if !exists || username == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	username, ok := mustUsername(ctx)
+	if !ok {
 		return
 	}
 
 	req.SessionID = sessionID
 
-	resp, err := c.messageService.Chat(ctx.Request.Context(), sessionID, username.(string), req.Content)
+	resp, err := c.messageService.Chat(ctx.Request.Context(), sessionID, username, req.Content)
 	if err != nil {
 		respx.Respond(ctx, err, nil)
 		return
@@ -211,9 +204,8 @@ func (c *AiMessageController) ChatStream(ctx *gin.Context) {
 		return
 	}
 
-	username, exists := ctx.Get("username")
-	if !exists || username == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	username, ok := mustUsername(ctx)
+	if !ok {
 		return
 	}
 
@@ -224,7 +216,7 @@ func (c *AiMessageController) ChatStream(ctx *gin.Context) {
 	ctx.Status(http.StatusOK)
 	ctx.Writer.Flush()
 
-	resp, err := c.messageService.ChatStream(ctx.Request.Context(), sessionID, username.(string), req.Content, func(chunk ai.AiChatStreamChunk) error {
+	resp, err := c.messageService.ChatStream(ctx.Request.Context(), sessionID, username, req.Content, func(chunk ai.AiChatStreamChunk) error {
 		if err := ctx.Request.Context().Err(); err != nil {
 			return err
 		}
@@ -253,13 +245,12 @@ func (c *AiMessageController) ChatStream(ctx *gin.Context) {
 
 func (c *AiMessageController) GetConversationHistory(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
-	username, exists := ctx.Get("username")
-	if !exists || username == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	username, ok := mustUsername(ctx)
+	if !ok {
 		return
 	}
 
-	messages, err := c.messageService.GetConversationHistory(sessionID, username.(string))
+	messages, err := c.messageService.GetConversationHistory(sessionID, username)
 	if err != nil {
 		respx.Respond(ctx, err, nil)
 		return
@@ -299,13 +290,12 @@ func (c *AiMessageController) PageHistoryMessages(ctx *gin.Context) {
 		size = 100
 	}
 
-	username, exists := ctx.Get("username")
-	if !exists || username == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	username, ok := mustUsername(ctx)
+	if !ok {
 		return
 	}
 
-	messages, total, err := c.messageService.PageHistoryMessages(sessionID, current, size, username.(string))
+	messages, total, err := c.messageService.PageHistoryMessages(sessionID, current, size, username)
 	if err != nil {
 		respx.Respond(ctx, err, nil)
 		return

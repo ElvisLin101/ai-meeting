@@ -39,14 +39,13 @@ func (c *AgentController) CreateSession(ctx *gin.Context) {
 		return
 	}
 
-	username, exists := ctx.Get("username")
-	if !exists || username == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	username, ok := mustUsername(ctx)
+	if !ok {
 		return
 	}
 
 	result, err := c.agentConversationService.CreateConversationWithTitle(
-		username.(string),
+		username,
 		req.AgentID,
 		req.FirstMessage,
 	)
@@ -66,9 +65,8 @@ func (c *AgentController) Chat(ctx *gin.Context) {
 		return
 	}
 
-	username, exists := ctx.Get("username")
-	if !exists || username == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	username, ok := mustUsername(ctx)
+	if !ok {
 		return
 	}
 
@@ -79,7 +77,7 @@ func (c *AgentController) Chat(ctx *gin.Context) {
 	ctx.Header("X-Accel-Buffering", "no")
 
 	// 调用 Agent Chat SSE，通过 onChunk 回调实时推送 chunk 给前端
-	_, err := c.agentMessageService.AgentChatSSE(sessionID, username.(string), req.Content, func(chunk string) {
+	_, err := c.agentMessageService.AgentChatSSE(sessionID, username, req.Content, func(chunk string) {
 		ctx.SSEvent("message", chunk)
 		ctx.Writer.Flush()
 	})
@@ -103,13 +101,12 @@ func (c *AgentController) PageConversations(ctx *gin.Context) {
 		return
 	}
 
-	username, exists := ctx.Get("username")
-	if !exists || username == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	username, ok := mustUsername(ctx)
+	if !ok {
 		return
 	}
 
-	conversations, total, err := c.agentConversationService.PageConversations(username.(string), req)
+	conversations, total, err := c.agentConversationService.PageConversations(username, req)
 	if err != nil {
 		respx.Respond(ctx, err, nil)
 		return
@@ -134,13 +131,12 @@ func (c *AgentController) PageConversations(ctx *gin.Context) {
 
 func (c *AgentController) GetConversationHistory(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
-	username, exists := ctx.Get("username")
-	if !exists || username == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	username, ok := mustUsername(ctx)
+	if !ok {
 		return
 	}
 
-	messages, err := c.agentMessageService.GetConversationHistory(sessionID, username.(string))
+	messages, err := c.agentMessageService.GetConversationHistory(sessionID, username)
 	if err != nil {
 		respx.Respond(ctx, err, nil)
 		return
@@ -159,16 +155,15 @@ func (c *AgentController) PageHistoryMessages(ctx *gin.Context) {
 	current := ctx.DefaultQuery("current", "1")
 	size := ctx.DefaultQuery("size", "10")
 
-	username, exists := ctx.Get("username")
-	if !exists || username == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	username, ok := mustUsername(ctx)
+	if !ok {
 		return
 	}
 
 	page, _ := strconv.Atoi(current)
 	pageSize, _ := strconv.Atoi(size)
 
-	messages, total, err := c.agentMessageService.PageHistoryMessages(sessionID, page, pageSize, username.(string))
+	messages, total, err := c.agentMessageService.PageHistoryMessages(sessionID, page, pageSize, username)
 	if err != nil {
 		respx.Respond(ctx, err, nil)
 		return
@@ -187,13 +182,12 @@ func (c *AgentController) PageHistoryMessages(ctx *gin.Context) {
 
 func (c *AgentController) EndConversation(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
-	username, exists := ctx.Get("username")
-	if !exists || username == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	username, ok := mustUsername(ctx)
+	if !ok {
 		return
 	}
 
-	if err := c.agentConversationService.EndConversation(sessionID, username.(string)); err != nil {
+	if err := c.agentConversationService.EndConversation(sessionID, username); err != nil {
 		respx.Respond(ctx, err, nil)
 		return
 	}
@@ -240,9 +234,8 @@ func (c *AgentFileController) Upload(ctx *gin.Context) {
 		return
 	}
 
-	username, exists := ctx.Get("username")
-	if !exists || username == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	username, ok := mustUsername(ctx)
+	if !ok {
 		return
 	}
 
@@ -254,7 +247,7 @@ func (c *AgentFileController) Upload(ctx *gin.Context) {
 		return
 	}
 
-	result, err := c.fileAssetService.UploadAndPersist(sessionID, bizType, username.(string), file.Filename, savePath, file.Size)
+	result, err := c.fileAssetService.UploadAndPersist(sessionID, bizType, username, file.Filename, savePath, file.Size)
 	if err != nil {
 		respx.Respond(ctx, err, nil)
 		return

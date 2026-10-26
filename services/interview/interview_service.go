@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -405,11 +406,14 @@ func (s *InterviewSessionFacade) PreviewResume(sessionID, userID string) (string
 	return content, nil
 }
 
-var interviewSessionFacadeInstance *InterviewSessionFacade
+var (
+	interviewSessionFacadeInstance *InterviewSessionFacade
+	interviewSessionFacadeOnce     sync.Once
+)
 
 // GetInterviewSessionFacade 获取InterviewSessionFacade单例
 func GetInterviewSessionFacade() *InterviewSessionFacade {
-	if interviewSessionFacadeInstance == nil {
+	interviewSessionFacadeOnce.Do(func() {
 		rdb := repositories.RedisClient
 		flowCache := runtime.NewFlowCache(rdb)
 		scoreCache := runtime.NewScoreCache(rdb)
@@ -433,8 +437,8 @@ func GetInterviewSessionFacade() *InterviewSessionFacade {
 			questionCache:    questionCache,
 			extractionSvc:    extractionSvc,
 		}
-	}
-	logrus.Info("InterviewSessionFacade instance created")
+		logrus.Info("InterviewSessionFacade instance created")
+	})
 	return interviewSessionFacadeInstance
 }
 
@@ -512,13 +516,16 @@ func (s *InterviewRecordService) SaveInterviewRecordFromRedis(sessionID, userID 
 	return nil
 }
 
-var interviewRecordServiceInstance *InterviewRecordService
+var (
+	interviewRecordServiceInstance *InterviewRecordService
+	interviewRecordServiceOnce     sync.Once
+)
 
 // GetInterviewRecordService 获取InterviewRecordService单例
 func GetInterviewRecordService() *InterviewRecordService {
-	if interviewRecordServiceInstance == nil {
+	interviewRecordServiceOnce.Do(func() {
 		interviewRecordServiceInstance = &InterviewRecordService{}
-	}
-	logrus.Info("InterviewRecordService instance created")
+		logrus.Info("InterviewRecordService instance created")
+	})
 	return interviewRecordServiceInstance
 }

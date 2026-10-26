@@ -7,6 +7,7 @@ import (
 	mysqlrepo "ai-meeting/repositories/mysql"
 	"errors"
 	"strings"
+	"sync"
 
 	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/bcrypt"
@@ -126,13 +127,16 @@ func (s *UserService) SetAdmin(username string) error {
 	return mysqlrepo.SetUserAdmin(username)
 }
 
-var userServiceInstance *UserService
+var (
+	userServiceInstance *UserService
+	userServiceOnce     sync.Once
+)
 
 // GetUserService 获取UserService单例
 func GetUserService() *UserService {
-	if userServiceInstance == nil {
+	userServiceOnce.Do(func() {
 		userServiceInstance = &UserService{}
-	}
-	logrus.Info("UserService instance created")
+		logrus.Info("UserService instance created")
+	})
 	return userServiceInstance
 }

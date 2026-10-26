@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -65,11 +66,14 @@ type Service struct {
 	quota     config.QuotaConfig
 }
 
-var serviceInstance *Service
+var (
+	serviceInstance *Service
+	serviceOnce     sync.Once
+)
 
 // GetService 获取单例
 func GetService() *Service {
-	if serviceInstance == nil {
+	serviceOnce.Do(func() {
 		cfg := config.GetConfig().Agent
 		registry := buildRegistry(cfg)
 		executor := tools.NewExecutor(registry,
@@ -110,7 +114,7 @@ func GetService() *Service {
 			},
 			quota: cfg.Quota,
 		}
-	}
+	})
 	return serviceInstance
 }
 

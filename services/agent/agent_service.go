@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -77,14 +78,17 @@ func (s *AgentConversationService) EndConversation(sessionID, userID string) err
 	return mysqlrepo.EndConversation(sessionID, userID)
 }
 
-var agentConversationServiceInstance *AgentConversationService
+var (
+	agentConversationServiceInstance *AgentConversationService
+	agentConversationServiceOnce     sync.Once
+)
 
 // GetAgentConversationService 获取AgentConversationService单例
 func GetAgentConversationService() *AgentConversationService {
-	if agentConversationServiceInstance == nil {
+	agentConversationServiceOnce.Do(func() {
 		agentConversationServiceInstance = &AgentConversationService{}
-	}
-	logrus.Info("AgentConversationService instance created")
+		logrus.Info("AgentConversationService instance created")
+	})
 	return agentConversationServiceInstance
 }
 
@@ -241,14 +245,17 @@ func buildAgentPromptMessages(agentProps *models.AgentProperties, history []mode
 	return messages
 }
 
-var agentMessageServiceInstance *AgentMessageService
+var (
+	agentMessageServiceInstance *AgentMessageService
+	agentMessageServiceOnce     sync.Once
+)
 
 // GetAgentMessageService 获取AgentMessageService单例
 func GetAgentMessageService() *AgentMessageService {
-	if agentMessageServiceInstance == nil {
+	agentMessageServiceOnce.Do(func() {
 		agentMessageServiceInstance = &AgentMessageService{}
-	}
-	logrus.Info("AgentMessageService instance created")
+		logrus.Info("AgentMessageService instance created")
+	})
 	return agentMessageServiceInstance
 }
 
@@ -280,14 +287,17 @@ func (s *AgentPropertiesService) GetByPage(req dto.AgentPropertiesReqDTO) ([]mod
 	return mysqlrepo.PageAgentProperties(10)
 }
 
-var agentPropertiesServiceInstance *AgentPropertiesService
+var (
+	agentPropertiesServiceInstance *AgentPropertiesService
+	agentPropertiesServiceOnce     sync.Once
+)
 
 // GetAgentPropertiesService 获取AgentPropertiesService单例
 func GetAgentPropertiesService() *AgentPropertiesService {
-	if agentPropertiesServiceInstance == nil {
+	agentPropertiesServiceOnce.Do(func() {
 		agentPropertiesServiceInstance = &AgentPropertiesService{}
-	}
-	logrus.Info("AgentPropertiesService instance created")
+		logrus.Info("AgentPropertiesService instance created")
+	})
 	return agentPropertiesServiceInstance
 }
 
@@ -302,14 +312,17 @@ func (s *AgentFileAssetService) UploadAndPersist(sessionID, bizType, username st
 	return &dto.AgentFileUploadRespDTO{FileID: fmt.Sprintf("%d", asset.ID), Filename: filename, Path: path}, nil
 }
 
-var agentFileAssetServiceInstance *AgentFileAssetService
+var (
+	agentFileAssetServiceInstance *AgentFileAssetService
+	agentFileAssetServiceOnce     sync.Once
+)
 
 // GetAgentFileAssetService 获取AgentFileAssetService单例
 func GetAgentFileAssetService() *AgentFileAssetService {
-	if agentFileAssetServiceInstance == nil {
+	agentFileAssetServiceOnce.Do(func() {
 		agentFileAssetServiceInstance = &AgentFileAssetService{}
-	}
-	logrus.Info("AgentFileAssetService instance created")
+		logrus.Info("AgentFileAssetService instance created")
+	})
 	return agentFileAssetServiceInstance
 }
 

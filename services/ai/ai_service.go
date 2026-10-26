@@ -5,6 +5,7 @@ import (
 	"ai-meeting/dto"
 	"ai-meeting/models"
 	mysqlrepo "ai-meeting/repositories/mysql"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
@@ -88,14 +89,17 @@ func (s *AiConversationService) GetConversationBySessionId(sessionID, username s
 	return &out, nil
 }
 
-var aiConversationServiceInstance *AiConversationService
+var (
+	aiConversationServiceInstance *AiConversationService
+	aiConversationServiceOnce     sync.Once
+)
 
 // GetAiConversationService 获取AiConversationService单例
 func GetAiConversationService() *AiConversationService {
-	if aiConversationServiceInstance == nil {
+	aiConversationServiceOnce.Do(func() {
 		aiConversationServiceInstance = &AiConversationService{}
-	}
-	logrus.Info("AiConversationService instance created")
+		logrus.Info("AiConversationService instance created")
+	})
 	return aiConversationServiceInstance
 }
 
@@ -151,14 +155,17 @@ func toAiMessage(m models.Message) models.AiMessage {
 	}
 }
 
-var aiMessageServiceInstance *AiMessageService
+var (
+	aiMessageServiceInstance *AiMessageService
+	aiMessageServiceOnce     sync.Once
+)
 
 // GetAiMessageService 获取AiMessageService单例
 func GetAiMessageService() *AiMessageService {
-	if aiMessageServiceInstance == nil {
+	aiMessageServiceOnce.Do(func() {
 		aiMessageServiceInstance = &AiMessageService{}
-	}
-	logrus.Info("AiMessageService instance created")
+		logrus.Info("AiMessageService instance created")
+	})
 	return aiMessageServiceInstance
 }
 
@@ -241,13 +248,16 @@ func (s *AiPropertiesService) ToggleAiPropertiesStatus(id uint, isEnabled int) e
 	return nil
 }
 
-var aiPropertiesServiceInstance *AiPropertiesService
+var (
+	aiPropertiesServiceInstance *AiPropertiesService
+	aiPropertiesServiceOnce     sync.Once
+)
 
 // GetAiPropertiesService 获取AiPropertiesService单例
 func GetAiPropertiesService() *AiPropertiesService {
-	if aiPropertiesServiceInstance == nil {
+	aiPropertiesServiceOnce.Do(func() {
 		aiPropertiesServiceInstance = &AiPropertiesService{}
-	}
-	logrus.Info("AiPropertiesService instance created")
+		logrus.Info("AiPropertiesService instance created")
+	})
 	return aiPropertiesServiceInstance
 }
