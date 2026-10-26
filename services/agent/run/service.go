@@ -143,8 +143,34 @@ func (s *Service) Start(ctx context.Context, req StartRequest) (*StartResult, er
 	if err != nil {
 		return nil, err
 	}
-	res, _ := result.(*StartResult)
-	return res, nil
+	return decodeStartResult(result)
+}
+
+// decodeStartResult 兼容 SingleFlight 的两种返回：
+//   - leader 返回本进程的 *StartResult；
+//   - follower 从 Redis 读回 JSON 后得到 map[string]interface{}。
+func decodeStartResult(result interface{}) (*StartResult, error) {
+	switch v := result.(type) {
+	case *StartResult:
+		if v == nil {
+			return nil, fmt.Errorf("empty singleflight result")
+		}
+		return v, nil
+	case StartResult:
+		return &v, nil
+	case map[string]interface{}:
+		raw, err := json.Marshal(v)
+		if err != nil {
+			return nil, fmt.Errorf("encode singleflight result: %w", err)
+		}
+		var out StartResult
+		if err := json.Unmarshal(raw, &out); err != nil {
+			return nil, fmt.Errorf("decode singleflight result: %w", err)
+		}
+		return &out, nil
+	default:
+		return nil, fmt.Errorf("unexpected singleflight result type %T", result)
+	}
 }
 
 // StartStream 流式执行（用 Redis 幂等锁防止重复提交；SingleFlight 不复用流式 chunk）
