@@ -55,18 +55,26 @@ type CaseResult struct {
 }
 
 type Report struct {
-	StartedAt     string       `json:"started_at"`
-	Model         string       `json:"model"`
-	Total         int          `json:"total"`
-	Passed        int          `json:"passed"`
-	PassRate      float64      `json:"pass_rate"`
-	RouteOK       int          `json:"route_ok"`
-	RouteOKRate   float64      `json:"route_ok_rate"`
-	PlanRuns      int          `json:"plan_runs"`
-	AvgSteps      float64      `json:"avg_steps"`
-	AvgTokens     float64      `json:"avg_tokens"`
-	AvgDurationMs float64      `json:"avg_duration_ms"`
-	Cases         []CaseResult `json:"cases"`
+	StartedAt       string       `json:"started_at"`
+	Model           string       `json:"model"`
+	RunLabel        string       `json:"run_label,omitempty"`
+	User            string       `json:"user,omitempty"`
+	Sandbox         string       `json:"sandbox,omitempty"`
+	Total           int          `json:"total"`
+	Passed          int          `json:"passed"`
+	PassRate        float64      `json:"pass_rate"`
+	RouteOK         int          `json:"route_ok"`
+	RouteOKRate     float64      `json:"route_ok_rate"`
+	PlanRuns        int          `json:"plan_runs"`
+	Completed       int          `json:"completed"`
+	CompletedRate   float64      `json:"completed_rate"`
+	QualityPass     int          `json:"quality_pass"`
+	QualityPassRate float64      `json:"quality_pass_rate"`
+	AvgQuality      float64      `json:"avg_quality"`
+	AvgSteps        float64      `json:"avg_steps"`
+	AvgTokens       float64      `json:"avg_tokens"`
+	AvgDurationMs   float64      `json:"avg_duration_ms"`
+	Cases           []CaseResult `json:"cases"`
 }
 
 func main() {
@@ -74,10 +82,13 @@ func main() {
 	outPath := flag.String("out", "tmp/live_eval_report.json", "report output")
 	username := flag.String("username", "eval-bot", "eval user (isolated from real users)")
 	userID := flag.String("user-id", "eval-bot", "eval user id used by interview tools")
+	isolate := flag.Bool("isolate", true, "use a fresh eval user and sandbox for this run")
+	label := flag.String("label", "", "label for isolated run (default timestamp-pid)")
 	agentID := flag.Uint("agent-id", 0, "agent id (0 uses config/config.yaml, >0 uses ai_properties)")
 	limit := flag.Int("limit", 0, "run only first N cases")
 	timeout := flag.Duration("timeout", 180*time.Second, "per-case timeout")
 	minPass := flag.Float64("min-pass", 0.7, "exit non-zero when pass rate is below this")
+	qualityThreshold := flag.Float64("quality-threshold", 0.7, "rubric coverage threshold for quality_pass")
 	flag.Parse()
 
 	if err := config.LoadConfig(); err != nil {
@@ -94,6 +105,29 @@ func main() {
 注意：config/config.yaml 已被 .gitignore 忽略，不要提交或粘贴到对话里。
 如果模型配置在 MySQL ai_properties 表里，请改用 -agent-id <id>。`)
 	}
+
+	runLabel := strings.TrimSpace(*label)
+	if *isolate {
+		if runLabel == "" {
+			runLabel = fmt.Sprintf("eval-%s-%d", time.Now().Format("20060102-150405"), os.Getpid())
+		}
+		runLabel = sanitizeLabel(runLabel)
+		*username = runLabel
+		*userID = runLabel
+		sandboxRoot := filepath.Join("tmp", "eval-runs", runLabel, "sandbox")
+		abs, err := filepath.Abs(sandboxRoot)
+		if err != nil {
+			fatalf("resolve eval sandbox: %v", err)
+		}
+		if err := resetSandbox(abs); err != nil {
+			fatalf("reset eval sandbox: %v", err)
+		}
+		cfg.Agent.SandboxRoot = abs
+		fmt.Printf("isolated eval: user=%s sandbox=%s\n", runLabel, abs)
+	} else if runLabel == "" {
+		runLabel = "shared"
+	}
+
 	if err := mysqlrepo.InitDB(); err != nil {
 		fatalf("init mysql: %v", err)
 	}
@@ -116,12 +150,21 @@ func main() {
 	report := Report{
 		StartedAt: time.Now().Format("2006-01-02 15:04:05"),
 		Model:     cfg.AI.DeepSeek.Model,
+		RunLabel:  runLabel,
+		User:      *username,
+		Sandbox:   cfg.Agent.SandboxRoot,
 		Total:     len(cases),
 	}
 	var totalSteps, totalTokens int
 	var totalDuration int64
+	var totalQuality float64
 
 	for _, c := range cases {
+		if *isolate {
+			if err := resetSandbox(cfg.Agent.SandboxRoot); err != nil {
+				fatalf("reset sandbox before %s: %v", c.ID, err)
+			}
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 		start := time.Now()
 		res, runErr := svc.Start(ctx, agentrun.StartRequest{
@@ -151,21 +194,32 @@ func main() {
 		if result.Passed {
 			report.Passed++
 		}
+		if result.Status == "completed" {
+			report.Completed++
+		}
+		if result.Quality >= *qualityThreshold {
+			report.QualityPass++
+		}
 		report.Cases = append(report.Cases, result)
 		totalSteps += result.Steps
 		totalTokens += result.Tokens
 		totalDuration += result.DurationMs
+		totalQuality += result.Quality
 
 		status := "FAIL"
 		if result.Passed {
 			status = "PASS"
 		}
-		fmt.Printf("[%s] %-24s plan=%-12s route_ok=%v steps=%d tokens=%d %dms\n",
-			status, c.ID, result.PlanMode, result.RouteOK, result.Steps, result.Tokens, result.DurationMs)
+		fmt.Printf("[%s] %-24s plan=%-12s status=%-9s route_ok=%v steps=%d tokens=%d %dms quality=%.2f\n",
+			status, c.ID, result.PlanMode, result.Status, result.RouteOK,
+			result.Steps, result.Tokens, result.DurationMs, result.Quality)
 	}
 
 	report.PassRate = ratio(report.Passed, report.Total)
 	report.RouteOKRate = ratio(report.RouteOK, report.Total)
+	report.CompletedRate = ratio(report.Completed, report.Total)
+	report.QualityPassRate = ratio(report.QualityPass, report.Total)
+	report.AvgQuality = totalQuality / float64(report.Total)
 	report.AvgSteps = ratioFloat(totalSteps, report.Total)
 	report.AvgTokens = ratioFloat(totalTokens, report.Total)
 	report.AvgDurationMs = ratioFloat64(totalDuration, report.Total)
@@ -173,10 +227,12 @@ func main() {
 	if err := writeReport(*outPath, report); err != nil {
 		fatalf("write report: %v", err)
 	}
-	fmt.Printf("\nsummary: pass=%d/%d (%.2f) route_ok=%d/%d (%.2f) plan=%d avg_steps=%.1f avg_tokens=%.0f avg_duration=%.0fms\n",
+	fmt.Printf("\nsummary: pass=%d/%d (%.2f) route_ok=%d/%d (%.2f) plan=%d completed=%d/%d quality_pass=%d/%d avg_quality=%.2f avg_steps=%.1f avg_tokens=%.0f avg_duration=%.0fms\n",
 		report.Passed, report.Total, report.PassRate,
 		report.RouteOK, report.Total, report.RouteOKRate,
-		report.PlanRuns, report.AvgSteps, report.AvgTokens, report.AvgDurationMs)
+		report.PlanRuns, report.Completed, report.Total,
+		report.QualityPass, report.Total, report.AvgQuality,
+		report.AvgSteps, report.AvgTokens, report.AvgDurationMs)
 	fmt.Printf("report: %s\n", *outPath)
 
 	if report.PassRate < *minPass {
@@ -263,6 +319,38 @@ func writeReport(path string, report Report) error {
 		return err
 	}
 	return os.WriteFile(path, raw, 0o644)
+}
+
+// sanitizeLabel 把用户传入的 label 限制为文件系统安全的字符。
+func sanitizeLabel(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		return "eval"
+	}
+	return out
+}
+
+// resetSandbox 只允许清空 tmp/eval-runs 下的隔离目录，避免误删真实 sandbox。
+func resetSandbox(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("empty sandbox path")
+	}
+	if !strings.Contains(filepath.ToSlash(path), "/eval-runs/") {
+		return fmt.Errorf("refusing to reset non-eval sandbox: %s", path)
+	}
+	if err := os.RemoveAll(path); err != nil {
+		return err
+	}
+	return os.MkdirAll(path, 0o755)
 }
 
 func ratio(a, b int) float64 {

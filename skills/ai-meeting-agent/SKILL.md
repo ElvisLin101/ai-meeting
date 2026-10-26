@@ -53,7 +53,7 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 - 画像注入: `services/agent/context/assembler.go` 的 `renderProfile` 只渲染 active facts；旧 `ProfileExtractor` 已不再由 run 服务调用。
 - 当前边界: 确认项已有查询/确认接口和调试页入口；工具大结果尚未转 artifact ref。
 - 确定性 eval: `internal/eval/cases.json` + `go run ./cmd/eval`，覆盖路由（15）、画像规则（10）、画像冲突（5）；CI 在 race 测试后执行。
-- Live eval: `test/eval/live_cases.json` + `go run ./cmd/liveeval`，用真实模型和 MySQL/Redis 跑 10 条任务，输出 `tmp/live_eval_report.json`；需要配置和 key，不进 CI。
+- Live eval: `test/eval/live_cases.json` + `go run ./cmd/liveeval`，用真实模型和 MySQL/Redis 跑 10 条任务，输出 `tmp/live_eval_report.json`；默认 `-isolate=true` 使用独立 eval 用户和 `tmp/eval-runs/<label>/sandbox`，每个用例前清空 sandbox，并统计 `completed` / `quality_pass` / `avg_quality`；需要配置和 key，不进 CI。
 - 配额: `services/agent/run/quota.go` 用 Redis 计数控制单用户并发 run 与每日 token；`agent.quota.*` 配置，0 表示不限制；超限返回 `-4012`/429，Redis 故障降级放行。
 - 前端: `static/index.html` Agent tab 支持查看 run 详情（`context_report_json`/`plan_json`）和待确认画像的确认/拒绝。
 

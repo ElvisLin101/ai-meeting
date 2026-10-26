@@ -193,9 +193,11 @@ scripts/knowledge-check.sh diff
 
 `cmd/liveeval` 默认 `-agent-id 0`，模型配置来自 `config/config.yaml` 的 `ai.deepseek`；`-agent-id >0` 时改用 MySQL `ai_properties` 里的启用配置。key 也可用 `AI_DEEPSEEK_API_KEY` 覆盖。未配置 key 时会在启动前直接报错，不会空跑用例。
 
+默认 `-isolate=true`：每轮生成独立 eval 用户（`eval-<timestamp>-<pid>`）和独立 sandbox（`tmp/eval-runs/<label>/sandbox`），每个用例前清空 sandbox，避免文件、画像和历史 run 跨轮污染。需要复用固定用户/沙箱时用 `-isolate=false -username <name> -user-id <id>`。报告额外输出 `completed`、`quality_pass`、`avg_quality`；quality 按 rubric 关键词覆盖率统计，默认 `-quality-threshold 0.7`。
+
 - 单元测试覆盖：循环终止/熔断/重复动作、工具参数校验、沙箱路径逃逸、上下文预算与画像合并、路由鉴权
 - 确定性 eval：15 条路由、10 条画像规则、5 条冲突用例，CI 直接跑
-- Live eval：`cmd/liveeval` 用真实模型跑 10 条任务，输出 direct/plan 成功率、步数、token、延迟到 `tmp/live_eval_report.json`；需要 `config/config.yaml`、MySQL、Redis 和模型 key，不进 CI
+- Live eval：`cmd/liveeval` 用真实模型跑 10 条任务，输出 direct/plan 成功率、步数、token、延迟到 `tmp/live_eval_report.json`；默认隔离用户和 sandbox，需要 `config/config.yaml`、MySQL、Redis 和模型 key，不进 CI
 - 分布式组件：SingleFlight 单测 + 真实 Redis 集成测试 + 集群压测脚本
 - CI：gofmt → build → vet → race 测试 → eval → 覆盖率
 
