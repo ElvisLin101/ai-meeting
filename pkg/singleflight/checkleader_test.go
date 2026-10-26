@@ -75,9 +75,12 @@ func TestCheckLeader_LockExpiredWithResult(t *testing.T) {
 	g.redis.Set(ctx, resultKey, respBytes, ResultTTL)
 
 	last := ""
-	reason := g.checkLeader(ctx, lockKey, resultKey, progressKey, cancelKey, "CCHAN", &last)
+	got, reason := g.checkLeaderResult(ctx, lockKey, resultKey, progressKey, cancelKey, "CCHAN", &last)
 	if reason != followerGotResult {
 		t.Fatalf("reason = %d, want followerGotResult(%d)", reason, followerGotResult)
+	}
+	if got != "final" {
+		t.Fatalf("follower result = %v, want final", got)
 	}
 }
 
