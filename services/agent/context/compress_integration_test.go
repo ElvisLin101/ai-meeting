@@ -23,7 +23,7 @@ func withSQLMock(t *testing.T) sqlmock.Sqlmock {
 	}
 	gormDB, err := gorm.Open(gormmysql.New(gormmysql.Config{
 		Conn: sqlDB, SkipInitializeWithVersion: true,
-	}), &gorm.Config{})
+	}), &gorm.Config{SkipDefaultTransaction: true})
 	if err != nil {
 		t.Fatalf("gorm sqlmock: %v", err)
 	}
@@ -56,10 +56,8 @@ func TestCompressAdvancesBoundaryAndRebuildsRecent(t *testing.T) {
 	mock.ExpectQuery("SELECT \\* FROM `messages` WHERE session_id = \\? AND user_id = \\? ORDER BY sequence DESC").
 		WithArgs(sessionID, userID).
 		WillReturnRows(rows)
-	mock.ExpectBegin()
 	mock.ExpectExec("INSERT INTO `compressed_contexts`").
 		WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectCommit()
 
 	orig := callCompressAI
 	callCompressAI = func(ctx context.Context, writer *singleflight.StreamWriter, prevSummary, newText string) (string, error) {
