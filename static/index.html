@@ -168,11 +168,17 @@ pre { background: #f5f5f5; padding: 10px; border-radius: 4px; font-size: 12px; o
     </div>
     <div class="row">
       <button class="success" onclick="runAgent()">▶ 运行 Agent</button>
+      <button onclick="loadAgentConfirmations()">🧠 待确认画像</button>
+      <button onclick="loadAgentDetail()">🔍 查看 Run 详情</button>
       <span id="agentRunInfo" style="font-size:13px;color:#999;"></span>
     </div>
     <div class="row">
-      <textarea id="agentOutput" style="height:220px" readonly placeholder="Agent 输出..."></textarea>
+      <textarea id="agentOutput" style="height:180px" readonly placeholder="Agent 输出..."></textarea>
     </div>
+    <div class="row">
+      <textarea id="agentDetail" style="height:180px" readonly placeholder="ContextReport / PlanJSON..."></textarea>
+    </div>
+    <div id="agentConfirmations" style="margin-top:10px;"></div>
   </div>
 </div>
 
@@ -192,6 +198,7 @@ const BASE = '/api/xunzhi/v1';
 let token = '';
 let interviewSessionId = '';
 let aiSessionId = '';
+let lastAgentRunId = '';
 
 function api(method, path, body, isForm) {
   const opts = { method, headers: {} };
@@ -232,7 +239,9 @@ async function runAgent() {
   try {
     const r = await api('POST', '/agent/runs', { input: input });
     if (r.run_id) {
-      info.textContent = '✅ run=' + r.run_id + ' steps=' + r.steps + ' stop=' + r.stop_reason;
+      lastAgentRunId = r.run_id;
+      info.textContent = '✅ run=' + r.run_id + ' plan=' + (r.plan_mode || '-') +
+        ' steps=' + r.steps + ' tokens=' + r.tokens + ' stop=' + r.stop_reason;
       out.value = r.output || '(无输出)';
     } else {
       info.textContent = '❌ ' + (r.error || '运行失败');
@@ -240,6 +249,62 @@ async function runAgent() {
   } catch (e) {
     info.textContent = '❌ ' + e;
   }
+}
+
+function prettyJSON(text) {
+  try { return JSON.stringify(JSON.parse(text), null, 2); } catch (e) { return text || ''; }
+}
+
+async function loadAgentDetail() {
+  if (!lastAgentRunId) { alert('请先运行 Agent'); return; }
+  const area = document.getElementById('agentDetail');
+  const r = await api('GET', '/agent/runs/' + encodeURIComponent(lastAgentRunId));
+  if (!r || r.error) { area.value = '❌ ' + ((r && r.error) || '查询失败'); return; }
+  const parts = [
+    'run: ' + r.run_id,
+    'status: ' + r.status + '  stop: ' + r.stop_reason,
+    'steps: ' + r.steps + '  tokens: ' + r.tokens,
+  ];
+  if (r.plan_json) parts.push('--- PlanJSON ---\n' + prettyJSON(r.plan_json));
+  if (r.context_report_json) parts.push('--- ContextReport ---\n' + prettyJSON(r.context_report_json));
+  area.value = parts.join('\n\n');
+}
+
+async function loadAgentConfirmations() {
+  const area = document.getElementById('agentConfirmations');
+  area.replaceChildren();
+  const r = await api('GET', '/agent/memory/confirmations');
+  if (!Array.isArray(r)) {
+    area.textContent = '❌ ' + ((r && r.error) || '查询失败');
+    return;
+  }
+  if (r.length === 0) {
+    area.textContent = '没有待确认的画像项';
+    return;
+  }
+  r.forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const text = document.createElement('span');
+    text.textContent = '#' + item.id + ' [' + item.field + '/' + item.key + '] ' +
+      item.value + ' — ' + item.question;
+    const yes = document.createElement('button');
+    yes.textContent = '确认';
+    yes.onclick = () => resolveAgentConfirmation(item.id, 'confirm');
+    const no = document.createElement('button');
+    no.textContent = '拒绝';
+    no.onclick = () => resolveAgentConfirmation(item.id, 'reject');
+    row.appendChild(text);
+    row.appendChild(yes);
+    row.appendChild(no);
+    area.appendChild(row);
+  });
+}
+
+async function resolveAgentConfirmation(id, action) {
+  const r = await api('POST', '/agent/memory/confirmations/' + id + '/resolve', { action: action });
+  if (r && r.error) { alert('❌ ' + r.error); return; }
+  await loadAgentConfirmations();
 }
 
 // === 面试 ===
