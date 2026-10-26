@@ -52,6 +52,13 @@ type AgentConfig struct {
 	Search              SearchConfig  `mapstructure:"search"`
 	Plan                PlanConfig    `mapstructure:"plan"`
 	Context             ContextConfig `mapstructure:"context"`
+	Quota               QuotaConfig   `mapstructure:"quota"`
+}
+
+// QuotaConfig Agent 并发/用量配额；0 表示不限制。
+type QuotaConfig struct {
+	MaxConcurrentRuns int `mapstructure:"max_concurrent_runs"`
+	DailyTokenLimit   int `mapstructure:"daily_token_limit"`
 }
 
 // ContextConfig 上下文 token 预算配置
@@ -153,6 +160,8 @@ func LoadConfig() error {
 	viper.SetDefault("agent.context.summary_max_tokens", 1000)
 	viper.SetDefault("agent.context.recent_max_tokens", 6000)
 	viper.SetDefault("agent.context.compress_threshold_tokens", 4800)
+	viper.SetDefault("agent.quota.max_concurrent_runs", 0)
+	viper.SetDefault("agent.quota.daily_token_limit", 0)
 	viper.SetDefault("agent.search.provider", "tavily")
 	viper.SetDefault("agent.search.endpoint", "https://api.tavily.com/search")
 	viper.SetDefault("agent.search.api_key", "")
