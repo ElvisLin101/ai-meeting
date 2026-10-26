@@ -52,6 +52,7 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 - L2 consolidation: `services/agent/context/profile_consolidate.go` 每 3 个用户回合或 pending 候选 ≥5 触发；输入当前 active facts、候选和最近 user/assistant 对话，输出 `ProfileDiff`；`services/agent/context/profile_apply.go` 负责 add/update/supersede/ask_confirm，冲突低置信不覆盖；`user_profiles` 用 version CAS 更新，确认项落 `profile_confirmations`，审计落 `profile_events`。
 - 画像注入: `services/agent/context/assembler.go` 的 `renderProfile` 只渲染 active facts；旧 `ProfileExtractor` 已不再由 run 服务调用。
 - 当前边界: 确认项已有查询/确认接口和调试页入口；工具大结果尚未转 artifact ref。
+- 后台任务: `CompressAsync` / `ConsolidateAsync` 走 `services/agent/context/workers.go` 的 worker pool；`main.go` 停机时先 cancel + Wait，再关 DB/Redis，避免异步任务丢写。
 - 确定性 eval: `internal/eval/cases.json` + `go run ./cmd/eval`，覆盖路由（15）、画像规则（10）、画像冲突（5）；CI 在 race 测试后执行。
 - Live eval: `test/eval/live_cases.json` + `go run ./cmd/liveeval`，用真实模型和 MySQL/Redis 跑 10 条任务，输出 `tmp/live_eval_report.json`；默认 `-isolate=true` 使用独立 eval 用户和 `tmp/eval-runs/<label>/sandbox`，每个用例前清空 sandbox；用例支持 `seed_files` 夹具和 `max_plan_steps`，`-judge` 开启 LLM 逐条语义评分；统计 `completed` / `quality_pass` / `avg_quality` / `judge_pass` / `avg_judge_score`；需要配置和 key，不进 CI。
 - 配额: `services/agent/run/quota.go` 用 Redis 计数控制单用户并发 run 与每日 token；`agent.quota.*` 配置，0 表示不限制；超限返回 `-4012`/429，Redis 故障降级放行。
@@ -62,6 +63,7 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 - 入口: `services/agent/loop/loop.go` 中 `l.batch.Execute(runCtx, tc, resp.ToolCalls)`。
 - 策略: 整批工具都实现 `MetaProvider` 且 `Meta().ConcurrencySafe=true` → 并行（信号量限制 `agent.max_parallel_tools`）；否则整批串行。
 - 结果: 按原始 `ToolCalls` 顺序返回，`tool` message 的 `tool_call_id` 与模型返回的 call id 对齐；单个失败不取消同批其他调用。
+- 截断: `services/agent/tools/executor.go` 按 UTF-8 字节预算切结果，保证不破坏多字节字符；默认 32KB。
 - 事件: `tool_call` / `tool_result` 新增 `CallID`，便于前端在同一步多个并发调用时关联。
 - 只读且无共享状态的工具（`pdf_parse`、`file_list`、`file_read`、`web_search`、`web_fetch`）已声明 `ConcurrencySafe=true`；写文件、面试状态推进默认不声明，保持串行。
 - 搜索/抓取: `web_search` 支持 `deepseek` / `tavily` / `serper`；`deepseek` 复用 `ai.deepseek.api_key`，搜索走 `/v1/tools/search`，`web_fetch` 走 `/v1/tools/fetch` 返回 Markdown。`web_fetch` 只放行公网 http/https，拒绝 localhost/内网/元数据 IP/非标准端口，正文截断 12000 rune 并标记不可信。

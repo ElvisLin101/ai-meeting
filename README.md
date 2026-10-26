@@ -69,7 +69,7 @@
 - 工具连续失败达到上限（默认 3）
 - ctx 取消 / 总超时（默认 120s）
 
-**工具执行统一收口**：JSON Schema 校验（required + 顶层类型）、单工具超时、panic recovery、结果 32KB 截断、审计日志。
+**工具执行统一收口**：JSON Schema 校验（required + 顶层类型）、单工具超时、panic recovery、结果 32KB 字节预算截断（按 UTF-8 边界，不切坏多字节字符）、审计日志。
 
 **单步工具批调度**：同一条 assistant 消息里的多个 tool call 默认并行；只有整批工具都声明 `ConcurrencySafe` 才并行，任一工具未声明（如写文件、面试状态推进）则整批串行。结果按原始 call 顺序回填，单个工具失败不取消同批兄弟调用。并行上限由 `agent.max_parallel_tools` 控制（默认 4）。
 
@@ -174,7 +174,7 @@ open http://localhost:8080
 mysql -uroot -p -e "CREATE DATABASE IF NOT EXISTS ai_meeting DEFAULT CHARSET utf8mb4;"
 # 2. 配置
 cp config/config.example.yaml config/config.yaml
-# 3. 运行（启动时 AutoMigrate 自动建表）
+# 3. 运行（启动时 AutoMigrate 自动建表；迁移失败会阻断启动）
 go run main.go
 ```
 
@@ -201,7 +201,7 @@ scripts/knowledge-check.sh diff
 - 确定性 eval：15 条路由、10 条画像规则、5 条冲突用例，CI 直接跑
 - Live eval：`cmd/liveeval` 用真实模型跑 10 条任务，输出 direct/plan 成功率、步数、token、延迟到 `tmp/live_eval_report.json`；默认隔离用户和 sandbox，需要 `config/config.yaml`、MySQL、Redis 和模型 key，不进 CI
 - 分布式组件：SingleFlight 单测 + 真实 Redis 集成测试 + 集群压测脚本
-- CI：gofmt → build → vet → race 测试 → eval → 覆盖率
+- CI：gofmt → build → vet → race 测试 → eval → 覆盖率（低于 35% 失败）
 
 ## 已知边界
 
