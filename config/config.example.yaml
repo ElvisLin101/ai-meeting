@@ -47,6 +47,9 @@ agent:
     summary_max_tokens: 1000
     recent_max_tokens: 6000
     compress_threshold_tokens: 4800  # 未压缩对话超过该 token 开始压缩
+  quota:
+    max_concurrent_runs: 0      # 单用户并发 run 上限，0 不限制
+    daily_token_limit: 0        # 单用户每日 token 上限，0 不限制
   search:
     provider: "tavily"          # tavily | serper
     endpoint: "https://api.tavily.com/search"

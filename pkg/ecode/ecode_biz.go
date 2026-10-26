@@ -44,6 +44,7 @@ const (
 	ErrAgentSandboxViolation = -4009 // 文件操作越界(沙箱)
 	ErrAgentInvalidInput     = -4010 // Agent 入参非法
 	ErrAgentProfileInvalid   = -4011 // 画像/身份数据非法
+	ErrAgentQuotaExceeded    = -4012 // Agent 并发/用量超限
 )
 
 // init 注册业务码的 HTTP 状态码
@@ -80,4 +81,5 @@ func init() {
 	RegisterHTTPStatus(ErrAgentSandboxViolation, http.StatusBadRequest)
 	RegisterHTTPStatus(ErrAgentInvalidInput, http.StatusBadRequest)
 	RegisterHTTPStatus(ErrAgentProfileInvalid, http.StatusBadRequest)
+	RegisterHTTPStatus(ErrAgentQuotaExceeded, http.StatusTooManyRequests)
 }

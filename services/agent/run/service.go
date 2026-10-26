@@ -61,6 +61,7 @@ type Service struct {
 	assembler *agentctx.Assembler
 	cfg       config.AgentConfig
 	planCfg   planpkg.Config
+	quota     config.QuotaConfig
 }
 
 var serviceInstance *Service
@@ -106,6 +107,7 @@ func GetService() *Service {
 				RouteMinScore:    cfg.Plan.RouteMinScore,
 				FastPathRunes:    cfg.Plan.FastPathRunes,
 			},
+			quota: cfg.Quota,
 		}
 	}
 	return serviceInstance
@@ -138,7 +140,9 @@ func (s *Service) Start(ctx context.Context, req StartRequest) (*StartResult, er
 	}
 	key := dedupKey(req)
 	result, err := repositories.SingleFlight.Do(ctx, key, func(ctx context.Context, _ *singleflight.StreamWriter) (interface{}, error) {
-		return s.execute(ctx, req, nil)
+		return s.runWithQuota(ctx, req.Username, func() (*StartResult, error) {
+			return s.execute(ctx, req, nil)
+		})
 	})
 	if err != nil {
 		return nil, err
@@ -183,7 +187,9 @@ func (s *Service) StartStream(ctx context.Context, req StartRequest, emit func(l
 		return nil, err
 	}
 	defer release()
-	return s.execute(ctx, req, emit)
+	return s.runWithQuota(ctx, req.Username, func() (*StartResult, error) {
+		return s.execute(ctx, req, emit)
+	})
 }
 
 // execute 核心执行流程
