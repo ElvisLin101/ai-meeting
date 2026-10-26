@@ -4,81 +4,158 @@
       "id": "greeting",
       "input": "你好，介绍一下你能帮我做什么",
       "expect_plan": "direct",
-      "must_contain": ["你好"],
-      "rubric": ["帮助", "能力"],
+      "must_contain": [],
+      "rubric": [
+        "帮助",
+        "能力"
+      ],
       "max_steps": 8
     },
     {
       "id": "simple_explain",
       "input": "用一句话解释什么是 REST API",
       "expect_plan": "direct",
-      "must_contain": ["API"],
-      "rubric": ["HTTP", "资源"],
+      "must_contain": [
+        "API"
+      ],
+      "rubric": [
+        "HTTP",
+        "资源"
+      ],
       "max_steps": 8
     },
     {
       "id": "resume_rewrite",
       "input": "帮我改写简历里的项目经历，突出后端性能优化和量化结果",
       "expect_plan": "plan",
-      "must_contain": ["简历", "项目"],
-      "rubric": ["性能", "量化", "建议"],
-      "max_steps": 10
+      "must_contain": [
+        "简历",
+        "项目"
+      ],
+      "rubric": [
+        "性能",
+        "量化",
+        "建议"
+      ],
+      "max_steps": 10,
+      "seed_files": {
+        "resume.md": "# 张明 - 后端开发工程师\n\n## 项目经历\n\n### 1. 电商订单服务（2023.03-2024.06，核心开发）\n- 背景：大促期间订单查询接口 P99 2.8s，数据库 CPU 85%。\n- 动作：引入 Redis 多级缓存，热点订单缓存 10 分钟；订单列表改为游标分页；慢 SQL 增加联合索引并拆分大事务。\n- 结果：P99 从 2.8s 降到 320ms，数据库 CPU 降到 45%，大促峰值 QPS 从 3k 提升到 12k，订单超时率从 1.2% 降到 0.15%。\n\n### 2. 支付回调网关（2022.01-2023.02，后端负责人）\n- 背景：第三方回调重复率高，日均 200 万次，重复支付投诉每月 30+。\n- 动作：基于 Redis SETNX + 数据库唯一键做幂等；回调处理改为异步队列，失败重试 3 次并告警。\n- 结果：重复支付投诉降到 0，回调成功率 99.97%，平均处理延迟从 800ms 降到 120ms。\n\n## 技能\nGo、MySQL、Redis、Kafka、Kubernetes\n"
+      },
+      "max_plan_steps": 24
     },
     {
       "id": "company_compare",
-      "input": "对比三家公司的后端岗位要求，并给出准备建议",
+      "input": "对比字节跳动、腾讯、阿里巴巴三家公司的后端岗位要求，并给出准备建议",
       "expect_plan": "plan",
-      "must_contain": ["公司", "建议"],
-      "rubric": ["对比", "技能", "准备"],
-      "max_steps": 10
+      "must_contain": [
+        "公司",
+        "建议"
+      ],
+      "rubric": [
+        "对比",
+        "技能",
+        "准备"
+      ],
+      "max_steps": 10,
+      "seed_files": {
+        "jd-bytedance.md": "# 字节跳动 - 后端开发工程师\n- 3 年以上后端经验，熟练掌握 Go 或 Java。\n- 熟悉 MySQL、Redis、消息队列，具备高并发系统设计经验。\n- 有微服务、服务治理、稳定性建设经验优先。\n- 负责核心业务服务的设计、开发与性能优化。\n- 要求具备良好的问题定位和跨团队沟通能力。\n",
+        "jd-tencent.md": "# 腾讯 - 后台开发工程师\n- 本科及以上学历，3 年以上后台开发经验。\n- 熟悉 Go/C++，理解 TCP/IP、HTTP 等网络协议。\n- 熟悉分布式存储、缓存、消息队列，有海量服务经验优先。\n- 负责后台架构设计、容灾与性能优化。\n- 要求有较强的责任心和系统性排查能力。\n",
+        "jd-alibaba.md": "# 阿里巴巴 - 后端开发工程师\n- 熟悉 Java 或 Go，具备扎实的计算机基础。\n- 熟悉分布式系统、微服务、中间件（RPC/MQ/缓存）。\n- 有高可用、容量规划、线上故障处理经验。\n- 负责交易/支付等核心链路的服务研发。\n- 要求具备业务抽象能力和技术方案落地能力。\n"
+      },
+      "max_plan_steps": 24
     },
     {
       "id": "study_plan",
       "input": "制定一个两周的 Go 后端复习计划",
       "expect_plan": "direct",
-      "must_contain": ["Go", "计划"],
-      "rubric": ["两周", "复习"],
+      "must_contain": [
+        "Go",
+        "计划"
+      ],
+      "rubric": [
+        "两周",
+        "复习"
+      ],
       "max_steps": 8
     },
     {
       "id": "resume_jd_interview",
       "input": "先分析我的简历优势，再对比字节后端 JD，最后给出面试准备计划",
       "expect_plan": "plan",
-      "must_contain": ["简历", "计划"],
-      "rubric": ["优势", "JD", "面试"],
-      "max_steps": 12
+      "must_contain": [
+        "简历",
+        "计划"
+      ],
+      "rubric": [
+        "优势",
+        "JD",
+        "面试"
+      ],
+      "max_steps": 12,
+      "seed_files": {
+        "resume.md": "# 张明 - 后端开发工程师\n\n## 项目经历\n\n### 1. 电商订单服务（2023.03-2024.06，核心开发）\n- 背景：大促期间订单查询接口 P99 2.8s，数据库 CPU 85%。\n- 动作：引入 Redis 多级缓存，热点订单缓存 10 分钟；订单列表改为游标分页；慢 SQL 增加联合索引并拆分大事务。\n- 结果：P99 从 2.8s 降到 320ms，数据库 CPU 降到 45%，大促峰值 QPS 从 3k 提升到 12k，订单超时率从 1.2% 降到 0.15%。\n\n### 2. 支付回调网关（2022.01-2023.02，后端负责人）\n- 背景：第三方回调重复率高，日均 200 万次，重复支付投诉每月 30+。\n- 动作：基于 Redis SETNX + 数据库唯一键做幂等；回调处理改为异步队列，失败重试 3 次并告警。\n- 结果：重复支付投诉降到 0，回调成功率 99.97%，平均处理延迟从 800ms 降到 120ms。\n\n## 技能\nGo、MySQL、Redis、Kafka、Kubernetes\n",
+        "jd-bytedance.md": "# 字节跳动 - 后端开发工程师\n- 3 年以上后端经验，熟练掌握 Go 或 Java。\n- 熟悉 MySQL、Redis、消息队列，具备高并发系统设计经验。\n- 有微服务、服务治理、稳定性建设经验优先。\n- 负责核心业务服务的设计、开发与性能优化。\n- 要求具备良好的问题定位和跨团队沟通能力。\n"
+      },
+      "max_plan_steps": 24
     },
     {
       "id": "tech_compare",
       "input": "分析一下 REST 和 GraphQL 的主要区别",
       "expect_plan": "direct",
-      "must_contain": ["REST", "GraphQL"],
-      "rubric": ["区别", "查询", "接口"],
+      "must_contain": [
+        "REST",
+        "GraphQL"
+      ],
+      "rubric": [
+        "区别",
+        "查询",
+        "接口"
+      ],
       "max_steps": 8
     },
     {
       "id": "interview_research",
       "input": "调研 Go 后端常见面试题，并总结成复习清单",
       "expect_plan": "plan",
-      "must_contain": ["面试", "复习"],
-      "rubric": ["Go", "清单", "知识点"],
-      "max_steps": 10
+      "must_contain": [
+        "面试",
+        "复习"
+      ],
+      "rubric": [
+        "Go",
+        "清单",
+        "知识点"
+      ],
+      "max_steps": 10,
+      "max_plan_steps": 24
     },
     {
       "id": "preference_follow",
       "input": "以后回答都用中文，先给结论",
       "expect_plan": "direct",
-      "must_contain": ["中文"],
-      "rubric": ["结论"],
+      "must_contain": [
+        "中文"
+      ],
+      "rubric": [
+        "结论"
+      ],
       "max_steps": 8
     },
     {
       "id": "cache_selection",
       "input": "分别比较 Redis 和 MySQL 在缓存场景下的优劣，然后给出选型建议",
       "expect_plan": "plan",
-      "must_contain": ["Redis", "MySQL"],
-      "rubric": ["缓存", "优劣", "选型"],
-      "max_steps": 10
+      "must_contain": [
+        "Redis",
+        "MySQL"
+      ],
+      "rubric": [
+        "缓存",
+        "优劣",
+        "选型"
+      ],
+      "max_steps": 10,
+      "max_plan_steps": 24
     }
   ]
 }
