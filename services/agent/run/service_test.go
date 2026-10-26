@@ -87,3 +87,28 @@ func TestBuildContextHint(t *testing.T) {
 		t.Fatalf("recent user message should not be in hint: %q", hint)
 	}
 }
+
+func TestDecodeStartResult(t *testing.T) {
+	want := &StartResult{RunID: "r1", Status: "completed", PlanMode: "direct"}
+	got, err := decodeStartResult(want)
+	if err != nil || got != want {
+		t.Fatalf("pointer result should pass through: %v %+v", err, got)
+	}
+
+	got, err = decodeStartResult(map[string]interface{}{
+		"run_id": "r2", "status": "completed", "plan_mode": "plan", "steps": float64(2),
+	})
+	if err != nil {
+		t.Fatalf("map result should decode: %v", err)
+	}
+	if got.RunID != "r2" || got.PlanMode != "plan" || got.Steps != 2 {
+		t.Fatalf("unexpected decoded result: %+v", got)
+	}
+
+	if _, err := decodeStartResult(nil); err == nil {
+		t.Fatal("nil result should error")
+	}
+	if _, err := decodeStartResult("bad"); err == nil {
+		t.Fatal("unexpected type should error")
+	}
+}
