@@ -81,7 +81,9 @@ func RebuildRecentMessages(ctx context.Context, sessionID string, messages []mod
 	pipe := RedisClient.Pipeline()
 	pipe.Del(ctx, key)
 	if len(messages) > 0 {
-		for i := len(messages) - 1; i >= 0; i-- {
+		// messages 是时间正序；LPUSH 旧→新，最终 List 头是最新，
+		// 与 PushRecentMessage 的写入顺序一致。GetRecentMessages 再反转成正序。
+		for i := 0; i < len(messages); i++ {
 			payload, err := json.Marshal(messages[i])
 			if err != nil {
 				continue
