@@ -6,6 +6,7 @@ import (
 	"ai-meeting/models"
 	"ai-meeting/repositories"
 	mysqlrepo "ai-meeting/repositories/mysql"
+	agentctx "ai-meeting/services/agent/context"
 	"ai-meeting/services/metric"
 	"context"
 	"log"
@@ -34,6 +35,7 @@ func main() {
 	}
 
 	repositories.InitRedis()
+	agentctx.StartAsyncWorkers(context.Background())
 
 	// 注入 singleflight 指标回调
 	metricSvc := metric.GetMetricService()
@@ -83,10 +85,17 @@ func main() {
 		_ = srv.Close() // 超时后强制关闭剩余连接
 	}
 
-	// 2. 排空指标 buffer 落库(必须在关 DB 之前)
+	// 2. 停止后台压缩/画像任务，等它们退出后再关 DB/Redis
+	workerCtx, workerCancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	if err := agentctx.ShutdownAsyncWorkers(workerCtx); err != nil {
+		logrus.Warnf("Async workers did not stop in time: %v", err)
+	}
+	workerCancel()
+
+	// 3. 排空指标 buffer 落库(必须在关 DB 之前)
 	metricSvc.Stop()
 
-	// 3. 关闭底层连接
+	// 4. 关闭底层连接
 	closeConnections()
 
 	logrus.Info("Server exited")

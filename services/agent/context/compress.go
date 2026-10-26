@@ -44,8 +44,8 @@ func CompressAsync(sessionID, userID string, thresholdTokens int) {
 	if thresholdTokens <= 0 {
 		thresholdTokens = 4800
 	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	runAsync(func(parent context.Context) {
+		ctx, cancel := context.WithTimeout(parent, 120*time.Second)
 		defer cancel()
 
 		sfKey := "compress:agent:" + sessionID + ":" + userID
@@ -55,7 +55,7 @@ func CompressAsync(sessionID, userID string, thresholdTokens int) {
 		if err != nil {
 			logrus.Warnf("[agent-ctx] compress failed session=%s err=%v", sessionID, err)
 		}
-	}()
+	})
 }
 
 // CompressIfNeeded 同步执行一次压缩检查，供装配前 preflight 使用。

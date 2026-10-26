@@ -47,8 +47,8 @@ func ConsolidateAsync(userID, sessionID string) {
 	if userID == "" || sessionID == "" {
 		return
 	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	runAsync(func(parent context.Context) {
+		ctx, cancel := context.WithTimeout(parent, 90*time.Second)
 		defer cancel()
 
 		sfKey := "profile:consolidate:" + userID
@@ -58,7 +58,7 @@ func ConsolidateAsync(userID, sessionID string) {
 		if err != nil {
 			logrus.Warnf("[agent-profile] consolidate failed user=%s err=%v", userID, err)
 		}
-	}()
+	})
 }
 
 // ConsolidateIfNeeded 在满足触发条件时执行一次 consolidation。
