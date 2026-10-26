@@ -156,7 +156,8 @@ func splitConversationByTokens(messages []models.Message, keepTokens int) (oldMe
 	return messages[tailCount:], messages[:tailCount]
 }
 
-func callCompressAI(ctx context.Context, writer *singleflight.StreamWriter, prevSummary, newText string) (string, error) {
+// callCompressAI 抽成变量便于测试注入假压缩器。
+var callCompressAI = func(ctx context.Context, writer *singleflight.StreamWriter, prevSummary, newText string) (string, error) {
 	if strings.TrimSpace(prevSummary) == "" {
 		prevSummary = "（无）"
 	}
