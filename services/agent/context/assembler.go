@@ -48,29 +48,35 @@ func (a *Assembler) Build(ctx context.Context, in BuildInput) (*Assembled, error
 
 	out := &Assembled{CoveredThroughSeq: covered}
 	used := 0
-	addSystem := func(content string, maxTokens int) {
+	addSystem := func(content string, maxTokens int) int {
 		content = truncateToTokens(content, maxTokens)
 		if strings.TrimSpace(content) == "" {
-			return
+			return 0
 		}
 		out.Messages = append(out.Messages, Message{Role: "system", Content: content})
-		used += EstimateMessageTokens("system", content)
+		tokens := EstimateMessageTokens("system", content)
+		used += tokens
+		return tokens
 	}
 
 	// identity：稳定前缀，永不丢弃，只按上限截断。
-	addSystem(buildIdentityPrompt(identity), a.cfg.IdentityMaxTokens)
+	identityTokens := addSystem(buildIdentityPrompt(identity), a.cfg.IdentityMaxTokens)
 
 	// profile：结构化长期记忆，按上限截断。
+	profileTokens := 0
+	profileFacts := 0
 	if profile != nil {
-		if raw, err := json.Marshal(profile); err == nil {
-			addSystem("【用户画像（跨会话结构化记忆）】\n"+string(raw), a.cfg.ProfileMaxTokens)
+		if text := renderProfile(profile); text != "" {
+			profileTokens = addSystem(text, a.cfg.ProfileMaxTokens)
 			out.UsedProfile = true
+			profileFacts = len(profile.ActiveFacts())
 		}
 	}
 
 	// summary：中期压缩记忆；与 recent 以 CoveredThroughSeq 为界，不重叠。
+	summaryTokens := 0
 	if summary != "" {
-		addSystem("【远期对话摘要（更早的对话已压缩）】\n"+summary, a.cfg.SummaryMaxTokens)
+		summaryTokens = addSystem("【远期对话摘要（更早的对话已压缩）】\n"+summary, a.cfg.SummaryMaxTokens)
 		out.UsedSummary = true
 	}
 
@@ -92,11 +98,28 @@ func (a *Assembler) Build(ctx context.Context, in BuildInput) (*Assembled, error
 	}
 	picked, dropped := selectRecentByTokens(recentMessages, remaining)
 	out.Messages = append(out.Messages, picked...)
+	recentTokens := EstimateMessagesTokens(picked)
 	out.RecentMessages = len(picked)
 	out.DroppedMessages = dropped
-	out.TotalTokens = used + EstimateMessagesTokens(picked)
+	out.TotalTokens = used + recentTokens
 	for _, m := range out.Messages {
 		out.TotalBytes += len(m.Role) + len(m.Content)
+	}
+	out.Report = Report{
+		Mode:              "root",
+		BudgetTokens:      a.cfg.PromptBudgetTokens,
+		UsedTokens:        out.TotalTokens,
+		IdentityTokens:    identityTokens,
+		ProfileTokens:     profileTokens,
+		SummaryTokens:     summaryTokens,
+		RecentTokens:      recentTokens,
+		RecentMessages:    out.RecentMessages,
+		DroppedMessages:   out.DroppedMessages,
+		ProfileFacts:      profileFacts,
+		UsedProfile:       out.UsedProfile,
+		UsedSummary:       out.UsedSummary,
+		CoveredThroughSeq: covered,
+		GeneratedAt:       nowString(),
 	}
 	return out, nil
 }
@@ -137,6 +160,30 @@ func selectRecentByTokens(messages []Message, budget int) ([]Message, int) {
 		selected[i], selected[j] = selected[j], selected[i]
 	}
 	return selected, len(messages) - len(selected)
+}
+
+// renderProfile 渲染 active facts；没有 facts 时回退到旧 JSON 画像。
+func renderProfile(p *UserProfileData) string {
+	if p == nil {
+		return ""
+	}
+	facts := p.ActiveFacts()
+	if len(facts) == 0 {
+		raw, err := json.Marshal(p)
+		if err != nil {
+			return ""
+		}
+		return "【用户画像（跨会话结构化记忆）】\n" + string(raw)
+	}
+	var b strings.Builder
+	b.WriteString("【用户画像（结构化长期记忆）】\n")
+	for i, f := range facts {
+		if i >= 30 {
+			break
+		}
+		fmt.Fprintf(&b, "- [%s] %s（置信度 %.2f）\n", displayFactKey(f), f.Value, f.Confidence)
+	}
+	return b.String()
 }
 
 // buildIdentityPrompt 生成 Agent 自我定位 system prompt

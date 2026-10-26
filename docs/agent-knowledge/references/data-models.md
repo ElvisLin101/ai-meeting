@@ -35,9 +35,10 @@ Redis 热数据（`repositories/redis_hot.go`）：
 `models/agent_runtime.go`
 
 - `AgentRun` -> MySQL `agent_runs`
-  - `RunID`(唯一), `SessionID`, `UserID`, `AgentID`, `Input`, `Output`, `PlanJSON`, `Status`, `StopReason`, `Steps`, `Tokens`, `Error`, 起止时间
+  - `RunID`(唯一), `SessionID`, `UserID`, `AgentID`, `Input`, `Output`, `PlanJSON`, `ContextReportJSON`, `Status`, `StopReason`, `Steps`, `Tokens`, `Error`, 起止时间
   - `PlanJSON` 保存 Plan-and-Execute 的任务图与每个任务的最终状态；线性 ReAct 时为空。
   - `PlanJSON` 内任务包含 `idempotency_key`、`attempts`、`status`、`result`、`error`；计划包含 `version`、`replan_count`。
+  - `ContextReportJSON` 保存本次根上下文装配的预算/各段 token/丢弃条数/压缩边界/画像事实数。
 - `AgentStep` -> MySQL `agent_steps`
   - `RunID` + `StepIndex` 唯一；`Thought`, `Action`, `ActionInput`, `Observation`, `Status`, `DurationMs`, `Error`
   - 用于按 run 回放，回答「Agent 为什么跑偏」。
@@ -52,11 +53,15 @@ Redis 热数据（`repositories/redis_hot.go`）：
 
 - `UserProfile` -> MySQL `user_profiles`
   - `UserID` 唯一；`ProfileJSON` 结构见 `services/agent/context/types.go` 的 `UserProfileData`
-  - 字段: preferences / goals / constraints / background / confidence / version / schema_version / last_consolidated_seq / updated_at
-  - MySQL 是画像真相源，Redis `user:{uid}:profile` 只是缓存。
+  - 字段: facts（结构化事实）/ preferences / goals / constraints / background / confidence / version / schema_version / last_consolidated_seq / updated_at
+  - MySQL 是画像真相源，Redis `user:{uid}:profile` 只是缓存；L2 用 version CAS 更新。
 - `ProfileCandidate` -> MySQL `profile_candidates`
   - L1 规则候选：`user_id`, `session_id`, `message_id`, `field`, `quote`, `rule`, `confidence`, `status`(pending/promoted/rejected)
   - `value_hash` 唯一，保证同一条消息同一字段不会重复入候选；L2 consolidation 才写正式画像。
+- `ProfileConfirmation` -> MySQL `profile_confirmations`
+  - L2 冲突/模糊项：`user_id`, `field`, `key`, `value`, `question`, `status`(pending/confirmed/rejected)
+- `ProfileEvent` -> MySQL `profile_events`
+  - 每次 L2 consolidation 的审计：`user_id`, `reason`, `diff_json`, `created_at`
 - `AgentIdentity` -> MySQL `agent_identities`
   - `AgentID` 唯一；`IdentityJSON` 结构见 `AgentIdentityData`
   - 字段: name / role / capabilities / boundaries / interaction_style / self_reflection / version

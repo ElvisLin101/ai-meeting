@@ -33,16 +33,18 @@ type AgentRun struct {
 	Input     string `gorm:"type:longtext" json:"input"`
 	Output    string `gorm:"type:longtext" json:"output"`
 	// PlanJSON 保存 Plan-and-Execute 的任务图与每个任务的最终状态；线性 ReAct 时为空。
-	PlanJSON   string     `gorm:"type:longtext" json:"plan_json"`
-	Status     string     `gorm:"size:32;index;not null" json:"status"`
-	StopReason string     `gorm:"size:64" json:"stop_reason"`
-	Steps      int        `gorm:"default:0" json:"steps"`
-	Tokens     int        `gorm:"default:0" json:"tokens"`
-	Error      string     `gorm:"type:text" json:"error"`
-	StartedAt  time.Time  `json:"started_at"`
-	FinishedAt *time.Time `json:"finished_at"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	PlanJSON string `gorm:"type:longtext" json:"plan_json"`
+	// ContextReportJSON 保存本次根上下文装配的 token/丢弃/压缩/画像快照。
+	ContextReportJSON string     `gorm:"type:longtext" json:"context_report_json"`
+	Status            string     `gorm:"size:32;index;not null" json:"status"`
+	StopReason        string     `gorm:"size:64" json:"stop_reason"`
+	Steps             int        `gorm:"default:0" json:"steps"`
+	Tokens            int        `gorm:"default:0" json:"tokens"`
+	Error             string     `gorm:"type:text" json:"error"`
+	StartedAt         time.Time  `json:"started_at"`
+	FinishedAt        *time.Time `json:"finished_at"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
 // TableName 指定表名
@@ -100,6 +102,34 @@ type ProfileCandidate struct {
 
 // TableName 指定表名
 func (ProfileCandidate) TableName() string { return "profile_candidates" }
+
+// ProfileConfirmation 保存需要用户确认的模糊/冲突画像项。
+type ProfileConfirmation struct {
+	ID         uint       `gorm:"primaryKey" json:"id"`
+	UserID     string     `gorm:"size:128;index;not null" json:"user_id"`
+	Field      string     `gorm:"size:64" json:"field"`
+	Key        string     `gorm:"size:64" json:"key"`
+	Value      string     `gorm:"type:text" json:"value"`
+	Question   string     `gorm:"type:text" json:"question"`
+	Status     string     `gorm:"size:32;index;default:'pending'" json:"status"` // pending/confirmed/rejected
+	CreatedAt  time.Time  `json:"created_at"`
+	ResolvedAt *time.Time `json:"resolved_at"`
+}
+
+// TableName 指定表名
+func (ProfileConfirmation) TableName() string { return "profile_confirmations" }
+
+// ProfileEvent 记录每次 L2 consolidation 的审计摘要。
+type ProfileEvent struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	UserID    string    `gorm:"size:128;index;not null" json:"user_id"`
+	Reason    string    `gorm:"size:255" json:"reason"`
+	DiffJSON  string    `gorm:"type:longtext" json:"diff_json"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// TableName 指定表名
+func (ProfileEvent) TableName() string { return "profile_events" }
 
 // AgentIdentity Agent 自我定位（静态 persona + 低频自省）
 type AgentIdentity struct {

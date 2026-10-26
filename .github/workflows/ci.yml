@@ -47,6 +47,9 @@ jobs:
       - name: Test
         run: go test -race ./...
 
+      - name: Deterministic eval
+        run: go run ./cmd/eval
+
       - name: Coverage
         run: |
           go test -coverprofile=coverage.out ./... > /dev/null

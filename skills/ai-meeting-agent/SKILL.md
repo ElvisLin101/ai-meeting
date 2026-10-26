@@ -47,8 +47,15 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 - 存储: 短期 Redis List + MySQL `messages` 全量；中期 Redis summary + MySQL `compressed_contexts`（一会话一行，UPDATE）；长期 Redis JSON + MySQL `user_profiles.profile_json`。
 - Redis 裁剪不变量: `PushRecentMessage` 不再 LTRIM；未摘要覆盖的消息不能从 Redis 丢弃，压缩推进边界后再重建列表。
 - 配置: `agent.context.*`（model_window_tokens / max_output_tokens / soft_limit_tokens / reserve_tokens / profile_max_tokens / summary_max_tokens / recent_max_tokens / compress_threshold_tokens）。
+- ContextReport: `services/agent/context/assembler.go` 产出 `Report`（预算/各段 token/丢弃条数/covered seq/画像事实数），`services/agent/run/service.go` 写入 `agent_runs.context_report_json`，run 详情接口透出。
 - L1 候选: `services/agent/context/profile_rules.go` 在每个用户消息落库后异步跑规则，写入 MySQL `profile_candidates`（不调用 LLM、不改正式画像）；`value_hash` 去重。
-- 当前边界: L2 consolidation（每 N 轮 / 候选阈值触发、diff、冲突/确认）尚未实现；正式画像仍由旧 `ProfileExtractor` 每 run 抽取 + last-write-wins。工具大结果尚未转 artifact ref。
+- L2 consolidation: `services/agent/context/profile_consolidate.go` 每 3 个用户回合或 pending 候选 ≥5 触发；输入当前 active facts、候选和最近 user/assistant 对话，输出 `ProfileDiff`；`services/agent/context/profile_apply.go` 负责 add/update/supersede/ask_confirm，冲突低置信不覆盖；`user_profiles` 用 version CAS 更新，确认项落 `profile_confirmations`，审计落 `profile_events`。
+- 画像注入: `services/agent/context/assembler.go` 的 `renderProfile` 只渲染 active facts；旧 `ProfileExtractor` 已不再由 run 服务调用。
+- 当前边界: 确认项已有查询/确认接口和调试页入口；工具大结果尚未转 artifact ref。
+- 确定性 eval: `internal/eval/cases.json` + `go run ./cmd/eval`，覆盖路由（15）、画像规则（10）、画像冲突（5）；CI 在 race 测试后执行。
+- Live eval: `test/eval/live_cases.json` + `go run ./cmd/liveeval`，用真实模型和 MySQL/Redis 跑 10 条任务，输出 `tmp/live_eval_report.json`；需要配置和 key，不进 CI。
+- 配额: `services/agent/run/quota.go` 用 Redis 计数控制单用户并发 run 与每日 token；`agent.quota.*` 配置，0 表示不限制；超限返回 `-4012`/429，Redis 故障降级放行。
+- 前端: `static/index.html` Agent tab 支持查看 run 详情（`context_report_json`/`plan_json`）和待确认画像的确认/拒绝。
 
 ### 单步工具批调度（BatchExecutor）
 

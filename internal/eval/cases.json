@@ -1,0 +1,95 @@
+{
+  "routing": [
+    {"name": "greeting", "query": "你好", "want_plan": false},
+    {"name": "weather", "query": "今天天气怎么样？", "want_plan": false},
+    {"name": "resume_template", "query": "简历模板怎么排版？", "want_plan": false},
+    {"name": "single_summary", "query": "帮我总结一下这段文字", "want_plan": false},
+    {"name": "single_analysis", "query": "分析这段代码", "want_plan": false},
+    {"name": "study_plan_output", "query": "制定一个两周学习计划", "want_plan": false},
+    {"name": "resume_rewrite", "query": "帮我改改简历", "want_plan": true},
+    {"name": "multi_source_report", "query": "调研三家公司并生成对比报告", "want_plan": true},
+    {"name": "explicit_sequence", "query": "先分析简历，再对比 JD，最后生成复习计划", "want_plan": true},
+    {"name": "compare_offers", "query": "对比三份 offer 并给出选择建议", "want_plan": true},
+    {"name": "search_then_summary", "query": "先搜索再总结", "want_plan": true},
+    {"name": "multi_company_research", "query": "分别分析三家公司的面经并对比", "want_plan": true},
+    {"name": "resume_jd_plan", "query": "把简历、JD 和面经放在一起对比，然后给出复习计划", "want_plan": true},
+    {"name": "simple_resume_look", "query": "帮我看看简历", "want_plan": false},
+    {"name": "thanks", "query": "谢谢", "want_plan": false}
+  ],
+  "profile_rules": [
+    {"name": "goal", "query": "我想找后端开发的工作", "want_fields": ["goal"]},
+    {"name": "constraint", "query": "我只考虑上海，不接受长期加班", "want_fields": ["constraint"]},
+    {"name": "background", "query": "我有三年 Go 后端经验", "want_fields": ["background"]},
+    {"name": "preference", "query": "以后回答简短点，用中文", "want_fields": ["preference"]},
+    {"name": "correction", "query": "我说错了，不是这个意思", "want_fields": ["correction"]},
+    {"name": "explicit_memory", "query": "记住我下周要面试", "want_fields": ["explicit_memory"]},
+    {"name": "interview_state", "query": "我面过字节二面，挂了", "want_fields": ["interview_state"]},
+    {"name": "greeting_none", "query": "你好", "want_fields": []},
+    {"name": "weather_none", "query": "今天天气怎么样？", "want_fields": []},
+    {"name": "simple_resume_none", "query": "帮我看看简历", "want_fields": []}
+  ],
+  "conflicts": [
+    {
+      "name": "low_conflict_asks",
+      "existing": [
+        {"field": "constraint", "key": "location", "value": "上海", "confidence": 0.9, "status": "active"}
+      ],
+      "add": [
+        {"field": "constraint", "key": "location", "value": "北京", "confidence": 0.6}
+      ],
+      "force": false,
+      "want_active_value": "上海",
+      "want_questions": 1
+    },
+    {
+      "name": "higher_conf_supersedes",
+      "existing": [
+        {"field": "constraint", "key": "location", "value": "上海", "confidence": 0.7, "status": "active"}
+      ],
+      "add": [
+        {"field": "constraint", "key": "location", "value": "北京", "confidence": 0.95}
+      ],
+      "force": false,
+      "want_active_value": "北京",
+      "want_questions": 0
+    },
+    {
+      "name": "force_confirm_overrides",
+      "existing": [
+        {"field": "constraint", "key": "location", "value": "上海", "confidence": 1.0, "status": "active"}
+      ],
+      "add": [
+        {"field": "constraint", "key": "location", "value": "北京", "confidence": 1.0}
+      ],
+      "force": true,
+      "want_active_value": "北京",
+      "want_questions": 0
+    },
+    {
+      "name": "same_value_updates_confidence",
+      "existing": [
+        {"field": "goal", "key": "target_role", "value": "后端", "confidence": 0.7, "status": "active"}
+      ],
+      "add": [
+        {"field": "goal", "key": "target_role", "value": "后端", "confidence": 0.9}
+      ],
+      "force": false,
+      "want_active_value": "后端",
+      "want_questions": 0,
+      "want_active_count": 1
+    },
+    {
+      "name": "different_key_no_conflict",
+      "existing": [
+        {"field": "constraint", "key": "location", "value": "上海", "confidence": 0.9, "status": "active"}
+      ],
+      "add": [
+        {"field": "constraint", "key": "salary", "value": "30k 以上", "confidence": 0.8}
+      ],
+      "force": false,
+      "want_active_value": "30k 以上",
+      "want_questions": 0,
+      "want_active_count": 2
+    }
+  ]
+}

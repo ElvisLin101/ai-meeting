@@ -99,10 +99,12 @@
 
 拼装顺序：`system(persona) → 用户画像 → 压缩摘要 → 近期对话`。预算按 token 计算（`agent.context.*`），不足时优先裁剪近期对话，persona 与画像不丢弃、只按上限截断。
 
-- **画像提炼**：模型调用后异步、节流触发；同一用户通过分布式 SingleFlight 去重；新值覆盖旧值并递增版本。
+- **画像 L1/L2**：每个用户消息先用规则筛出候选（MySQL `profile_candidates`，不调用 LLM、不直接改画像）；每 3 个用户回合或候选 ≥5 时跑一次 L2 consolidation，输入“当前画像 + 候选 + 最近对话”，输出增量 diff，冲突时 supersede 或写入 `profile_confirmations` 等用户确认。
 - **短期/中期边界**：`compressed_contexts.index` 是 `CoveredThroughSeq`；摘要覆盖 `sequence <= index`，短期只取 `sequence > index`，二者不重叠。
 - **压缩**：只压缩对话消息，不压缩 identity/profile/plan/tool schema；按 token 触发，压缩较旧的 80%，保留最近 20% 原文（有最小尾部），增量合并旧摘要，避免每次重压全部。
-- **存储**：短期 Redis List + MySQL 全量消息；中期 Redis 摘要 + MySQL 一会话一行；长期 Redis JSON + MySQL `user_profiles.profile_json`。
+- **存储**：短期 Redis List + MySQL 全量消息；中期 Redis 摘要 + MySQL 一会话一行；长期 Redis JSON + MySQL `user_profiles.profile_json`（带 version CAS），候选/确认/审计分别落 MySQL。
+- **ContextReport**：每次根上下文装配记录预算、各段 token、丢弃条数、摘要边界和画像事实数，写入 `agent_runs.context_report_json`，run 详情可查。
+- **配额/限流**：`agent.quota.max_concurrent_runs` 控制单用户并发 run，`daily_token_limit` 控制每日 token；Redis 计数，超限返回 `-4012` / 429；Redis 故障时降级放行，不阻断主链路。
 
 ### 3. 确定性编排工具：状态机不删，降级为工具
 
@@ -142,7 +144,8 @@ Agent run 动辄数十秒，前端重试概率高。基于 Redis 实现跨实例
 ### Agent
 - `POST /agent/runs` 非流式执行、`POST /agent/runs/stream` SSE
 - `GET /agent/runs/:runId` 查看 run 与 step 回放、`GET /agent/runs` 分页
-- SSE 事件：`step` / `tool_call` / `tool_result` / `message` / `done` / `error`
+- `GET /agent/memory/confirmations` 查询待确认画像项、`POST /agent/memory/confirmations/:id/resolve` 确认/拒绝
+- SSE 事件：`route` / `step` / `tool_call` / `tool_result` / `message` / `plan_*` / `done` / `error`
 - 每步落 `agent_steps`，支持分析「Agent 为什么跑偏」
 
 ### 面试（确定性工具）
@@ -183,12 +186,16 @@ go run main.go
 go build ./...
 go test ./...
 go vet ./...
+go run ./cmd/eval          # 确定性 eval：路由/画像规则/画像冲突
+go run ./cmd/liveeval      # Live eval：真实模型 + MySQL/Redis
 scripts/knowledge-check.sh diff
 ```
 
 - 单元测试覆盖：循环终止/熔断/重复动作、工具参数校验、沙箱路径逃逸、上下文预算与画像合并、路由鉴权
+- 确定性 eval：15 条路由、10 条画像规则、5 条冲突用例，CI 直接跑
+- Live eval：`cmd/liveeval` 用真实模型跑 10 条任务，输出 direct/plan 成功率、步数、token、延迟到 `tmp/live_eval_report.json`；需要 `config/config.yaml`、MySQL、Redis 和模型 key，不进 CI
 - 分布式组件：SingleFlight 单测 + 真实 Redis 集成测试 + 集群压测脚本
-- CI：gofmt → build → vet → race 测试 → 覆盖率
+- CI：gofmt → build → vet → race 测试 → eval → 覆盖率
 
 ## 已知边界
 

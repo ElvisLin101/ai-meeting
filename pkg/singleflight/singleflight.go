@@ -342,37 +342,42 @@ func (g *DistributedGroup) runAsFollower(ctx context.Context, lockKey, resultKey
 
 		case <-ticker.C:
 			// 检查主节点状态
-			reason := g.checkLeader(ctx, lockKey, resultKey, progressKey, cancelKey, cancelChan, &lastProgress)
+			result, reason := g.checkLeaderResult(ctx, lockKey, resultKey, progressKey, cancelKey, cancelChan, &lastProgress)
 			if reason != 0 { // 0 表示主节点正常，继续等
-				return nil, reason, nil
+				return result, reason, nil
 			}
 		}
 	}
 }
 
-// checkLeader 检查主节点是否健康
-// 返回 0 = 主节点正常，继续等待
-// 返回 followerGotResult = 主节点已完成（兜底读到结果）
-// 返回 followerLeaderTimeout = 主节点卡死/超时
+// checkLeader 保留旧签名，供测试和只关心原因的调用方使用。
 func (g *DistributedGroup) checkLeader(ctx context.Context, lockKey, resultKey, progressKey, cancelKey, cancelChan string, lastProgress *string) followerReason {
+	_, reason := g.checkLeaderResult(ctx, lockKey, resultKey, progressKey, cancelKey, cancelChan, lastProgress)
+	return reason
+}
+
+// checkLeaderResult 检查主节点是否健康。
+// 返回 (result, 0) = 主节点正常，继续等待
+// 返回 (result, followerGotResult) = 主节点已完成（兜底读到结果）
+// 返回 (nil, followerLeaderTimeout) = 主节点卡死/超时
+func (g *DistributedGroup) checkLeaderResult(ctx context.Context, lockKey, resultKey, progressKey, cancelKey, cancelChan string, lastProgress *string) (interface{}, followerReason) {
 	// 1. 检查锁是否还在
 	lockExists, err := g.redis.Exists(ctx, lockKey).Result()
 	if err != nil {
-		return 0 // Redis 出错，不急着换主，继续等
+		return nil, 0 // Redis 出错，不急着换主，继续等
 	}
 	if lockExists == 0 {
 		// 锁不在了，检查结果是否已写入（主节点可能完成了但 Pub 消息丢了）
 		result, rerr := g.readResult(ctx, resultKey)
 		if rerr == nil {
-			_ = result
-			return followerGotResult
+			return result, followerGotResult
 		}
 		// 锁没了结果也没有，主节点超时了
 		// 此时拿不到旧主 nodeID，写空串——旧主的 execCtx 也会因超时退出
 		g.notifyCancel(ctx, cancelKey, cancelChan, "")
 		g.record("leader_timeout", false, "lock_expired")
 		logrus.Warnf("[singleflight] 主节点锁已消失，写入取消标记，准备换主")
-		return followerLeaderTimeout
+		return nil, followerLeaderTimeout
 	}
 
 	// 从锁的 value 读取旧主 nodeID（用于精确取消）
@@ -383,25 +388,25 @@ func (g *DistributedGroup) checkLeader(ctx context.Context, lockKey, resultKey, 
 	if err != nil {
 		if *lastProgress == "" {
 			*lastProgress = "init" // 第一次检查，跳过一个周期给 leader 启动时间
-			return 0
+			return nil, 0
 		}
 		// 后续检查 progressKey 仍不存在 → leader 长时间无输出，换主
 		g.notifyCancel(ctx, cancelKey, cancelChan, leaderNodeID)
 		g.record("leader_timeout", false, "progress_lost")
 		logrus.Warnf("[singleflight] 主节点进度信息丢失，写入取消标记，准备换主")
-		return followerLeaderTimeout
+		return nil, followerLeaderTimeout
 	}
 
 	if currentProgress != *lastProgress {
 		// 进度有变化，主节点在干活
 		*lastProgress = currentProgress
-		return 0
+		return nil, 0
 	}
 
 	// 进度没变化，检查是否超过停滞阈值
 	parts := splitProgress(currentProgress)
 	if len(parts) != 2 {
-		return 0
+		return nil, 0
 	}
 	lastUpdateMs := parts[1]
 	stalledDuration := time.Since(time.UnixMilli(lastUpdateMs))
@@ -410,10 +415,10 @@ func (g *DistributedGroup) checkLeader(ctx context.Context, lockKey, resultKey, 
 		g.record("leader_timeout", false, "stalled")
 		logrus.Warnf("[singleflight] 主节点输出停滞 %v，超过阈值 %v，写入取消标记，准备换主",
 			stalledDuration, StallThreshold)
-		return followerLeaderTimeout
+		return nil, followerLeaderTimeout
 	}
 
-	return 0
+	return nil, 0
 }
 
 // notifyCancel 通知旧主节点停止 AI 调用（双通道）

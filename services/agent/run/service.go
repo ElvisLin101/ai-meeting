@@ -59,9 +59,9 @@ type Service struct {
 	registry  *tools.Registry
 	executor  *tools.Executor
 	assembler *agentctx.Assembler
-	extractor *agentctx.ProfileExtractor
 	cfg       config.AgentConfig
 	planCfg   planpkg.Config
+	quota     config.QuotaConfig
 }
 
 var serviceInstance *Service
@@ -90,8 +90,7 @@ func GetService() *Service {
 				RecentMaxTokens:         cfg.Context.RecentMaxTokens,
 				CompressThresholdTokens: cfg.Context.CompressThresholdTokens,
 			}),
-			extractor: agentctx.NewProfileExtractor(cfg.ProfileExtractEvery),
-			cfg:       cfg,
+			cfg: cfg,
 			planCfg: planpkg.Config{
 				Enabled:          cfg.Plan.Enabled,
 				MaxTasks:         cfg.Plan.MaxTasks,
@@ -108,6 +107,7 @@ func GetService() *Service {
 				RouteMinScore:    cfg.Plan.RouteMinScore,
 				FastPathRunes:    cfg.Plan.FastPathRunes,
 			},
+			quota: cfg.Quota,
 		}
 	}
 	return serviceInstance
@@ -140,13 +140,41 @@ func (s *Service) Start(ctx context.Context, req StartRequest) (*StartResult, er
 	}
 	key := dedupKey(req)
 	result, err := repositories.SingleFlight.Do(ctx, key, func(ctx context.Context, _ *singleflight.StreamWriter) (interface{}, error) {
-		return s.execute(ctx, req, nil)
+		return s.runWithQuota(ctx, req.Username, func() (*StartResult, error) {
+			return s.execute(ctx, req, nil)
+		})
 	})
 	if err != nil {
 		return nil, err
 	}
-	res, _ := result.(*StartResult)
-	return res, nil
+	return decodeStartResult(result)
+}
+
+// decodeStartResult 兼容 SingleFlight 的两种返回：
+//   - leader 返回本进程的 *StartResult；
+//   - follower 从 Redis 读回 JSON 后得到 map[string]interface{}。
+func decodeStartResult(result interface{}) (*StartResult, error) {
+	switch v := result.(type) {
+	case *StartResult:
+		if v == nil {
+			return nil, fmt.Errorf("empty singleflight result")
+		}
+		return v, nil
+	case StartResult:
+		return &v, nil
+	case map[string]interface{}:
+		raw, err := json.Marshal(v)
+		if err != nil {
+			return nil, fmt.Errorf("encode singleflight result: %w", err)
+		}
+		var out StartResult
+		if err := json.Unmarshal(raw, &out); err != nil {
+			return nil, fmt.Errorf("decode singleflight result: %w", err)
+		}
+		return &out, nil
+	default:
+		return nil, fmt.Errorf("unexpected singleflight result type %T", result)
+	}
 }
 
 // StartStream 流式执行（用 Redis 幂等锁防止重复提交；SingleFlight 不复用流式 chunk）
@@ -159,7 +187,9 @@ func (s *Service) StartStream(ctx context.Context, req StartRequest, emit func(l
 		return nil, err
 	}
 	defer release()
-	return s.execute(ctx, req, emit)
+	return s.runWithQuota(ctx, req.Username, func() (*StartResult, error) {
+		return s.execute(ctx, req, emit)
+	})
 }
 
 // execute 核心执行流程
@@ -227,6 +257,15 @@ func (s *Service) execute(ctx context.Context, req StartRequest, emit func(loop.
 	if err := mysqlrepo.CreateAgentRun(runRecord); err != nil {
 		return nil, ecode.Wrap(err, "创建 run 失败")
 	}
+	if raw, err := json.Marshal(assembled.Report); err == nil {
+		if err := mysqlrepo.UpdateAgentRunContextReport(runID, string(raw)); err != nil {
+			logrus.Warnf("[agent-run] persist context report failed: %v", err)
+		}
+	}
+	logrus.Infof("[agent-run] context report: mode=%s used=%d/%d identity=%d profile=%d summary=%d recent=%d dropped=%d",
+		assembled.Report.Mode, assembled.Report.UsedTokens, assembled.Report.BudgetTokens,
+		assembled.Report.IdentityTokens, assembled.Report.ProfileTokens,
+		assembled.Report.SummaryTokens, assembled.Report.RecentTokens, assembled.Report.DroppedMessages)
 
 	tc := &tools.Context{
 		UserID: req.UserID, Username: req.Username,
@@ -323,9 +362,9 @@ func (s *Service) execute(ctx context.Context, req StartRequest, emit func(loop.
 			loopResult.Steps, loopResult.Tokens, loopResult.StopReason),
 	})
 
-	// 5. 异步压缩 + 画像提炼
+	// 5. 异步压缩 + 画像 L2 consolidation
 	agentctx.CompressAsync(conv.SessionID, req.Username, s.cfg.Context.CompressThresholdTokens)
-	s.extractor.ExtractAsync(req.Username, toContextMessages(loopResult.Transcript))
+	agentctx.ConsolidateAsync(req.Username, conv.SessionID)
 
 	return &StartResult{
 		RunID: runID, SessionID: conv.SessionID, Status: status,
@@ -376,10 +415,7 @@ func (s *Service) finishPlanRun(req StartRequest, conv *models.Conversation, run
 	})
 
 	agentctx.CompressAsync(conv.SessionID, req.Username, s.cfg.Context.CompressThresholdTokens)
-	s.extractor.ExtractAsync(req.Username, []agentctx.Message{
-		{Role: "user", Content: req.Input},
-		{Role: "assistant", Content: result.Answer},
-	})
+	agentctx.ConsolidateAsync(req.Username, conv.SessionID)
 
 	return &StartResult{
 		RunID: runID, SessionID: conv.SessionID, Status: status,
@@ -511,21 +547,6 @@ func truncateTitle(input string) string {
 		return "新会话"
 	}
 	return string(r)
-}
-
-func toContextMessages(transcript []clients.ToolMessage) []agentctx.Message {
-	start := 0
-	if len(transcript) > 40 {
-		start = len(transcript) - 40
-	}
-	out := make([]agentctx.Message, 0, len(transcript)-start)
-	for _, m := range transcript[start:] {
-		if m.Content == "" {
-			continue
-		}
-		out = append(out, agentctx.Message{Role: m.Role, Content: m.Content})
-	}
-	return out
 }
 
 // ============================================================

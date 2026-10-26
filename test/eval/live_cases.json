@@ -1,0 +1,84 @@
+{
+  "cases": [
+    {
+      "id": "greeting",
+      "input": "你好，介绍一下你能帮我做什么",
+      "expect_plan": "direct",
+      "must_contain": ["你好"],
+      "rubric": ["帮助", "能力"],
+      "max_steps": 8
+    },
+    {
+      "id": "simple_explain",
+      "input": "用一句话解释什么是 REST API",
+      "expect_plan": "direct",
+      "must_contain": ["API"],
+      "rubric": ["HTTP", "资源"],
+      "max_steps": 8
+    },
+    {
+      "id": "resume_rewrite",
+      "input": "帮我改写简历里的项目经历，突出后端性能优化和量化结果",
+      "expect_plan": "plan",
+      "must_contain": ["简历", "项目"],
+      "rubric": ["性能", "量化", "建议"],
+      "max_steps": 10
+    },
+    {
+      "id": "company_compare",
+      "input": "对比三家公司的后端岗位要求，并给出准备建议",
+      "expect_plan": "plan",
+      "must_contain": ["公司", "建议"],
+      "rubric": ["对比", "技能", "准备"],
+      "max_steps": 10
+    },
+    {
+      "id": "study_plan",
+      "input": "制定一个两周的 Go 后端复习计划",
+      "expect_plan": "direct",
+      "must_contain": ["Go", "计划"],
+      "rubric": ["两周", "复习"],
+      "max_steps": 8
+    },
+    {
+      "id": "resume_jd_interview",
+      "input": "先分析我的简历优势，再对比字节后端 JD，最后给出面试准备计划",
+      "expect_plan": "plan",
+      "must_contain": ["简历", "计划"],
+      "rubric": ["优势", "JD", "面试"],
+      "max_steps": 12
+    },
+    {
+      "id": "tech_compare",
+      "input": "分析一下 REST 和 GraphQL 的主要区别",
+      "expect_plan": "direct",
+      "must_contain": ["REST", "GraphQL"],
+      "rubric": ["区别", "查询", "接口"],
+      "max_steps": 8
+    },
+    {
+      "id": "interview_research",
+      "input": "调研 Go 后端常见面试题，并总结成复习清单",
+      "expect_plan": "plan",
+      "must_contain": ["面试", "复习"],
+      "rubric": ["Go", "清单", "知识点"],
+      "max_steps": 10
+    },
+    {
+      "id": "preference_follow",
+      "input": "以后回答都用中文，先给结论",
+      "expect_plan": "direct",
+      "must_contain": ["中文"],
+      "rubric": ["结论"],
+      "max_steps": 8
+    },
+    {
+      "id": "cache_selection",
+      "input": "分别比较 Redis 和 MySQL 在缓存场景下的优劣，然后给出选型建议",
+      "expect_plan": "plan",
+      "must_contain": ["Redis", "MySQL"],
+      "rubric": ["缓存", "优劣", "选型"],
+      "max_steps": 10
+    }
+  ]
+}

@@ -31,6 +31,12 @@ func UpdateAgentRunPlan(runID, planJSON string) error {
 		Update("plan_json", planJSON).Error
 }
 
+// UpdateAgentRunContextReport 保存本次根上下文装配的可观测快照。
+func UpdateAgentRunContextReport(runID, reportJSON string) error {
+	return DB.Model(&models.AgentRun{}).Where("run_id = ?", runID).
+		Update("context_report_json", reportJSON).Error
+}
+
 // FindAgentRun 按 run_id 查询
 func FindAgentRun(runID string) (*models.AgentRun, error) {
 	var run models.AgentRun

@@ -78,7 +78,8 @@ func (r *Router) Decide(query string) RouteDecision {
 	}
 	for _, s := range []string{
 		"分别", "对比", "比较", "拆解", "分步骤", "第一步", "首先",
-		"并生成", "并输出", "并给出", "多个", "三家公司", "两份", "几家公司", "三项",
+		"并生成", "并输出", "并给出", "并总结", "并整理",
+		"多个", "三家公司", "两份", "几家公司", "三项",
 	} {
 		if strings.Contains(q, s) {
 			addStrong(s)
