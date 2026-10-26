@@ -32,6 +32,9 @@ func TestCORSMiddleware_SetsHeaders(t *testing.T) {
 	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "*" {
 		t.Errorf("Allow-Origin = %q, want *", got)
 	}
+	if got := w.Header().Get("Access-Control-Allow-Credentials"); got != "" {
+		t.Errorf("Allow-Credentials must be empty with wildcard origin, got %q", got)
+	}
 	if got := w.Header().Get("Access-Control-Allow-Methods"); got != "POST, OPTIONS, GET, PUT, DELETE" {
 		t.Errorf("Allow-Methods = %q", got)
 	}

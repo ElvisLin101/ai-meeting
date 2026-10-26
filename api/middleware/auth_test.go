@@ -9,6 +9,7 @@ import (
 	"ai-meeting/config"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v4"
 )
 
 // ============================================================
@@ -134,6 +135,39 @@ func TestAuthMiddleware_InvalidToken(t *testing.T) {
 	}
 	if gotUsername != nil {
 		t.Errorf("无效 token 不应设置 username, got %v", gotUsername)
+	}
+}
+
+func TestAuthMiddleware_NonHMACRejected(t *testing.T) {
+	setTestJWT(t)
+	gin.SetMode(gin.TestMode)
+
+	claims := Claims{Username: "mallory", UserID: "u1"}
+	token, err := jwt.NewWithClaims(jwt.SigningMethodNone, claims).SignedString(jwt.UnsafeAllowNoneSignatureType)
+	if err != nil {
+		t.Fatalf("sign none token: %v", err)
+	}
+
+	called := false
+	var gotUsername interface{}
+	r := gin.New()
+	r.Use(AuthMiddleware())
+	r.GET("/x", func(c *gin.Context) {
+		called = true
+		gotUsername, _ = c.Get("username")
+		c.String(http.StatusOK, "ok")
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	r.ServeHTTP(w, req)
+
+	if !called {
+		t.Fatal("非 HMAC token 应放行(由 RequireAuth 拦截)")
+	}
+	if gotUsername != nil {
+		t.Fatalf("非 HMAC token 不应设置 username, got %v", gotUsername)
 	}
 }
 
