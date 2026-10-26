@@ -1,4 +1,4 @@
-# CareerAgent
+# AI-Meeting
 
 ![CI](https://img.shields.io/github/actions/workflow/status/ElvisLin101/ai-meeting/ci.yml?branch=main&label=CI)
 [![Go Version](https://img.shields.io/badge/Go-1.24.1-00ADD8?logo=go&logoColor=white)](https://go.dev/)

@@ -3,194 +3,724 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI-Meeting 面试平台</title>
+<title>AI-Meeting · Agentic Interview Workspace</title>
 <style>
+:root {
+  --bg: #060912;
+  --bg-soft: #0b1120;
+  --panel: rgba(15, 23, 42, 0.72);
+  --panel-strong: rgba(17, 24, 39, 0.9);
+  --line: rgba(148, 163, 184, 0.16);
+  --line-strong: rgba(148, 163, 184, 0.28);
+  --text: #e5e7eb;
+  --muted: #94a3b8;
+  --faint: #64748b;
+  --accent: #6366f1;
+  --accent-2: #22d3ee;
+  --success: #10b981;
+  --warn: #f59e0b;
+  --danger: #f43f5e;
+  --radius: 20px;
+  --radius-sm: 12px;
+  --shadow: 0 24px 70px rgba(0, 0, 0, 0.38);
+}
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; }
-.container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-h1 { text-align: center; margin-bottom: 20px; color: #1a1a1a; }
-.panel { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-.panel h2 { font-size: 16px; margin-bottom: 15px; color: #666; border-bottom: 1px solid #eee; padding-bottom: 8px; }
-.row { display: flex; gap: 10px; margin-bottom: 10px; align-items: center; flex-wrap: wrap; }
-input, textarea, select { padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
-input[type="text"], input[type="password"] { width: 200px; }
-textarea { width: 100%; min-height: 80px; resize: vertical; }
-button { padding: 8px 16px; background: #1890ff; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; transition: background 0.2s; }
-button:hover { background: #40a9ff; }
-button:disabled { background: #ccc; cursor: not-allowed; }
-button.success { background: #52c41a; }
-button.success:hover { background: #73d13d; }
-button.danger { background: #ff4d4f; }
-button.danger:hover { background: #ff7875; }
-button.warn { background: #faad14; }
-button.warn:hover { background: #ffc53d; }
-.chat-area { max-height: 500px; overflow-y: auto; padding: 10px; background: #fafafa; border-radius: 4px; border: 1px solid #eee; }
-.msg { margin-bottom: 12px; padding: 10px 14px; border-radius: 8px; max-width: 80%; }
-.msg.user { background: #1890ff; color: #fff; margin-left: auto; }
-.msg.bot { background: #f0f0f0; color: #333; }
-.msg.system { background: #fff7e6; color: #d46b08; text-align: center; max-width: 100%; font-size: 13px; }
-.msg .meta { font-size: 12px; opacity: 0.7; margin-top: 4px; }
-.msg .score { display: inline-block; background: #52c41a; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 12px; margin-left: 8px; }
-.msg .followup { display: inline-block; background: #faad14; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 12px; margin-left: 8px; }
-.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; margin-left: 6px; }
-.badge.green { background: #d9f7be; color: #389e0d; }
-.badge.blue { background: #e6f7ff; color: #1890ff; }
-.badge.orange { background: #fff7e6; color: #d46b08; }
-.stats { display: flex; gap: 15px; flex-wrap: wrap; }
-.stat-card { flex: 1; min-width: 150px; background: #fafafa; padding: 15px; border-radius: 6px; text-align: center; }
-.stat-card .value { font-size: 24px; font-weight: bold; color: #1890ff; }
-.stat-card .label { font-size: 12px; color: #999; margin-top: 4px; }
-.tab-bar { display: flex; gap: 0; margin-bottom: 20px; }
-.tab { padding: 10px 20px; cursor: pointer; border-bottom: 2px solid transparent; color: #666; }
-.tab.active { color: #1890ff; border-bottom-color: #1890ff; font-weight: 500; }
+
+html { color-scheme: dark; }
+
+body {
+  min-height: 100vh;
+  font-family: "SF Pro Display", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(circle at 12% -10%, rgba(99, 102, 241, 0.24), transparent 34%),
+    radial-gradient(circle at 88% 0%, rgba(34, 211, 238, 0.14), transparent 30%),
+    radial-gradient(circle at 50% 110%, rgba(79, 70, 229, 0.12), transparent 40%),
+    var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.045) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(circle at 50% 0%, black, transparent 78%);
+}
+
+::selection { background: rgba(99, 102, 241, 0.45); }
+
+.app {
+  position: relative;
+  z-index: 1;
+  width: min(1280px, 100%);
+  margin: 0 auto;
+  padding: 28px 24px 64px;
+}
+
+/* ---------- Topbar ---------- */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 18px 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: linear-gradient(135deg, rgba(17, 24, 39, 0.86), rgba(15, 23, 42, 0.52));
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(20px);
+}
+
+.brand { display: flex; align-items: center; gap: 14px; min-width: 0; }
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
+  border-radius: 15px;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #fff;
+  background: linear-gradient(135deg, #6366f1, #22d3ee);
+  box-shadow: 0 10px 26px rgba(99, 102, 241, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.brand-text h1 {
+  font-size: 24px;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  font-weight: 700;
+}
+
+.brand-text p {
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.auth {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.auth-fields { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+
+.status {
+  min-height: 16px;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: right;
+  word-break: break-all;
+}
+
+/* ---------- Tabs ---------- */
+.tabs {
+  display: flex;
+  gap: 6px;
+  width: max-content;
+  max-width: 100%;
+  margin: 22px 0 24px;
+  padding: 6px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.54);
+  backdrop-filter: blur(16px);
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 15px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.2s ease, background 0.2s ease, transform 0.2s ease;
+}
+
+.tab:hover { color: var(--text); background: rgba(148, 163, 184, 0.08); }
+
+.tab.active {
+  color: #fff;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.95), rgba(34, 211, 238, 0.62));
+  box-shadow: 0 8px 22px rgba(99, 102, 241, 0.3);
+}
+
+.tab-icon { font-size: 14px; opacity: 0.9; }
+
+/* ---------- Panels ---------- */
 .tab-content { display: none; }
-.tab-content.active { display: block; }
-pre { background: #f5f5f5; padding: 10px; border-radius: 4px; font-size: 12px; overflow-x: auto; max-height: 300px; }
-.radar-chart { display: flex; gap: 20px; align-items: center; }
-.radar-bars { flex: 1; }
-.radar-bar { margin-bottom: 8px; }
-.radar-bar .bar-label { font-size: 13px; margin-bottom: 2px; }
-.radar-bar .bar-track { background: #f0f0f0; border-radius: 4px; height: 20px; overflow: hidden; }
-.radar-bar .bar-fill { height: 100%; background: linear-gradient(90deg, #1890ff, #52c41a); border-radius: 4px; transition: width 0.5s; }
+.tab-content.active { display: block; animation: rise 0.35s ease both; }
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.panel {
+  margin-bottom: 20px;
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, rgba(17, 24, 39, 0.8), rgba(15, 23, 42, 0.52));
+  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(18px);
+}
+
+.panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.eyebrow {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent-2);
+}
+
+.panel h2 {
+  font-size: 18px;
+  line-height: 1.25;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: #f1f5f9;
+}
+
+.panel-sub {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.agent-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  gap: 18px;
+}
+
+.stack { display: flex; flex-direction: column; gap: 12px; }
+
+/* ---------- Forms ---------- */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.row:last-child { margin-bottom: 0; }
+
+.field { display: flex; flex-direction: column; gap: 8px; }
+
+.field label {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+input, textarea, select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  outline: none;
+  background: rgba(2, 6, 23, 0.62);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+input::placeholder, textarea::placeholder { color: #64748b; }
+
+input:focus, textarea:focus, select:focus {
+  border-color: rgba(99, 102, 241, 0.75);
+  background: rgba(2, 6, 23, 0.82);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.16);
+}
+
+input[type="text"], input[type="password"] { height: 40px; }
+
+.auth-fields input[type="text"], .auth-fields input[type="password"] { width: 148px; }
+
+textarea {
+  min-height: 92px;
+  resize: vertical;
+  line-height: 1.65;
+}
+
+#agentOutput, #agentDetail {
+  min-height: 190px;
+  font-family: "SFMono-Regular", "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #cbd5e1;
+}
+
+#agentInput { min-height: 150px; }
+
+/* ---------- Buttons ---------- */
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 9px 15px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+button:hover { filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22); }
+button:active { transform: translateY(0); }
+button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+
+button.success { background: linear-gradient(135deg, #10b981, #059669); }
+button.warn { background: linear-gradient(135deg, #f59e0b, #d97706); }
+button.danger { background: linear-gradient(135deg, #f43f5e, #e11d48); }
+button.ghost {
+  background: rgba(148, 163, 184, 0.08);
+  border-color: var(--line-strong);
+  color: #cbd5e1;
+}
+
+button.ghost:hover { background: rgba(148, 163, 184, 0.14); }
+
+/* ---------- Chat ---------- */
+.chat-area {
+  min-height: 300px;
+  max-height: 480px;
+  padding: 16px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background:
+    linear-gradient(180deg, rgba(2, 6, 23, 0.42), rgba(2, 6, 23, 0.7)),
+    radial-gradient(circle at 50% 0%, rgba(99, 102, 241, 0.06), transparent 60%);
+}
+
+.chat-area::-webkit-scrollbar, .tabs::-webkit-scrollbar { width: 8px; height: 8px; }
+.chat-area::-webkit-scrollbar-thumb, .tabs::-webkit-scrollbar-thumb {
+  border-radius: 99px;
+  background: rgba(148, 163, 184, 0.22);
+}
+
+.msg {
+  width: fit-content;
+  max-width: 82%;
+  margin-bottom: 12px;
+  padding: 11px 14px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  font-size: 14px;
+  line-height: 1.65;
+  word-break: break-word;
+  animation: rise 0.22s ease both;
+}
+
+.msg.user {
+  margin-left: auto;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.95), rgba(79, 70, 229, 0.88));
+  color: #fff;
+  border-bottom-right-radius: 4px;
+  box-shadow: 0 8px 20px rgba(79, 70, 229, 0.18);
+}
+
+.msg.bot {
+  background: rgba(30, 41, 59, 0.78);
+  border-color: var(--line);
+  color: #e2e8f0;
+  border-bottom-left-radius: 4px;
+}
+
+.msg.system {
+  width: 100%;
+  max-width: 100%;
+  padding: 8px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.16);
+}
+
+.msg .meta { margin-top: 5px; font-size: 11px; opacity: 0.65; }
+.msg .score, .msg .followup {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 650;
+}
+.msg .score { color: #052e16; background: #86efac; }
+.msg .followup { color: #451a03; background: #fcd34d; }
+
+.composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  margin-top: 12px;
+}
+.composer input, .composer textarea { flex: 1; }
+.composer textarea { min-height: 42px; max-height: 120px; }
+
+/* ---------- Stats ---------- */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.stat-card {
+  position: relative;
+  padding: 16px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.62), rgba(15, 23, 42, 0.52));
+}
+
+.stat-card::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(34, 211, 238, 0.55), transparent);
+}
+
+.stat-card .value {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: #f8fafc;
+}
+
+.stat-card .label {
+  margin-top: 4px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+/* ---------- Radar ---------- */
+.radar-bars { display: flex; flex-direction: column; gap: 10px; }
+.radar-bar .bar-label {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 5px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.radar-bar .bar-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: rgba(148, 163, 184, 0.14);
+}
+.radar-bar .bar-fill {
+  height: 100%;
+  border-radius: 99px;
+  background: linear-gradient(90deg, #6366f1, #22d3ee);
+  box-shadow: 0 0 12px rgba(34, 211, 238, 0.35);
+  transition: width 0.6s ease;
+}
+
+/* ---------- Code / metrics ---------- */
+pre {
+  max-height: 320px;
+  padding: 14px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(2, 6, 23, 0.68);
+  color: #cbd5e1;
+  font-family: "SFMono-Regular", "JetBrains Mono", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+#metricsArea { margin-top: 14px; color: var(--muted); font-size: 13px; }
+#metricsArea p { margin-bottom: 10px; }
+
+#agentConfirmations { margin-top: 4px; }
+#agentConfirmations .row {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(2, 6, 23, 0.38);
+}
+#agentConfirmations .row span { flex: 1; min-width: 220px; font-size: 13px; color: var(--muted); }
+
+#radarArea { margin-top: 16px; }
+
+/* ---------- Responsive ---------- */
+@media (max-width: 980px) {
+  .topbar { flex-direction: column; align-items: stretch; }
+  .auth { align-items: stretch; }
+  .auth-fields { justify-content: flex-start; }
+  .status { text-align: left; }
+  .grid-2, .agent-grid { grid-template-columns: 1fr; }
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 640px) {
+  .app { padding: 16px 12px 40px; }
+  .topbar, .panel { padding: 16px; }
+  .tabs { width: 100%; border-radius: 14px; }
+  .tab { flex: 0 0 auto; padding: 9px 12px; font-size: 13px; }
+  .brand-text h1 { font-size: 21px; }
+  .brand-text p { font-size: 10px; }
+  .auth-fields input[type="text"], .auth-fields input[type="password"] { width: 100%; }
+  .auth-fields button { flex: 1; }
+  .stats { grid-template-columns: 1fr 1fr; }
+  .stat-card .value { font-size: 23px; }
+  .msg { max-width: 92%; }
+  .panel h2 { font-size: 16px; }
+}
 </style>
 </head>
 <body>
-<div class="container">
-<h1>🤖 AI-Meeting 面试平台</h1>
+<div class="app">
 
-<!-- 登录区 -->
-<div class="panel">
-  <h2>1. 用户登录</h2>
-  <div class="row">
-    <input type="text" id="username" placeholder="用户名" value="testuser">
-    <input type="password" id="password" placeholder="密码" value="123456">
-    <button onclick="login()">登录</button>
-    <button class="warn" onclick="register()">注册</button>
-    <span id="loginStatus" style="font-size:13px;color:#999;"></span>
-  </div>
-</div>
-
-<!-- Tab 切换 -->
-<div class="tab-bar">
-  <div class="tab active" onclick="switchTab('interview')">📝 模拟面试</div>
-  <div class="tab" onclick="switchTab('ai')">💬 AI 对话</div>
-  <div class="tab" onclick="switchTab('agent')">🤖 Agent</div>
-  <div class="tab" onclick="switchTab('metrics')">📊 指标监控</div>
-</div>
-
-<!-- 面试 Tab -->
-<div id="tab-interview" class="tab-content active">
-
-<!-- 创建会话 + 出题 -->
-<div class="panel">
-  <h2>2. 创建面试会话 & 出题</h2>
-  <div class="row">
-    <button class="success" onclick="createSession()">创建面试会话</button>
-    <span id="sessionInfo" style="font-size:13px;color:#999;"></span>
-  </div>
-  <div class="row">
-    <textarea id="resumeContent" placeholder="粘贴简历内容（文本）...">张三，3年Go后端开发经验，熟悉Gin/GORM/MySQL/Redis，做过电商订单系统和支付系统，熟悉微服务架构和Kafka消息队列。</textarea>
-  </div>
-  <div class="row">
-    <button onclick="extractQuestions()">📄 文本出题</button>
-    <button onclick="document.getElementById('pdfUpload').click()">📎 PDF上传出题</button>
-    <input type="file" id="pdfUpload" accept=".pdf" style="display:none" onchange="uploadResumePDF(this)">
-  </div>
-</div>
-
-<!-- 面试对话区 -->
-<div class="panel">
-  <h2>3. 面试对话</h2>
-  <div class="chat-area" id="interviewChat">
-    <div class="msg system">请先创建会话并出题</div>
-  </div>
-  <div class="row" style="margin-top:10px;">
-    <input type="text" id="questionNumber" placeholder="题号 (如 1 或 1-F1)" style="width:120px;">
-    <textarea id="answerContent" placeholder="输入你的答案..." style="flex:1;min-height:40px;"></textarea>
-    <button class="success" onclick="answerQuestion()">提交答案</button>
-  </div>
-  <div class="row">
-    <button onclick="getCurrentQuestion()">获取当前题</button>
-    <button onclick="restoreSession()">恢复会话</button>
-    <button class="danger" onclick="finishSession()">结束面试</button>
-    <button class="warn" onclick="generateReport()">生成报告</button>
-  </div>
-</div>
-
-<!-- 面试状态 -->
-<div class="panel">
-  <h2>4. 面试状态</h2>
-  <div class="stats">
-    <div class="stat-card"><div class="value" id="statScore">-</div><div class="label">总分</div></div>
-    <div class="stat-card"><div class="value" id="statResumeScore">-</div><div class="label">简历分</div></div>
-    <div class="stat-card"><div class="value" id="statQuestions">-</div><div class="label">题目数</div></div>
-    <div class="stat-card"><div class="value" id="statStatus">-</div><div class="label">状态</div></div>
-  </div>
-  <div class="row" style="margin-top:10px;">
-    <button onclick="getScore()">刷新分数</button>
-    <button onclick="getQuestions()">查看题目</button>
-    <button onclick="getSuggestions()">查看建议</button>
-    <button onclick="getRadar()">雷达图</button>
-  </div>
-  <div id="radarArea" style="margin-top:10px;display:none;">
-    <div class="radar-bars" id="radarBars"></div>
-  </div>
-</div>
-
-</div><!-- /interview tab -->
-
-<!-- AI 对话 Tab -->
-<div id="tab-ai" class="tab-content">
-  <div class="panel">
-    <h2>AI 对话</h2>
-    <div class="row">
-      <button class="success" onclick="createAIConversation()">创建AI会话</button>
-      <span id="aiSessionInfo" style="font-size:13px;color:#999;"></span>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">AI</div>
+      <div class="brand-text">
+        <h1>AI-Meeting</h1>
+        <p>Agentic interview workspace</p>
+      </div>
     </div>
-  </div>
-  <div class="panel">
-    <div class="chat-area" id="aiChat" style="min-height:300px;">
-      <div class="msg system">创建AI会话后开始对话</div>
+    <div class="auth">
+      <div class="auth-fields">
+        <input type="text" id="username" placeholder="用户名" value="testuser" autocomplete="username">
+        <input type="password" id="password" placeholder="密码" value="123456" autocomplete="current-password">
+        <button onclick="login()">登录</button>
+        <button class="ghost" onclick="register()">注册</button>
+      </div>
+      <span id="loginStatus" class="status">未登录 · 登录后开始使用</span>
     </div>
-    <div class="row" style="margin-top:10px;">
-      <input type="text" id="aiMessage" placeholder="输入消息..." style="flex:1;">
-      <button class="success" onclick="aiChat()">发送</button>
-    </div>
-  </div>
-</div>
+  </header>
 
-<!-- Agent Tab -->
-<div id="tab-agent" class="tab-content">
-  <div class="panel">
-    <h2>Agent Run（自主编排）</h2>
-    <div class="row">
-      <textarea id="agentInput" placeholder="例如：帮我查一下字节跳动后端面试常考什么，然后生成一个两周复习计划，并保存到 plan.md">帮我查一下 Go 后端面试常考什么，生成一个两周复习计划并保存到 plan.md</textarea>
-    </div>
-    <div class="row">
-      <button class="success" onclick="runAgent()">▶ 运行 Agent</button>
-      <button onclick="loadAgentConfirmations()">🧠 待确认画像</button>
-      <button onclick="loadAgentDetail()">🔍 查看 Run 详情</button>
-      <span id="agentRunInfo" style="font-size:13px;color:#999;"></span>
-    </div>
-    <div class="row">
-      <textarea id="agentOutput" style="height:180px" readonly placeholder="Agent 输出..."></textarea>
-    </div>
-    <div class="row">
-      <textarea id="agentDetail" style="height:180px" readonly placeholder="ContextReport / PlanJSON..."></textarea>
-    </div>
-    <div id="agentConfirmations" style="margin-top:10px;"></div>
-  </div>
-</div>
+  <nav class="tabs" aria-label="功能导航">
+    <button class="tab active" onclick="switchTab('interview')"><span class="tab-icon">✦</span>模拟面试</button>
+    <button class="tab" onclick="switchTab('ai')"><span class="tab-icon">◌</span>AI 对话</button>
+    <button class="tab" onclick="switchTab('agent')"><span class="tab-icon">◎</span>Agent 编排</button>
+    <button class="tab" onclick="switchTab('metrics')"><span class="tab-icon">▤</span>指标监控</button>
+  </nav>
 
-<!-- 指标 Tab -->
-<div id="tab-metrics" class="tab-content">
-  <div class="panel">
-    <h2>系统指标</h2>
-    <button onclick="loadMetrics()">刷新指标</button>
-    <div id="metricsArea" style="margin-top:15px;"></div>
-  </div>
-</div>
+  <main>
+    <!-- 面试 Tab -->
+    <div id="tab-interview" class="tab-content active">
+      <div class="grid-2">
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <span class="eyebrow">Session</span>
+              <h2>创建面试会话 & 出题</h2>
+              <p class="panel-sub">先创建会话，再用简历文本或 PDF 生成第一道题。</p>
+            </div>
+            <span id="sessionInfo" class="status">尚未创建会话</span>
+          </div>
 
+          <div class="row">
+            <button class="success" onclick="createSession()">创建面试会话</button>
+          </div>
+          <div class="field" style="margin-bottom:12px;">
+            <label for="resumeContent">简历文本</label>
+            <textarea id="resumeContent" placeholder="粘贴简历内容（文本）...">张三，3年Go后端开发经验，熟悉Gin/GORM/MySQL/Redis，做过电商订单系统和支付系统，熟悉微服务架构和Kafka消息队列。</textarea>
+          </div>
+          <div class="row">
+            <button onclick="extractQuestions()">文本出题</button>
+            <button class="ghost" onclick="document.getElementById('pdfUpload').click()">上传 PDF 出题</button>
+            <input type="file" id="pdfUpload" accept=".pdf" style="display:none" onchange="uploadResumePDF(this)">
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <span class="eyebrow">Live Interview</span>
+              <h2>面试对话</h2>
+              <p class="panel-sub">提交答案后，系统会评分、追问并推进下一题。</p>
+            </div>
+          </div>
+
+          <div class="chat-area" id="interviewChat">
+            <div class="msg system">请先创建会话并出题</div>
+          </div>
+
+          <div class="composer" style="margin-top:12px;">
+            <input type="text" id="questionNumber" placeholder="题号，如 1 或 1-F1" style="width:120px;flex:0 0 120px;">
+            <textarea id="answerContent" placeholder="输入你的答案..." style="min-height:42px;"></textarea>
+            <button class="success" onclick="answerQuestion()">提交答案</button>
+          </div>
+
+          <div class="row" style="margin-top:12px;">
+            <button class="ghost" onclick="getCurrentQuestion()">获取当前题</button>
+            <button class="ghost" onclick="restoreSession()">恢复会话</button>
+            <button class="ghost" onclick="generateReport()">生成报告</button>
+            <button class="danger" onclick="finishSession()">结束面试</button>
+          </div>
+        </section>
+      </div>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <span class="eyebrow">Overview</span>
+            <h2>面试状态</h2>
+          </div>
+          <span class="status">实时分数与进度</span>
+        </div>
+
+        <div class="stats">
+          <div class="stat-card"><div class="value" id="statScore">-</div><div class="label">总分</div></div>
+          <div class="stat-card"><div class="value" id="statResumeScore">-</div><div class="label">简历分</div></div>
+          <div class="stat-card"><div class="value" id="statQuestions">-</div><div class="label">题目数</div></div>
+          <div class="stat-card"><div class="value" id="statStatus">-</div><div class="label">状态</div></div>
+        </div>
+
+        <div class="row" style="margin-top:14px;">
+          <button class="ghost" onclick="getScore()">刷新分数</button>
+          <button class="ghost" onclick="getQuestions()">查看题目</button>
+          <button class="ghost" onclick="getSuggestions()">查看建议</button>
+          <button class="ghost" onclick="getRadar()">雷达图</button>
+        </div>
+
+        <div id="radarArea" style="display:none;">
+          <div class="radar-bars" id="radarBars"></div>
+        </div>
+      </section>
+    </div>
+
+    <!-- AI 对话 Tab -->
+    <div id="tab-ai" class="tab-content">
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <span class="eyebrow">Conversation</span>
+            <h2>AI 对话</h2>
+            <p class="panel-sub">创建一个通用 AI 会话，验证模型链路和上下文。</p>
+          </div>
+          <span id="aiSessionInfo" class="status">尚未创建会话</span>
+        </div>
+
+        <div class="row">
+          <button class="success" onclick="createAIConversation()">创建 AI 会话</button>
+        </div>
+
+        <div class="chat-area" id="aiChat" style="min-height:320px;">
+          <div class="msg system">创建 AI 会话后开始对话</div>
+        </div>
+
+        <div class="composer" style="margin-top:12px;">
+          <input type="text" id="aiMessage" placeholder="输入消息...">
+          <button class="success" onclick="aiChat()">发送</button>
+        </div>
+      </section>
+    </div>
+
+    <!-- Agent Tab -->
+    <div id="tab-agent" class="tab-content">
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <span class="eyebrow">Agent Runtime</span>
+            <h2>Agent Run · 自主编排</h2>
+            <p class="panel-sub">路由 → 规划 → DAG 调度 → 工具执行 → 合成，复杂任务会进入 plan 模式。</p>
+          </div>
+          <span id="agentRunInfo" class="status">等待任务</span>
+        </div>
+
+        <div class="agent-grid">
+          <div class="field">
+            <label for="agentInput">任务描述</label>
+            <textarea id="agentInput" placeholder="描述一个需要多步完成的任务...">帮我查一下 Go 后端面试常考什么，生成一个两周复习计划并保存到 plan.md</textarea>
+            <div class="row" style="margin-top:12px;">
+              <button class="success" onclick="runAgent()">▶ 运行 Agent</button>
+              <button class="ghost" onclick="loadAgentConfirmations()">待确认画像</button>
+              <button class="ghost" onclick="loadAgentDetail()">查看 Run 详情</button>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="agentOutput">输出</label>
+            <textarea id="agentOutput" readonly placeholder="Agent 输出会显示在这里..."></textarea>
+          </div>
+        </div>
+
+        <div class="field" style="margin-top:16px;">
+          <label for="agentDetail">Run 详情 · ContextReport / PlanJSON / Steps</label>
+          <textarea id="agentDetail" readonly placeholder="运行后点击「查看 Run 详情」..."></textarea>
+        </div>
+
+        <div id="agentConfirmations"></div>
+      </section>
+    </div>
+
+    <!-- 指标 Tab -->
+    <div id="tab-metrics" class="tab-content">
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <span class="eyebrow">Observability</span>
+            <h2>系统指标</h2>
+            <p class="panel-sub">指标写入 MySQL metric_logs，可按模块和事件聚合查看。</p>
+          </div>
+          <button class="ghost" onclick="loadMetrics()">刷新指标</button>
+        </div>
+        <div id="metricsArea"></div>
+      </section>
+    </div>
+  </main>
 </div>
 
 <script>
@@ -299,6 +829,7 @@ async function loadAgentConfirmations() {
     yes.onclick = () => resolveAgentConfirmation(item.id, 'confirm');
     const no = document.createElement('button');
     no.textContent = '拒绝';
+    no.className = 'danger';
     no.onclick = () => resolveAgentConfirmation(item.id, 'reject');
     row.appendChild(text);
     row.appendChild(yes);
