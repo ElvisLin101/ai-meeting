@@ -99,6 +99,10 @@ func validateFetchURL(raw string) (string, error) {
 	if raw == "" {
 		return "", ecode.New(ecode.ErrAgentInvalidInput, "url 不能为空")
 	}
+	// 模型经常省略 scheme；补成 https 后再做完整校验。
+	if !strings.Contains(raw, "://") {
+		raw = "https://" + strings.TrimPrefix(raw, "//")
+	}
 	if len(raw) > 8192 {
 		return "", ecode.New(ecode.ErrAgentInvalidInput, "url 过长")
 	}

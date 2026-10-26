@@ -111,4 +111,8 @@ func TestValidateFetchURL(t *testing.T) {
 			t.Fatalf("URL %q should pass: %v", raw, err)
 		}
 	}
+	normalized, err := validateFetchURL("example.com/a")
+	if err != nil || normalized != "https://example.com/a" {
+		t.Fatalf("scheme-less URL should normalize, got %q err=%v", normalized, err)
+	}
 }
