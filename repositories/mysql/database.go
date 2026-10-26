@@ -37,7 +37,9 @@ func InitDB() error {
 	sqlDB.SetMaxIdleConns(10)
 	sqlDB.SetMaxOpenConns(100)
 
-	// 自动迁移所有 MySQL 表
+	// 自动迁移所有 MySQL 表。
+	// 生产环境建议关闭 AutoMigrate，改为显式版本化迁移；这里失败必须阻断启动，
+	// 否则 schema 漂移会在第一次写库时才以 SQL 错误暴露。
 	if err := DB.AutoMigrate(
 		&models.MetricLog{},
 		&models.User{},
@@ -64,7 +66,7 @@ func InitDB() error {
 		&models.InterviewColdSnapshotRow{},
 		&models.InterviewTurnArchiveRow{},
 	); err != nil {
-		logrus.Warnf("Failed to auto migrate tables: %v", err)
+		return fmt.Errorf("auto migrate tables: %w", err)
 	}
 
 	logrus.Info("Database connection established")
