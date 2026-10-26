@@ -212,6 +212,27 @@ func TestReplannerNoChange(t *testing.T) {
 	}
 }
 
+func TestReplannerAcceptsStringAcceptance(t *testing.T) {
+	orig := callReplannerLLM
+	callReplannerLLM = func(ctx context.Context, aiID uint, messages []clients.PromptMessage, temperature float64) (string, error) {
+		return `{"reason":"add fallback","add":[{"id":"t2","type":"llm","goal":"给结论","acceptance":"给出结论"}]}`, nil
+	}
+	t.Cleanup(func() { callReplannerLLM = orig })
+
+	p := newKeyedPlan(agentTask("t1"))
+	diff, err := NewLLMReplanner().Propose(context.Background(), ReplanInput{
+		Goal: "find data", Plan: p,
+		Results: map[string]TaskResult{"t1": {ID: "t1", Status: StatusFailed}},
+		Reasons: []string{"t1 failed"}, MaxNewTasks: 2,
+	})
+	if err != nil {
+		t.Fatalf("string acceptance should be accepted: %v", err)
+	}
+	if len(diff.Add) != 1 || len(diff.Add[0].Acceptance) != 1 || diff.Add[0].Acceptance[0] != "给出结论" {
+		t.Fatalf("unexpected acceptance: %+v", diff.Add)
+	}
+}
+
 func TestPlanHashDetectsChanges(t *testing.T) {
 	p1 := newKeyedPlan(agentTask("t1"), agentTask("t2", "t1"))
 	p2 := newKeyedPlan(agentTask("t1"), agentTask("t2", "t1"))

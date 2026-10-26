@@ -267,6 +267,12 @@ async function loadAgentDetail() {
   ];
   if (r.plan_json) parts.push('--- PlanJSON ---\n' + prettyJSON(r.plan_json));
   if (r.context_report_json) parts.push('--- ContextReport ---\n' + prettyJSON(r.context_report_json));
+  if (Array.isArray(r.step_detail) && r.step_detail.length) {
+    parts.push('--- Steps ---\n' + r.step_detail.map(s => {
+      const task = s.task_id ? '[' + s.task_id + '] ' : '';
+      return task + '#' + s.step_index + ' ' + (s.action || 'final') + ' ' + s.status + ' ' + s.duration_ms + 'ms';
+    }).join('\n'));
+  }
   area.value = parts.join('\n\n');
 }
 

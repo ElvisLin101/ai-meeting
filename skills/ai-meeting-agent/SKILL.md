@@ -75,7 +75,7 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 - 事件: `route` / `plan_ready` / `plan_task_start` / `plan_task_done` / `plan_task_failed` / `plan_task_skipped` / `plan_replanned` / `plan_done`，复用 `services/agent/loop/loop.go` 的 `Event`。
 - 前置路由: `services/agent/plan/router.go` 用规则打分决定是否进 plan，不调用 LLM。强多步信号/中信号/长度/多问号/多行加分；纯问候、明确“直接回答”、短且无强信号减分。`services/agent/run/service.go` 只有 `UsePlan=true` 才调用 `planSvc.Run`，并发送 `route` 事件；`StartResult.PlanMode` 返回 `plan` / `plan_fallback` / `direct`。
 - 路由配置: `agent.plan.mode`（auto/always/never）、`agent.plan.min_score`、`agent.plan.fast_path_runes`。规则是启发式的，边界请求可能欠/过触发；需要更准时可加 cheap classifier，但不要给每个请求都加一次模型调用。
-- 持久化: `agent_runs.plan_json` 保存任务图与每个任务的最终状态；plan 任务不写 `agent_steps`，详情接口返回 `plan_json`。
+- 持久化: `agent_runs.plan_json` 保存任务图与每个任务的最终状态；plan 子任务的 step 同时写入 `agent_steps`，用 `task_id` 标识所属子任务（最终合成为 `synthesis`），`step_index` 由 run 级原子序号统一分配，避免并行任务/重试撞唯一键；重试会为同一 `task_id` 追加 step 行；详情接口同时返回 `plan_json` 和 `step_detail`。
 - Replan 安全机制:
   - `services/agent/plan/scheduler.go` 的 `RunRound` 在一批任务结束后统一评估失败/hint，多个触发合并成一次；计划修改只发生在轮次边界，由 `services/agent/plan/service.go` 单线程串行应用，不存在并发改 Plan。
   - `services/agent/plan/replanner.go` 只产出增量 `PlanDiff`（add/update/remove），不返回整张新计划；`ApplyDiff` 拒绝修改/删除已完成任务。
@@ -85,7 +85,7 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
   - `services/agent/plan/ledger.go` 是单 run 内的幂等账本：同 `idempotency_key` 并发只跑一次，成功结果缓存供 replan 复用，失败不缓存以允许重试。
   - `idempotency_key` 由任务语义（type/tool/goal/params/上游 key）计算，模型不能指定。
   - `services/agent/plan/service.go` 只对 `Retryable=true` 的失败重试；默认 `agent.plan.retry_max_attempts=2`、指数退避；调用过非只读工具的 agent 任务不自动重试。
-- 当前边界: 幂等账本只在进程内、单 run 内有效，进程重启后无法续跑；任务级结果只落在 `plan_json`，没有独立 `agent_plan_tasks` 表；replan 只处理失败/hint，不做每步评估。
+- 当前边界: 幂等账本只在进程内、单 run 内有效，进程重启后无法续跑；任务级结果同时落在 `plan_json` 和 `agent_steps`（按 `task_id` 分组），但没有独立 `agent_plan_tasks` 表；replan 只处理失败/hint，不做每步评估。
 
 ## 核心流程
 

@@ -109,7 +109,7 @@ func (c *AgentRunController) Get(ctx *gin.Context) {
 	}
 	for _, s := range steps {
 		detail.StepDetail = append(detail.StepDetail, dto.AgentRunStepRespDTO{
-			StepIndex: s.StepIndex, Thought: s.Thought, Action: s.Action,
+			TaskID: s.TaskID, StepIndex: s.StepIndex, Thought: s.Thought, Action: s.Action,
 			ActionInput: s.ActionInput, Observation: s.Observation,
 			Status: s.Status, DurationMs: s.DurationMs, Error: s.Error,
 		})

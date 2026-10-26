@@ -54,6 +54,7 @@ func (AgentRun) TableName() string { return "agent_runs" }
 type AgentStep struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
 	RunID       string    `gorm:"size:64;not null;uniqueIndex:uk_run_step,priority:1;index" json:"run_id"`
+	TaskID      string    `gorm:"size:64;index" json:"task_id"` // plan 子任务 ID；线性 ReAct 为空
 	StepIndex   int       `gorm:"not null;uniqueIndex:uk_run_step,priority:2" json:"step_index"`
 	Thought     string    `gorm:"type:longtext" json:"thought"`
 	Action      string    `gorm:"size:128" json:"action"` // 工具名, 空表示最终回答

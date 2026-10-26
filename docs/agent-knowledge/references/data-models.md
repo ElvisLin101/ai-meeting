@@ -40,8 +40,11 @@ Redis 热数据（`repositories/redis_hot.go`）：
   - `PlanJSON` 内任务包含 `idempotency_key`、`attempts`、`status`、`result`、`error`；计划包含 `version`、`replan_count`。
   - `ContextReportJSON` 保存本次根上下文装配的预算/各段 token/丢弃条数/压缩边界/画像事实数。
 - `AgentStep` -> MySQL `agent_steps`
-  - `RunID` + `StepIndex` 唯一；`Thought`, `Action`, `ActionInput`, `Observation`, `Status`, `DurationMs`, `Error`
-  - 用于按 run 回放，回答「Agent 为什么跑偏」。
+  - `RunID` + `StepIndex` 唯一；`TaskID` 标识 plan 子任务（线性 ReAct 为空）
+  - plan 子任务共享同一个 `RunID`，`StepIndex` 由 run 级原子序号全局递增，并行任务和重试不会冲突
+  - `Thought`, `Action`, `ActionInput`, `Observation`, `Status`, `DurationMs`, `Error`
+  - 用于按 run 回放，回答「Agent 为什么跑偏」；plan 任务可按 `TaskID` 分组
+  - `TaskID=synthesis` 表示最终合成步骤；任务重试会为同一 `TaskID` 追加新的 step 行，`StepIndex` 继续全局递增
 - `AgentProperties` -> MySQL `agent_properties`（配置元数据，启动缓存到 `AgentPropertiesLoader`）
 - `AgentFileAsset` -> MySQL `agent_file_assets`
 - `CompressedContextRecord` -> MySQL `compressed_contexts`（Agent 中期摘要）

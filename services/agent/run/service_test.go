@@ -2,9 +2,11 @@ package run
 
 import (
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"ai-meeting/config"
+	"ai-meeting/models"
 	"ai-meeting/services/agent/context"
 )
 
@@ -110,5 +112,32 @@ func TestDecodeStartResult(t *testing.T) {
 	}
 	if _, err := decodeStartResult("bad"); err == nil {
 		t.Fatal("unexpected type should error")
+	}
+}
+
+func TestStepRecorderPreparePlanStep(t *testing.T) {
+	var seq atomic.Int64
+	rec := &stepRecorder{runID: "run-1", taskID: "t1", seq: &seq}
+
+	first := &models.AgentStep{StepIndex: 1}
+	second := &models.AgentStep{StepIndex: 1}
+	rec.prepare(first)
+	rec.prepare(second)
+
+	if first.RunID != "run-1" || first.TaskID != "t1" || first.StepIndex != 1 {
+		t.Fatalf("unexpected first step: %+v", first)
+	}
+	if second.StepIndex != 2 {
+		t.Fatalf("plan steps should share a run-level sequence, got %d", second.StepIndex)
+	}
+}
+
+func TestStepRecorderKeepsDirectStepIndex(t *testing.T) {
+	rec := &stepRecorder{runID: "run-2"}
+	step := &models.AgentStep{StepIndex: 3}
+	rec.prepare(step)
+
+	if step.RunID != "run-2" || step.TaskID != "" || step.StepIndex != 3 {
+		t.Fatalf("direct run should keep loop step index: %+v", step)
 	}
 }

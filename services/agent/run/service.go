@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -291,6 +292,9 @@ func (s *Service) execute(ctx context.Context, req StartRequest, emit func(loop.
 
 	if decision.UsePlan {
 		logrus.Infof("[agent-run] route=plan reason=%s", decision.Reason)
+		// plan 的多个子任务共享同一个 run_id；step_index 在同一 run 内必须唯一，
+		// 因此用 run 级原子序号串行分配，避免并行任务或重试写入相同 (run_id, step_index)。
+		var planStepSeq atomic.Int64
 		planResult, planErr := planSvc.Run(ctx, planpkg.Input{
 			Query:       req.Input,
 			ContextHint: buildContextHint(assembled),
@@ -299,6 +303,9 @@ func (s *Service) execute(ctx context.Context, req StartRequest, emit func(loop.
 			SessionID:   conv.SessionID,
 			RunID:       runID,
 			AgentID:     req.AgentID,
+			RecorderFor: func(taskID string) loop.Recorder {
+				return &stepRecorder{runID: runID, taskID: taskID, seq: &planStepSeq}
+			},
 			PlanSink: func(p *planpkg.Plan) {
 				raw, err := json.Marshal(p)
 				if err != nil {
@@ -512,11 +519,27 @@ func ensureConversation(req StartRequest) (*models.Conversation, error) {
 	return conv, nil
 }
 
-// stepRecorder 把循环步骤写入 MySQL
-type stepRecorder struct{ runID string }
+// stepRecorder 把循环步骤写入 MySQL。
+// plan 子任务共用 runID，但 seq 非空时由 run 级原子序号统一分配 StepIndex，
+// 保证并行任务和失败重试不会撞 (run_id, step_index) 唯一键。
+type stepRecorder struct {
+	runID  string
+	taskID string
+	seq    *atomic.Int64
+}
+
+func (r *stepRecorder) prepare(step *models.AgentStep) {
+	step.RunID = r.runID
+	if r.taskID != "" {
+		step.TaskID = r.taskID
+	}
+	if r.seq != nil {
+		step.StepIndex = int(r.seq.Add(1))
+	}
+}
 
 func (r *stepRecorder) RecordStep(step *models.AgentStep) error {
-	step.RunID = r.runID
+	r.prepare(step)
 	return mysqlrepo.CreateAgentStep(step)
 }
 

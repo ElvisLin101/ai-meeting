@@ -20,6 +20,7 @@ type AgentRunRespDTO struct {
 
 // AgentRunStepRespDTO 单步记录
 type AgentRunStepRespDTO struct {
+	TaskID      string `json:"task_id,omitempty"`
 	StepIndex   int    `json:"step_index"`
 	Thought     string `json:"thought"`
 	Action      string `json:"action"`

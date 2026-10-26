@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"ai-meeting/services/agent/loop"
 )
 
 // ============================================================
@@ -104,6 +106,32 @@ const (
 	StatusCanceled TaskStatus = "canceled"
 )
 
+// StringList 兼容模型把字符串数组写成单个字符串的情况。
+// 例如 "acceptance":"给出结论" 会被规范化为 []string{"给出结论"}。
+type StringList []string
+
+func (s *StringList) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 || string(data) == "null" {
+		*s = nil
+		return nil
+	}
+	var list []string
+	if err := json.Unmarshal(data, &list); err == nil {
+		*s = list
+		return nil
+	}
+	var single string
+	if err := json.Unmarshal(data, &single); err != nil {
+		return fmt.Errorf("expected string or string array: %w", err)
+	}
+	if strings.TrimSpace(single) == "" {
+		*s = nil
+		return nil
+	}
+	*s = []string{single}
+	return nil
+}
+
 // Task 是计划中的一个节点。
 type Task struct {
 	ID         string                 `json:"id"`
@@ -112,7 +140,7 @@ type Task struct {
 	Tool       string                 `json:"tool,omitempty"`
 	Params     map[string]interface{} `json:"params,omitempty"`
 	DependsOn  []string               `json:"depends_on"`
-	Acceptance []string               `json:"acceptance,omitempty"`
+	Acceptance StringList             `json:"acceptance,omitempty"`
 	MaxSteps   int                    `json:"max_steps,omitempty"`
 
 	// IdempotencyKey 由任务语义（类型/工具/目标/参数/上游 key）决定。
@@ -214,6 +242,9 @@ type Input struct {
 	SessionID   string
 	RunID       string
 	AgentID     uint
+	// RecorderFor 为每个 plan 子任务创建 step recorder；nil 表示不落 step。
+	// 同一 run 的多个子任务共享 run_id，step_index 的唯一性由实现方保证。
+	RecorderFor func(taskID string) loop.Recorder
 	// PlanSink 在每个计划版本（初次生成/replan 后）被调用，用于中途持久化 plan_json。
 	PlanSink func(*Plan)
 }

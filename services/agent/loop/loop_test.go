@@ -169,13 +169,20 @@ func TestRun_RepeatedAction(t *testing.T) {
 			FinishReason: "tool_calls",
 		}, nil
 	})
-	l, _ := newLoop(t, &echoTool{}, Config{MaxSteps: 10, MaxRepeatActions: 2, TotalTimeout: time.Second})
+	l, rec := newLoop(t, &echoTool{}, Config{MaxSteps: 10, MaxRepeatActions: 2, TotalTimeout: time.Second})
 	res, err := l.Run(context.Background(), &tools.Context{}, nil, "hi", nil)
 	if err != nil {
 		t.Fatalf("run failed: %v", err)
 	}
 	if res.StopReason != "repeated_action" {
 		t.Fatalf("want repeated_action, got %+v", res)
+	}
+	if len(rec.steps) != 2 {
+		t.Fatalf("repeated_action should record the stopped step, got %d steps", len(rec.steps))
+	}
+	last := rec.steps[len(rec.steps)-1]
+	if last.Status != models.AgentStepStatusFailed || last.Error != "repeated_action" {
+		t.Fatalf("unexpected stopped step: %+v", last)
 	}
 }
 

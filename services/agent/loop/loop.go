@@ -211,6 +211,16 @@ func (l *Loop) Run(ctx context.Context, tc *tools.Context, initial []clients.Too
 				result.Content = resp.Content
 				result.Steps = step
 				result.Transcript = messages
+				l.recordStep(&models.AgentStep{
+					StepIndex:   step,
+					Thought:     resp.Content,
+					Action:      strings.Join(toolNames(resp.ToolCalls), ","),
+					ActionInput: toolInputs(resp.ToolCalls),
+					Observation: "检测到重复动作，已停止",
+					Status:      models.AgentStepStatusFailed,
+					Error:       "repeated_action",
+					DurationMs:  time.Since(stepStart).Milliseconds(),
+				})
 				if emit != nil {
 					emit(Event{Type: EventDone, StepIndex: step, StopReason: "repeated_action", Content: resp.Content})
 				}
