@@ -74,7 +74,7 @@ func main() {
 	outPath := flag.String("out", "tmp/live_eval_report.json", "report output")
 	username := flag.String("username", "eval-bot", "eval user (isolated from real users)")
 	userID := flag.String("user-id", "eval-bot", "eval user id used by interview tools")
-	agentID := flag.Uint("agent-id", 1, "agent id")
+	agentID := flag.Uint("agent-id", 0, "agent id (0 uses config/config.yaml, >0 uses ai_properties)")
 	limit := flag.Int("limit", 0, "run only first N cases")
 	timeout := flag.Duration("timeout", 180*time.Second, "per-case timeout")
 	minPass := flag.Float64("min-pass", 0.7, "exit non-zero when pass rate is below this")
@@ -83,15 +83,22 @@ func main() {
 	if err := config.LoadConfig(); err != nil {
 		fatalf("load config: %v", err)
 	}
+	cfg := config.GetConfig()
+	if strings.TrimSpace(cfg.AI.DeepSeek.APIKey) == "" && *agentID == 0 {
+		fatalf(`ai.deepseek.api_key 未配置，Live Eval 需要真实模型。
+
+任选一种方式配置后重跑：
+  1. 编辑 config/config.yaml，填写 ai.deepseek.api_key
+  2. 使用环境变量：AI_DEEPSEEK_API_KEY=sk-xxx go run ./cmd/liveeval -limit 1
+
+注意：config/config.yaml 已被 .gitignore 忽略，不要提交或粘贴到对话里。
+如果模型配置在 MySQL ai_properties 表里，请改用 -agent-id <id>。`)
+	}
 	if err := mysqlrepo.InitDB(); err != nil {
 		fatalf("init mysql: %v", err)
 	}
 	repositories.InitRedis()
 
-	cfg := config.GetConfig()
-	if strings.TrimSpace(cfg.AI.DeepSeek.APIKey) == "" {
-		fmt.Println("⚠️  ai.deepseek.api_key 为空，模型可能走 mock，结果仅用于链路验证")
-	}
 	fmt.Printf("model: %s\n", cfg.AI.DeepSeek.Model)
 
 	cases, err := loadCases(*casesPath)
