@@ -4,7 +4,6 @@ import (
 	"ai-meeting/dto"
 	"ai-meeting/models"
 	"ai-meeting/pkg/ecode"
-	mysqlrepo "ai-meeting/repositories/mysql"
 	"errors"
 	"strings"
 	"sync"
@@ -14,7 +13,16 @@ import (
 	"gorm.io/gorm"
 )
 
-type UserService struct{}
+type UserService struct {
+	repo userRepository
+}
+
+func (s *UserService) repository() userRepository {
+	if s.repo != nil {
+		return s.repo
+	}
+	return mysqlUserRepository{}
+}
 
 // hashPassword bcrypt 哈希密码
 func hashPassword(plain string) (string, error) {
@@ -40,7 +48,7 @@ func verifyPassword(stored, plain string) (matched, needMigrate bool, err error)
 
 // Login 用户登录验证
 func (s *UserService) Login(req dto.UserLoginReqDTO) (*models.User, error) {
-	user, err := mysqlrepo.FindActiveUserByUsername(req.Username)
+	user, err := s.repository().FindActiveUserByUsername(req.Username)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ecode.New(ecode.ErrUserNotFound, "user not found")
@@ -57,7 +65,7 @@ func (s *UserService) Login(req dto.UserLoginReqDTO) (*models.User, error) {
 	// 旧明文用户登录成功后自动迁移为 bcrypt 哈希
 	if migrate {
 		if hashed, herr := hashPassword(req.Password); herr == nil {
-			if uerr := mysqlrepo.UpdateUserPassword(user.Username, hashed); uerr != nil {
+			if uerr := s.repository().UpdateUserPassword(user.Username, hashed); uerr != nil {
 				logrus.Warnf("Failed to migrate password hash for user %s: %v", user.Username, uerr)
 			}
 		}
@@ -67,7 +75,7 @@ func (s *UserService) Login(req dto.UserLoginReqDTO) (*models.User, error) {
 
 // Register 用户注册
 func (s *UserService) Register(req dto.UserRegisterReqDTO) error {
-	if _, err := mysqlrepo.FindUserByUsername(req.Username); err == nil {
+	if _, err := s.repository().FindUserByUsername(req.Username); err == nil {
 		return ecode.New(ecode.ErrUsernameExists, "username already exists")
 	}
 	hashed, err := hashPassword(req.Password)
@@ -75,17 +83,17 @@ func (s *UserService) Register(req dto.UserRegisterReqDTO) error {
 		return ecode.Wrap(err, "密码哈希失败")
 	}
 	user := models.User{Username: req.Username, Password: hashed, Email: req.Email, Phone: req.Phone, IsAdmin: false, Status: 1}
-	return mysqlrepo.CreateUser(&user)
+	return s.repository().CreateUser(&user)
 }
 
 // GetUserByUsername 根据用户名查询用户
 func (s *UserService) GetUserByUsername(username string) (*models.User, error) {
-	return mysqlrepo.FindUserByUsername(username)
+	return s.repository().FindUserByUsername(username)
 }
 
 // HasUsername 检查用户名是否存在
 func (s *UserService) HasUsername(username string) (bool, error) {
-	count, err := mysqlrepo.CountUsersByUsername(username)
+	count, err := s.repository().CountUsersByUsername(username)
 	if err != nil {
 		return false, err
 	}
@@ -94,7 +102,7 @@ func (s *UserService) HasUsername(username string) (bool, error) {
 
 // Update 更新用户信息
 func (s *UserService) Update(req dto.UserUpdateReqDTO, currentUsername string) error {
-	return mysqlrepo.UpdateUserContact(currentUsername, req.Email, req.Phone)
+	return s.repository().UpdateUserContact(currentUsername, req.Email, req.Phone)
 }
 
 // PageUsers 分页查询用户列表
@@ -110,12 +118,12 @@ func (s *UserService) PageUsers(req dto.UserPageReqDTO) ([]models.User, int64, e
 		req.Size = 100
 	}
 	offset := (req.Page - 1) * req.Size
-	return mysqlrepo.PageUsers(req.Username, offset, req.Size)
+	return s.repository().PageUsers(req.Username, offset, req.Size)
 }
 
 // IsAdmin 检查用户是否为管理员
 func (s *UserService) IsAdmin(username string) (bool, error) {
-	user, err := mysqlrepo.FindUserByUsername(username)
+	user, err := s.repository().FindUserByUsername(username)
 	if err != nil {
 		return false, err
 	}
@@ -124,7 +132,7 @@ func (s *UserService) IsAdmin(username string) (bool, error) {
 
 // SetAdmin 设置用户为管理员
 func (s *UserService) SetAdmin(username string) error {
-	return mysqlrepo.SetUserAdmin(username)
+	return s.repository().SetUserAdmin(username)
 }
 
 var (
@@ -135,7 +143,7 @@ var (
 // GetUserService 获取UserService单例
 func GetUserService() *UserService {
 	userServiceOnce.Do(func() {
-		userServiceInstance = &UserService{}
+		userServiceInstance = &UserService{repo: mysqlUserRepository{}}
 		logrus.Info("UserService instance created")
 	})
 	return userServiceInstance
