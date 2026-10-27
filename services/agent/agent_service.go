@@ -6,7 +6,6 @@ import (
 	"ai-meeting/models"
 	"ai-meeting/pkg/ecode"
 
-	mysqlrepo "ai-meeting/repositories/mysql"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -19,7 +18,16 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-type AgentConversationService struct{}
+type AgentConversationService struct {
+	repo agentRepository
+}
+
+func (s *AgentConversationService) repository() agentRepository {
+	if s.repo != nil {
+		return s.repo
+	}
+	return mysqlAgentRepository{}
+}
 
 // CreateConversationWithTitle 创建Agent会话并生成标题
 // agentID 可选: 空默认 1(通用智能体), 非空则校验配置存在且启用
@@ -38,7 +46,7 @@ func (s *AgentConversationService) CreateConversationWithTitle(username, agentID
 		SessionID: sessionID, UserID: username, Scene: models.ConversationSceneAgent,
 		AgentID: agentIDUint, Title: title, Status: models.ConversationStatusActive, MessageCount: 0,
 	}
-	if err := mysqlrepo.CreateConversation(&conversation); err != nil {
+	if err := s.repository().CreateConversation(&conversation); err != nil {
 		return nil, err
 	}
 	return &dto.AgentSessionCreateRespDTO{SessionID: sessionID, Title: title}, nil
@@ -62,7 +70,7 @@ func resolveAgentID(agentID string) (uint, error) {
 // PageConversations 分页查询用户的Agent会话列表
 func (s *AgentConversationService) PageConversations(username string, req dto.AgentConversationPageReqDTO) ([]models.AgentConversation, int64, error) {
 	offset := (req.Page - 1) * req.Size
-	convs, total, err := mysqlrepo.PageConversations(username, models.ConversationSceneAgent, offset, req.Size)
+	convs, total, err := s.repository().PageConversations(username, models.ConversationSceneAgent, offset, req.Size)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -75,7 +83,7 @@ func (s *AgentConversationService) PageConversations(username string, req dto.Ag
 
 // EndConversation 结束会话
 func (s *AgentConversationService) EndConversation(sessionID, userID string) error {
-	return mysqlrepo.EndConversation(sessionID, userID)
+	return s.repository().EndConversation(sessionID, userID)
 }
 
 var (
@@ -86,17 +94,26 @@ var (
 // GetAgentConversationService 获取AgentConversationService单例
 func GetAgentConversationService() *AgentConversationService {
 	agentConversationServiceOnce.Do(func() {
-		agentConversationServiceInstance = &AgentConversationService{}
+		agentConversationServiceInstance = &AgentConversationService{repo: mysqlAgentRepository{}}
 		logrus.Info("AgentConversationService instance created")
 	})
 	return agentConversationServiceInstance
 }
 
-type AgentMessageService struct{}
+type AgentMessageService struct {
+	repo agentRepository
+}
+
+func (s *AgentMessageService) repository() agentRepository {
+	if s.repo != nil {
+		return s.repo
+	}
+	return mysqlAgentRepository{}
+}
 
 // GetConversationHistory 获取会话历史消息
 func (s *AgentMessageService) GetConversationHistory(sessionID, userID string) ([]models.AgentMessage, error) {
-	messages, err := mysqlrepo.ListMessagesAsc(sessionID, userID)
+	messages, err := s.repository().ListMessagesAsc(sessionID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +126,7 @@ func (s *AgentMessageService) GetConversationHistory(sessionID, userID string) (
 
 // PageHistoryMessages 分页查询历史消息
 func (s *AgentMessageService) PageHistoryMessages(sessionID string, page, size int, userID string) ([]models.AgentMessage, int64, error) {
-	messages, total, err := mysqlrepo.PageMessages(sessionID, userID, page, size)
+	messages, total, err := s.repository().PageMessages(sessionID, userID, page, size)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -122,7 +139,7 @@ func (s *AgentMessageService) PageHistoryMessages(sessionID string, page, size i
 
 // SaveMessage 保存消息
 func (s *AgentMessageService) SaveMessage(sessionID, userID, role, content string) error {
-	return mysqlrepo.CreateMessage(&models.Message{
+	return s.repository().CreateMessage(&models.Message{
 		SessionID: sessionID, UserID: userID, Role: role, Content: content,
 	})
 }
@@ -135,7 +152,7 @@ func (s *AgentMessageService) SaveMessage(sessionID, userID, role, content strin
 // 返回完整回复内容
 func (s *AgentMessageService) AgentChatSSE(sessionID, userID, content string, onChunk func(chunk string)) (string, error) {
 	// 1. 会话归属校验
-	conv, err := mysqlrepo.FindConversationBySessionAndUser(sessionID, userID)
+	conv, err := s.repository().FindConversationBySessionAndUser(sessionID, userID)
 	if err != nil || conv == nil {
 		return "", ecode.New(ecode.ErrSessionNotFound, "会话不存在或无权限")
 	}
@@ -149,14 +166,14 @@ func (s *AgentMessageService) AgentChatSSE(sessionID, userID, content string, on
 	// 3. 保存用户消息
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := mysqlrepo.CreateMessage(&models.Message{
+	if err := s.repository().CreateMessage(&models.Message{
 		SessionID: sessionID, UserID: userID, Role: "user", Content: content,
 	}); err != nil {
 		return "", ecode.Wrap(err, "保存用户消息失败")
 	}
 
 	// 4. 加载历史消息构建 prompt messages
-	rawMessages, err := mysqlrepo.ListMessagesAsc(sessionID, userID)
+	rawMessages, err := s.repository().ListMessagesAsc(sessionID, userID)
 	if err != nil {
 		return "", ecode.Wrap(err, "加载历史消息失败")
 	}
@@ -183,7 +200,7 @@ func (s *AgentMessageService) AgentChatSSE(sessionID, userID, content string, on
 	if err != nil {
 		// 6a. 出错也保存一条错误 assistant 消息
 		meta, _ := json.Marshal(map[string]interface{}{"response_time": responseTime, "error": err.Error()})
-		_ = mysqlrepo.CreateMessage(&models.Message{
+		_ = s.repository().CreateMessage(&models.Message{
 			SessionID: sessionID, UserID: userID, Role: "assistant",
 			Content: "Sorry, an error occurred while processing your request.", Metadata: string(meta),
 		})
@@ -193,7 +210,7 @@ func (s *AgentMessageService) AgentChatSSE(sessionID, userID, content string, on
 
 	// 6b. 保存 assistant 回复
 	meta, _ := json.Marshal(map[string]interface{}{"response_time": responseTime})
-	if err := mysqlrepo.CreateMessage(&models.Message{
+	if err := s.repository().CreateMessage(&models.Message{
 		SessionID: sessionID, UserID: userID, Role: "assistant",
 		Content: fullContent.String(), Metadata: string(meta),
 	}); err != nil {
@@ -201,8 +218,8 @@ func (s *AgentMessageService) AgentChatSSE(sessionID, userID, content string, on
 	}
 
 	// 7. 更新会话消息计数
-	if total, err := mysqlrepo.CountMessages(sessionID, userID); err == nil {
-		if err := mysqlrepo.UpdateConversationMessageCount(sessionID, userID, int(total)); err != nil {
+	if total, err := s.repository().CountMessages(sessionID, userID); err == nil {
+		if err := s.repository().UpdateConversationMessageCount(sessionID, userID, int(total)); err != nil {
 			logrus.Errorf("Failed to update conversation message count, session=%s, err=%v", sessionID, err)
 		}
 	}
@@ -253,38 +270,47 @@ var (
 // GetAgentMessageService 获取AgentMessageService单例
 func GetAgentMessageService() *AgentMessageService {
 	agentMessageServiceOnce.Do(func() {
-		agentMessageServiceInstance = &AgentMessageService{}
+		agentMessageServiceInstance = &AgentMessageService{repo: mysqlAgentRepository{}}
 		logrus.Info("AgentMessageService instance created")
 	})
 	return agentMessageServiceInstance
 }
 
-type AgentPropertiesService struct{}
+type AgentPropertiesService struct {
+	repo agentRepository
+}
+
+func (s *AgentPropertiesService) repository() agentRepository {
+	if s.repo != nil {
+		return s.repo
+	}
+	return mysqlAgentRepository{}
+}
 
 // Create 创建Agent配置
 func (s *AgentPropertiesService) Create(req dto.AgentPropertiesReqDTO) error {
 	prop := models.AgentProperties{Name: req.Name, Description: req.Description, Config: req.Config, IsEnabled: true}
-	return mysqlrepo.CreateAgentProperties(&prop)
+	return s.repository().CreateAgentProperties(&prop)
 }
 
 // Update 更新Agent配置
 func (s *AgentPropertiesService) Update(req dto.AgentPropertiesReqDTO) error {
-	return mysqlrepo.UpdateAgentProperties(req.ID, map[string]interface{}{"name": req.Name, "description": req.Description, "config": req.Config})
+	return s.repository().UpdateAgentProperties(req.ID, map[string]interface{}{"name": req.Name, "description": req.Description, "config": req.Config})
 }
 
 // Delete 删除Agent配置
 func (s *AgentPropertiesService) Delete(id uint) error {
-	return mysqlrepo.DeleteAgentProperties(id)
+	return s.repository().DeleteAgentProperties(id)
 }
 
 // GetByName 根据名称查询Agent配置
 func (s *AgentPropertiesService) GetByName(name string) (*models.AgentProperties, error) {
-	return mysqlrepo.FindAgentPropertiesByName(name)
+	return s.repository().FindAgentPropertiesByName(name)
 }
 
 // GetByPage 分页查询Agent配置
 func (s *AgentPropertiesService) GetByPage(req dto.AgentPropertiesReqDTO) ([]models.AgentProperties, int64, error) {
-	return mysqlrepo.PageAgentProperties(10)
+	return s.repository().PageAgentProperties(10)
 }
 
 var (
@@ -295,18 +321,27 @@ var (
 // GetAgentPropertiesService 获取AgentPropertiesService单例
 func GetAgentPropertiesService() *AgentPropertiesService {
 	agentPropertiesServiceOnce.Do(func() {
-		agentPropertiesServiceInstance = &AgentPropertiesService{}
+		agentPropertiesServiceInstance = &AgentPropertiesService{repo: mysqlAgentRepository{}}
 		logrus.Info("AgentPropertiesService instance created")
 	})
 	return agentPropertiesServiceInstance
 }
 
-type AgentFileAssetService struct{}
+type AgentFileAssetService struct {
+	repo agentRepository
+}
+
+func (s *AgentFileAssetService) repository() agentRepository {
+	if s.repo != nil {
+		return s.repo
+	}
+	return mysqlAgentRepository{}
+}
 
 // UploadAndPersist 上传文件并持久化记录
 func (s *AgentFileAssetService) UploadAndPersist(sessionID, bizType, username string, filename, path string, size int64) (*dto.AgentFileUploadRespDTO, error) {
 	asset := models.AgentFileAsset{SessionID: sessionID, UserID: username, Filename: filename, Path: path, BizType: bizType, Size: size}
-	if err := mysqlrepo.CreateAgentFileAsset(&asset); err != nil {
+	if err := s.repository().CreateAgentFileAsset(&asset); err != nil {
 		return nil, err
 	}
 	return &dto.AgentFileUploadRespDTO{FileID: fmt.Sprintf("%d", asset.ID), Filename: filename, Path: path}, nil
@@ -320,7 +355,7 @@ var (
 // GetAgentFileAssetService 获取AgentFileAssetService单例
 func GetAgentFileAssetService() *AgentFileAssetService {
 	agentFileAssetServiceOnce.Do(func() {
-		agentFileAssetServiceInstance = &AgentFileAssetService{}
+		agentFileAssetServiceInstance = &AgentFileAssetService{repo: mysqlAgentRepository{}}
 		logrus.Info("AgentFileAssetService instance created")
 	})
 	return agentFileAssetServiceInstance
