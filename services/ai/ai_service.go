@@ -4,14 +4,22 @@ import (
 	"ai-meeting/clients"
 	"ai-meeting/dto"
 	"ai-meeting/models"
-	mysqlrepo "ai-meeting/repositories/mysql"
 	"sync"
 
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 )
 
-type AiConversationService struct{}
+type AiConversationService struct {
+	repo aiRepository
+}
+
+func (s *AiConversationService) repository() aiRepository {
+	if s.repo != nil {
+		return s.repo
+	}
+	return mysqlAIRepository{}
+}
 
 // CreateConversationWithTitle 创建AI会话并生成标题
 func (s *AiConversationService) CreateConversationWithTitle(username string, aiID uint, firstMessage string) (*dto.AiSessionCreateRespDTO, error) {
@@ -24,7 +32,7 @@ func (s *AiConversationService) CreateConversationWithTitle(username string, aiI
 		SessionID: sessionID, UserID: username, Scene: models.ConversationSceneAI,
 		AgentID: aiID, Title: title, Status: models.ConversationStatusActive, MessageCount: 0,
 	}
-	if err := mysqlrepo.CreateConversation(&conversation); err != nil {
+	if err := s.repository().CreateConversation(&conversation); err != nil {
 		return nil, err
 	}
 	return &dto.AiSessionCreateRespDTO{SessionID: sessionID, Title: title}, nil
@@ -33,7 +41,7 @@ func (s *AiConversationService) CreateConversationWithTitle(username string, aiI
 // PageConversations 分页查询用户的AI会话列表
 func (s *AiConversationService) PageConversations(username string, req dto.AiConversationPageReqDTO) ([]models.AiConversation, int64, error) {
 	offset := (req.Page - 1) * req.Size
-	convs, total, err := mysqlrepo.PageConversations(username, models.ConversationSceneAI, offset, req.Size)
+	convs, total, err := s.repository().PageConversations(username, models.ConversationSceneAI, offset, req.Size)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -56,24 +64,24 @@ func (s *AiConversationService) UpdateConversation(sessionID string, messageCoun
 	if len(updates) == 0 {
 		return nil
 	}
-	return mysqlrepo.UpdateConversation(sessionID, username, updates)
+	return s.repository().UpdateConversation(sessionID, username, updates)
 }
 
 // UpdateConversationMessageCount 仅更新会话消息计数
 func (s *AiConversationService) UpdateConversationMessageCount(sessionID, username string, messageCount int) error {
-	return mysqlrepo.UpdateConversation(sessionID, username, map[string]interface{}{
+	return s.repository().UpdateConversation(sessionID, username, map[string]interface{}{
 		"message_count": messageCount,
 	})
 }
 
 // EndConversation 结束会话
 func (s *AiConversationService) EndConversation(sessionID, username string) error {
-	return mysqlrepo.EndConversation(sessionID, username)
+	return s.repository().EndConversation(sessionID, username)
 }
 
 // DeleteConversation 删除会话
 func (s *AiConversationService) DeleteConversation(sessionID, username string) error {
-	if err := mysqlrepo.DeleteConversation(sessionID, username); err != nil {
+	if err := s.repository().DeleteConversation(sessionID, username); err != nil {
 		return err
 	}
 	return GetAiMemoryService().ClearCompressedContext(sessionID)
@@ -81,7 +89,7 @@ func (s *AiConversationService) DeleteConversation(sessionID, username string) e
 
 // GetConversationBySessionId 根据会话ID查询会话
 func (s *AiConversationService) GetConversationBySessionId(sessionID, username string) (*models.AiConversation, error) {
-	conv, err := mysqlrepo.FindConversationBySessionAndUser(sessionID, username)
+	conv, err := s.repository().FindConversationBySessionAndUser(sessionID, username)
 	if err != nil || conv == nil {
 		return nil, err
 	}
@@ -97,17 +105,26 @@ var (
 // GetAiConversationService 获取AiConversationService单例
 func GetAiConversationService() *AiConversationService {
 	aiConversationServiceOnce.Do(func() {
-		aiConversationServiceInstance = &AiConversationService{}
+		aiConversationServiceInstance = &AiConversationService{repo: mysqlAIRepository{}}
 		logrus.Info("AiConversationService instance created")
 	})
 	return aiConversationServiceInstance
 }
 
-type AiMessageService struct{}
+type AiMessageService struct {
+	repo aiRepository
+}
+
+func (s *AiMessageService) repository() aiRepository {
+	if s.repo != nil {
+		return s.repo
+	}
+	return mysqlAIRepository{}
+}
 
 // GetConversationHistory 获取会话历史消息
 func (s *AiMessageService) GetConversationHistory(sessionID, username string) ([]models.AiMessage, error) {
-	messages, err := mysqlrepo.ListMessagesAsc(sessionID, username)
+	messages, err := s.repository().ListMessagesAsc(sessionID, username)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +137,7 @@ func (s *AiMessageService) GetConversationHistory(sessionID, username string) ([
 
 // PageHistoryMessages 分页查询历史消息
 func (s *AiMessageService) PageHistoryMessages(sessionID string, page, size int, username string) ([]models.AiMessage, int64, error) {
-	messages, total, err := mysqlrepo.PageMessages(sessionID, username, page, size)
+	messages, total, err := s.repository().PageMessages(sessionID, username, page, size)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -133,7 +150,7 @@ func (s *AiMessageService) PageHistoryMessages(sessionID string, page, size int,
 
 // SaveMessage 保存消息
 func (s *AiMessageService) SaveMessage(sessionID, userID, role, content string) error {
-	return mysqlrepo.CreateMessage(&models.Message{
+	return s.repository().CreateMessage(&models.Message{
 		SessionID: sessionID, UserID: userID, Role: role, Content: content,
 	})
 }
@@ -163,23 +180,32 @@ var (
 // GetAiMessageService 获取AiMessageService单例
 func GetAiMessageService() *AiMessageService {
 	aiMessageServiceOnce.Do(func() {
-		aiMessageServiceInstance = &AiMessageService{}
+		aiMessageServiceInstance = &AiMessageService{repo: mysqlAIRepository{}}
 		logrus.Info("AiMessageService instance created")
 	})
 	return aiMessageServiceInstance
 }
 
-type AiPropertiesService struct{}
+type AiPropertiesService struct {
+	repo aiRepository
+}
+
+func (s *AiPropertiesService) repository() aiRepository {
+	if s.repo != nil {
+		return s.repo
+	}
+	return mysqlAIRepository{}
+}
 
 // GetAvailableAiModels 获取所有可用的AI模型
 func (s *AiPropertiesService) GetAvailableAiModels() ([]models.AiProperties, error) {
-	return mysqlrepo.FindAllEnabledAiProperties()
+	return s.repository().FindAllEnabledAiProperties()
 }
 
 // CreateAiProperties 创建AI配置
 func (s *AiPropertiesService) CreateAiProperties(req dto.AiPropertiesCreateReqDTO) error {
 	prop := models.AiProperties{Name: req.Name, ModelType: req.ModelType, ApiKey: req.ApiKey, ApiSecret: req.ApiSecret, Endpoint: req.Endpoint, Config: req.Config, IsEnabled: true}
-	if err := mysqlrepo.CreateAiProperties(&prop); err != nil {
+	if err := s.repository().CreateAiProperties(&prop); err != nil {
 		return err
 	}
 	clients.InvalidateAiPropertyCache()
@@ -207,7 +233,7 @@ func (s *AiPropertiesService) UpdateAiProperties(req dto.AiPropertiesUpdateReqDT
 	if req.Config != "" {
 		updates["config"] = req.Config
 	}
-	if err := mysqlrepo.UpdateAiProperties(req.ID, updates); err != nil {
+	if err := s.repository().UpdateAiProperties(req.ID, updates); err != nil {
 		return err
 	}
 	clients.InvalidateAiPropertyCache()
@@ -216,7 +242,7 @@ func (s *AiPropertiesService) UpdateAiProperties(req dto.AiPropertiesUpdateReqDT
 
 // DeleteAiProperties 删除AI配置
 func (s *AiPropertiesService) DeleteAiProperties(id uint) error {
-	if err := mysqlrepo.DeleteAiProperties(id); err != nil {
+	if err := s.repository().DeleteAiProperties(id); err != nil {
 		return err
 	}
 	clients.InvalidateAiPropertyCache()
@@ -225,23 +251,23 @@ func (s *AiPropertiesService) DeleteAiProperties(id uint) error {
 
 // GetAiPropertiesById 根据ID查询AI配置
 func (s *AiPropertiesService) GetAiPropertiesById(id uint) (*models.AiProperties, error) {
-	return mysqlrepo.FindAiPropertiesByID(id)
+	return s.repository().FindAiPropertiesByID(id)
 }
 
 // PageAiProperties 分页查询AI配置
 func (s *AiPropertiesService) PageAiProperties(req dto.AiPropertiesPageReqDTO) ([]models.AiProperties, int64, error) {
 	offset := (req.Page - 1) * req.Size
-	return mysqlrepo.PageAiProperties(offset, req.Size)
+	return s.repository().PageAiProperties(offset, req.Size)
 }
 
 // GetAllEnabledAiProperties 获取所有启用的AI配置
 func (s *AiPropertiesService) GetAllEnabledAiProperties() ([]models.AiProperties, error) {
-	return mysqlrepo.FindAllEnabledAiProperties()
+	return s.repository().FindAllEnabledAiProperties()
 }
 
 // ToggleAiPropertiesStatus 切换AI配置启用状态
 func (s *AiPropertiesService) ToggleAiPropertiesStatus(id uint, isEnabled int) error {
-	if err := mysqlrepo.ToggleAiPropertiesStatus(id, isEnabled == 1); err != nil {
+	if err := s.repository().ToggleAiPropertiesStatus(id, isEnabled == 1); err != nil {
 		return err
 	}
 	clients.InvalidateAiPropertyCache()
@@ -256,7 +282,7 @@ var (
 // GetAiPropertiesService 获取AiPropertiesService单例
 func GetAiPropertiesService() *AiPropertiesService {
 	aiPropertiesServiceOnce.Do(func() {
-		aiPropertiesServiceInstance = &AiPropertiesService{}
+		aiPropertiesServiceInstance = &AiPropertiesService{repo: mysqlAIRepository{}}
 		logrus.Info("AiPropertiesService instance created")
 	})
 	return aiPropertiesServiceInstance
