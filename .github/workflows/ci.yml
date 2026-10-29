@@ -59,7 +59,7 @@ jobs:
         run: |
           coverage=$(go tool cover -func=coverage.out | tail -1 | awk '{gsub(/%/,"",$3); print $3}')
           echo "total coverage: ${coverage}%"
-          awk -v c="$coverage" 'BEGIN { if (c+0 < 35) { print "coverage below 35%"; exit 1 } }'
+          awk -v c="$coverage" 'BEGIN { if (c+0 < 38) { print "coverage below 38%"; exit 1 } }'
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4

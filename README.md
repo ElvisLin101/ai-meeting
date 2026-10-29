@@ -237,7 +237,7 @@ scripts/knowledge-check.sh diff
 - 确定性 eval：15 条路由、10 条画像规则、5 条冲突用例，CI 直接跑
 - Live eval：`cmd/liveeval` 用真实模型跑 10 条任务，输出 direct/plan 成功率、步数、token、延迟到 `tmp/live_eval_report.json`；默认隔离用户和 sandbox，需要 `config/config.yaml`、MySQL、Redis 和模型 key，不进 CI
 - 分布式组件：SingleFlight 单测 + 真实 Redis 集成测试 + 集群压测脚本
-- CI：gofmt → build → vet → race 测试 → eval → 覆盖率（低于 35% 失败）
+- CI：gofmt → build → vet → race 测试 → eval → 覆盖率（低于 38% 失败，目标 40%）
 
 ## 已知边界
 
