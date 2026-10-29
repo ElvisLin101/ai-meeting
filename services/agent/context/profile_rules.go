@@ -8,7 +8,6 @@ import (
 	"unicode/utf8"
 
 	"ai-meeting/models"
-	mysqlrepo "ai-meeting/repositories/mysql"
 
 	"github.com/sirupsen/logrus"
 )
@@ -118,7 +117,7 @@ func CaptureCandidatesAsync(userID, sessionID string, messageID uint, query stri
 				Rule:       c.Rule,
 				Status:     "pending",
 			}
-			if err := mysqlrepo.CreateProfileCandidate(rec); err != nil {
+			if err := currentRepository().CreateProfileCandidate(rec); err != nil {
 				logrus.Warnf("[agent-profile] create candidate failed user=%s field=%s err=%v",
 					userID, c.Field, err)
 			}

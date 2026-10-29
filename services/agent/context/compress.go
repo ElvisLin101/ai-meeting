@@ -5,7 +5,6 @@ import (
 	"ai-meeting/models"
 	"ai-meeting/pkg/singleflight"
 	"ai-meeting/repositories"
-	mysqlrepo "ai-meeting/repositories/mysql"
 	"context"
 	"fmt"
 	"strings"
@@ -77,7 +76,7 @@ func CompressIfNeeded(ctx context.Context, sessionID, userID string, thresholdTo
 func doCompress(ctx context.Context, writer *singleflight.StreamWriter, sessionID, userID string, thresholdTokens int) error {
 	prevSummary, covered := LoadSummary(ctx, sessionID)
 
-	messages, err := mysqlrepo.ListMessagesDesc(sessionID, userID)
+	messages, err := currentRepository().ListMessagesDesc(sessionID, userID)
 	if err != nil {
 		return err
 	}
