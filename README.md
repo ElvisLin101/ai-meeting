@@ -114,19 +114,55 @@
 
 ### 4. 分布式 SingleFlight — 跨实例 Agent run 去重
 
-Agent run 动辄数十秒，前端重试概率高。基于 Redis 实现跨实例请求合并：
+**问题**：Agent run 动辄数十秒，负载均衡下前端网络抖动或重试会让同一用户同一 prompt 的请求分散到不同实例；每个实例各跑一次 Agent 和模型调用，成本翻倍。
 
-- 主从选举（`SET NX`）、流式输出作心跳、停滞后自动换主、双通道取消（Pub/Sub + 轮询）、Redis 不可用降级本地
-- 非流式 run 走 SingleFlight 合并；流式 run 用 Redis 幂等锁拒绝重复提交（SingleFlight 无法复用流式 chunk）
+**方案**：基于 Redis `SET NX` + Pub/Sub 实现跨实例请求合并。
 
-**集群实测**（`cmd/sfcluster`：N 个独立进程共享一个 Redis）：
+```
+实例A 抢到锁 → 成为主节点 → 执行 Agent run → 写结果 → Pub 通知
+实例B 没抢到 → 成为从节点 → Sub 等待 → 读结果复用
+```
 
-| 场景 | 实例数 | 每实例并发 | 总请求 | 实际执行 | 结果一致 | 失败 |
-|---|---|---|---|---|---|---|
-| 去重 | 3 | 50 | 150 | 1 | 150/150 | 0 |
-| 换主（首个 leader 假死） | 3 | 50 | 150 | 2 | 150/150 | 0 |
+**关键设计**：
 
-> 集群压测还发现并修复了一个换主竞态：新 leader 抢锁后清空 `progressKey`，但首段输出前存在空窗口，迟到的旧 follower 会误判新 leader 卡死并 cancel 它。修复方式：新 leader 清理后立即写占位进度（见 `pkg/singleflight/singleflight.go`）。
+- **主从选举**：Redis `SET NX` 抢锁，第一个成功的是主节点，其余为从节点
+- **流式输出作心跳**：主节点每收到模型一段输出就写 Redis 进度（`字节数:时间戳`），从节点检测进度变化，30s 无变化判定卡死
+- **自动换主**：从节点检测到主节点卡死后写 `cancelKey`（携带旧主 nodeID 做身份校验），取消信号通过 Pub/Sub + 轮询双通道传递，旧主 cancel context 断开 SSE 不浪费 token，从节点重新抢锁成为新主
+- **降级策略**：Redis 不可用时自动降级为本地 SingleFlight（`sync.Mutex` + `map` + `WaitGroup`）
+- **流式/非流式分流**：非流式 run 走 SingleFlight 合并；流式 run 用 Redis 幂等锁拒绝重复提交（SingleFlight 无法复用流式 chunk，只做幂等）
+
+**代码位置**：`pkg/singleflight/singleflight.go`
+
+**实测验证**：`cmd/sfprobe` 对真实 Redis 发起 N 个并发同 key 请求（模拟单次约 300ms 的 AI 流式调用）：
+
+| 并发数 | 实际执行次数 | 去重率 | 结果一致 | 失败 | 总耗时 |
+|---|---|---|---|---|---|
+| 100 | 1 | 99.0%（省 99 次） | 100/100 | 0 | ~362ms |
+| 500 | 1 | 99.8%（省 499 次） | 500/500 | 0 | ~404ms |
+
+总耗时约等于单次底层调用耗时，说明并发请求被真正合并；事件统计 `leader_elected=1 / follower_waiting=N-1 / leader_completed=1`，无换主（leader 健康）。复现：
+
+```bash
+go run ./cmd/sfprobe --addr localhost:6379 --password 123456 --concurrency 500
+```
+
+**集群（多实例）压测**：`cmd/sfcluster` 启动 N 个独立 worker 进程（各自独立 DistributedGroup / 独立 nodeID / 进程隔离），仅共享一个 Redis，等价于真实集群中请求被打到不同实例：
+
+| 场景 | 实例数 | 每实例并发 | 总请求 | 实际执行 | 结果一致 | 失败 | 总耗时 | 执行实例 |
+|---|---|---|---|---|---|---|---|---|
+| 去重 | 3 | 50 | 150 | 1 | 150/150 | 0 | ~0.9s | 单实例 |
+| 换主（首个 leader 假死 40s） | 3 | 50 | 150 | 2 | 150/150 | 0 | ~30.5s | 假死实例 + 接管实例 |
+
+去重场景证明跨实例合并：3 个进程同时对同一 key 发起请求，全局只执行 1 次底层调用；换主场景证明故障转移：首个 leader 假死不刷新心跳，其余实例检测停滞（30s）后接管执行，所有请求拿到一致结果。复现：
+
+```bash
+# 去重场景
+bash scripts/sfcluster-run.sh --instances 3 --concurrency 50 --password 123456
+# 换主场景（首个 leader 假死触发换主，约 30s）
+bash scripts/sfcluster-run.sh --instances 3 --concurrency 50 --password 123456 --failover-worker 0
+```
+
+> 集群压测暴露并修复了一个换主竞态：新 leader 抢锁成功后清空 `progressKey`，但 fn 首段输出前存在空窗口，迟到的旧 follower 会误判新 leader 卡死并 cancel 它，引发连环换主。修复：新 leader 清理后立即写占位进度，消除空窗口（见 `pkg/singleflight/singleflight.go`）。
 
 ### 5. 存储：MySQL 真相源 + Redis 热数据
 
