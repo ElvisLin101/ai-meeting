@@ -2,7 +2,6 @@ package agent
 
 import (
 	"ai-meeting/models"
-	mysqlrepo "ai-meeting/repositories/mysql"
 	"sync"
 
 	"github.com/sirupsen/logrus"
@@ -11,7 +10,15 @@ import (
 // AgentPropertiesLoader 智能体配置启动缓存
 // 启动时全量加载 agent_properties 到内存，运行时先查缓存 miss 查库
 type AgentPropertiesLoader struct {
+	repo  agentPropertiesLoaderRepository
 	cache sync.Map // uint -> *models.AgentProperties
+}
+
+func (l *AgentPropertiesLoader) repository() agentPropertiesLoaderRepository {
+	if l.repo != nil {
+		return l.repo
+	}
+	return mysqlAgentRepository{}
 }
 
 var agentPropertiesLoaderInstance *AgentPropertiesLoader
@@ -20,7 +27,7 @@ var agentPropertiesLoaderOnce sync.Once
 // GetAgentPropertiesLoader 获取智能体配置加载器单例
 func GetAgentPropertiesLoader() *AgentPropertiesLoader {
 	agentPropertiesLoaderOnce.Do(func() {
-		agentPropertiesLoaderInstance = &AgentPropertiesLoader{}
+		agentPropertiesLoaderInstance = &AgentPropertiesLoader{repo: mysqlAgentRepository{}}
 		agentPropertiesLoaderInstance.RefreshActiveAgents()
 	})
 	return agentPropertiesLoaderInstance
@@ -28,7 +35,7 @@ func GetAgentPropertiesLoader() *AgentPropertiesLoader {
 
 // RefreshActiveAgents 刷新缓存：全量加载启用的智能体配置
 func (l *AgentPropertiesLoader) RefreshActiveAgents() {
-	agents, err := mysqlrepo.ListActiveAgentProperties()
+	agents, err := l.repository().ListActiveAgentProperties()
 	if err != nil {
 		logrus.Errorf("Failed to load agent properties: %v", err)
 		return
@@ -59,7 +66,7 @@ func (l *AgentPropertiesLoader) GetByAgentID(agentID uint) *models.AgentProperti
 		return nil
 	}
 
-	prop, err := mysqlrepo.FindAgentPropertiesByID(agentID)
+	prop, err := l.repository().FindAgentPropertiesByID(agentID)
 	if err != nil || prop == nil {
 		return nil
 	}
@@ -92,7 +99,7 @@ func (l *AgentPropertiesLoader) GetByAgentName(name string) *models.AgentPropert
 	}
 
 	// 缓存 miss，查库
-	prop, err := mysqlrepo.FindAgentPropertiesByName(name)
+	prop, err := l.repository().FindAgentPropertiesByName(name)
 	if err != nil || prop == nil {
 		return nil
 	}

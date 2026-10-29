@@ -2,7 +2,6 @@ package metric
 
 import (
 	"ai-meeting/models"
-	mysqlrepo "ai-meeting/repositories/mysql"
 	"sync"
 	"time"
 
@@ -25,9 +24,17 @@ const (
 
 // MetricService 指标服务单例
 type MetricService struct {
+	repo   metricRepository
 	ch     chan models.MetricLog
 	stopCh chan struct{}
 	wg     sync.WaitGroup
+}
+
+func (s *MetricService) repository() metricRepository {
+	if s.repo != nil {
+		return s.repo
+	}
+	return mysqlMetricRepository{}
 }
 
 var instance *MetricService
@@ -37,6 +44,7 @@ var once sync.Once
 func GetMetricService() *MetricService {
 	once.Do(func() {
 		instance = &MetricService{
+			repo:   mysqlMetricRepository{},
 			ch:     make(chan models.MetricLog, bufferSize),
 			stopCh: make(chan struct{}),
 		}
@@ -131,7 +139,7 @@ func (s *MetricService) flush(batch []models.MetricLog) {
 	if len(batch) == 0 {
 		return
 	}
-	if err := mysqlrepo.BatchCreateMetricLogs(batch); err != nil {
+	if err := s.repository().BatchCreateMetricLogs(batch); err != nil {
 		logrus.Warnf("Failed to flush metric logs: %v, count=%d", err, len(batch))
 	}
 }

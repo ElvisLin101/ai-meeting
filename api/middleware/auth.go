@@ -4,6 +4,7 @@ import (
 	"ai-meeting/api/resp"
 	"ai-meeting/config"
 	"ai-meeting/pkg/ecode"
+	"fmt"
 	"strings"
 	"time"
 
@@ -36,6 +37,9 @@ func AuthMiddleware() gin.HandlerFunc {
 		claims := &Claims{}
 
 		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+			}
 			return []byte(config.AppConfig.JWT.Secret), nil
 		})
 

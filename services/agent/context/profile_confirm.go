@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"ai-meeting/models"
-	mysqlrepo "ai-meeting/repositories/mysql"
 )
 
 // ListPendingProfileConfirmations 查询当前用户待确认的画像项。
@@ -14,7 +13,7 @@ func ListPendingProfileConfirmations(ctx context.Context, userID string) ([]mode
 	if userID == "" {
 		return nil, nil
 	}
-	return mysqlrepo.ListPendingProfileConfirmations(userID, 50)
+	return currentRepository().ListPendingProfileConfirmations(userID, 50)
 }
 
 // ResolveProfileConfirmation 处理用户确认/拒绝。
@@ -33,7 +32,7 @@ func ResolveProfileConfirmation(ctx context.Context, userID string, id uint, act
 		return fmt.Errorf("action must be confirm or reject")
 	}
 
-	confirmation, err := mysqlrepo.FindProfileConfirmation(id, userID)
+	confirmation, err := currentRepository().FindProfileConfirmation(id, userID)
 	if err != nil {
 		return err
 	}
@@ -42,7 +41,7 @@ func ResolveProfileConfirmation(ctx context.Context, userID string, id uint, act
 	}
 
 	if action == "reject" {
-		ok, err := mysqlrepo.MarkProfileConfirmation(id, userID, "rejected")
+		ok, err := currentRepository().MarkProfileConfirmation(id, userID, "rejected")
 		if err != nil {
 			return err
 		}
@@ -79,7 +78,7 @@ func ResolveProfileConfirmation(ctx context.Context, userID string, id uint, act
 	if err := persistConsolidatedProfile(ctx, userID, next, isNew); err != nil {
 		return err
 	}
-	ok, err := mysqlrepo.MarkProfileConfirmation(id, userID, "confirmed")
+	ok, err := currentRepository().MarkProfileConfirmation(id, userID, "confirmed")
 	if err != nil {
 		return err
 	}

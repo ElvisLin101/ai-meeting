@@ -7,7 +7,6 @@ import (
 	"ai-meeting/pkg/ecode"
 	"ai-meeting/pkg/singleflight"
 	"ai-meeting/repositories"
-	mysqlrepo "ai-meeting/repositories/mysql"
 	"ai-meeting/services/agent/context"
 	"ai-meeting/services/agent/loop"
 	planpkg "ai-meeting/services/agent/plan"
@@ -19,6 +18,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -56,6 +57,7 @@ type StartResult struct {
 
 // Service Agent run 服务
 type Service struct {
+	repo      runRepository
 	registry  *tools.Registry
 	executor  *tools.Executor
 	assembler *agentctx.Assembler
@@ -64,11 +66,21 @@ type Service struct {
 	quota     config.QuotaConfig
 }
 
-var serviceInstance *Service
+func (s *Service) repository() runRepository {
+	if s.repo != nil {
+		return s.repo
+	}
+	return mysqlRunRepository{}
+}
+
+var (
+	serviceInstance *Service
+	serviceOnce     sync.Once
+)
 
 // GetService 获取单例
 func GetService() *Service {
-	if serviceInstance == nil {
+	serviceOnce.Do(func() {
 		cfg := config.GetConfig().Agent
 		registry := buildRegistry(cfg)
 		executor := tools.NewExecutor(registry,
@@ -80,6 +92,7 @@ func GetService() *Service {
 			})
 		})
 		serviceInstance = &Service{
+			repo:     mysqlRunRepository{},
 			registry: registry,
 			executor: executor,
 			assembler: agentctx.NewAssembler(agentctx.Config{
@@ -109,7 +122,7 @@ func GetService() *Service {
 			},
 			quota: cfg.Quota,
 		}
-	}
+	})
 	return serviceInstance
 }
 
@@ -125,10 +138,24 @@ func buildRegistry(cfg config.AgentConfig) *tools.Registry {
 	registry.Register(tools.NewInterviewCurrentQuestionTool())
 	registry.Register(tools.NewInterviewSubmitAnswerTool())
 
-	if provider, err := tools.NewSearchProvider(cfg.Search); err != nil {
+	searchCfg := cfg.Search
+	providerName := strings.ToLower(strings.TrimSpace(searchCfg.Provider))
+	if providerName == "" {
+		providerName = "deepseek"
+	}
+	// DeepSeek 的 Search/Fetch 复用模型 API key，不要求用户再配一份搜索 key。
+	if providerName == "deepseek" && strings.TrimSpace(searchCfg.APIKey) == "" {
+		searchCfg.APIKey = config.GetConfig().AI.DeepSeek.APIKey
+	}
+	if provider, err := tools.NewSearchProvider(searchCfg); err != nil {
 		logrus.Warnf("[agent] web_search disabled: %v", err)
 	} else {
-		registry.Register(tools.NewWebSearchTool(provider, cfg.Search.MaxResults))
+		registry.Register(tools.NewWebSearchTool(provider, searchCfg.MaxResults))
+		if fetcher, ok := provider.(tools.PageFetcher); ok {
+			registry.Register(tools.NewWebFetchTool(fetcher))
+		} else {
+			logrus.Infof("[agent] web_fetch disabled: provider %s does not implement fetch", providerName)
+		}
 	}
 	return registry
 }
@@ -194,7 +221,7 @@ func (s *Service) StartStream(ctx context.Context, req StartRequest, emit func(l
 
 // execute 核心执行流程
 func (s *Service) execute(ctx context.Context, req StartRequest, emit func(loop.Event)) (*StartResult, error) {
-	conv, err := ensureConversation(req)
+	conv, err := s.ensureConversation(req)
 	if err != nil {
 		return nil, err
 	}
@@ -254,11 +281,11 @@ func (s *Service) execute(ctx context.Context, req StartRequest, emit func(loop.
 		AgentID: req.AgentID, Input: req.Input, Status: models.AgentRunStatusRunning,
 		StartedAt: time.Now(),
 	}
-	if err := mysqlrepo.CreateAgentRun(runRecord); err != nil {
+	if err := s.repository().CreateAgentRun(runRecord); err != nil {
 		return nil, ecode.Wrap(err, "创建 run 失败")
 	}
 	if raw, err := json.Marshal(assembled.Report); err == nil {
-		if err := mysqlrepo.UpdateAgentRunContextReport(runID, string(raw)); err != nil {
+		if err := s.repository().UpdateAgentRunContextReport(runID, string(raw)); err != nil {
 			logrus.Warnf("[agent-run] persist context report failed: %v", err)
 		}
 	}
@@ -291,6 +318,9 @@ func (s *Service) execute(ctx context.Context, req StartRequest, emit func(loop.
 
 	if decision.UsePlan {
 		logrus.Infof("[agent-run] route=plan reason=%s", decision.Reason)
+		// plan 的多个子任务共享同一个 run_id；step_index 在同一 run 内必须唯一，
+		// 因此用 run 级原子序号串行分配，避免并行任务或重试写入相同 (run_id, step_index)。
+		var planStepSeq atomic.Int64
 		planResult, planErr := planSvc.Run(ctx, planpkg.Input{
 			Query:       req.Input,
 			ContextHint: buildContextHint(assembled),
@@ -299,12 +329,15 @@ func (s *Service) execute(ctx context.Context, req StartRequest, emit func(loop.
 			SessionID:   conv.SessionID,
 			RunID:       runID,
 			AgentID:     req.AgentID,
+			RecorderFor: func(taskID string) loop.Recorder {
+				return &stepRecorder{repo: s.repo, runID: runID, taskID: taskID, seq: &planStepSeq}
+			},
 			PlanSink: func(p *planpkg.Plan) {
 				raw, err := json.Marshal(p)
 				if err != nil {
 					return
 				}
-				if err := mysqlrepo.UpdateAgentRunPlan(runID, string(raw)); err != nil {
+				if err := s.repository().UpdateAgentRunPlan(runID, string(raw)); err != nil {
 					logrus.Warnf("[agent-run] persist plan snapshot failed: %v", err)
 				}
 			},
@@ -319,7 +352,7 @@ func (s *Service) execute(ctx context.Context, req StartRequest, emit func(loop.
 		logrus.Debugf("[agent-run] route=direct reason=%s", decision.Reason)
 	}
 
-	recorder := &stepRecorder{runID: runID}
+	recorder := &stepRecorder{repo: s.repo, runID: runID}
 	runner := loop.New(s.registry, s.executor, loop.Config{
 		AIID:                       req.AgentID,
 		MaxSteps:                   s.cfg.MaxSteps,
@@ -335,7 +368,7 @@ func (s *Service) execute(ctx context.Context, req StartRequest, emit func(loop.
 	durationMs := time.Since(start).Milliseconds()
 
 	if loopErr != nil {
-		_ = mysqlrepo.FinishAgentRun(runID, models.AgentRunStatusFailed, "error", "", loopErr.Error(), 0, 0)
+		_ = s.repository().FinishAgentRun(runID, models.AgentRunStatusFailed, "error", "", loopErr.Error(), 0, 0)
 		metric.GetMetricService().Record(models.MetricLog{
 			Module: "agent", Event: "run_failed", Success: false,
 			SessionID: conv.SessionID, DurationMs: durationMs,
@@ -352,7 +385,7 @@ func (s *Service) execute(ctx context.Context, req StartRequest, emit func(loop.
 	if loopResult.StopReason != "final_answer" {
 		status = models.AgentRunStatusMaxSteps
 	}
-	_ = mysqlrepo.FinishAgentRun(runID, status, loopResult.StopReason,
+	_ = s.repository().FinishAgentRun(runID, status, loopResult.StopReason,
 		loopResult.Content, "", loopResult.Steps, loopResult.Tokens)
 
 	metric.GetMetricService().Record(models.MetricLog{
@@ -395,12 +428,12 @@ func (s *Service) finishPlanRun(req StartRequest, conv *models.Conversation, run
 	if result.Status == planpkg.ResultFailed {
 		errMsg = result.StopReason
 	}
-	_ = mysqlrepo.FinishAgentRun(runID, status, result.StopReason,
+	_ = s.repository().FinishAgentRun(runID, status, result.StopReason,
 		result.Answer, errMsg, result.Steps, result.Tokens)
 
 	if result.Plan != nil {
 		if raw, err := json.Marshal(result.Plan); err == nil {
-			if err := mysqlrepo.UpdateAgentRunPlan(runID, string(raw)); err != nil {
+			if err := s.repository().UpdateAgentRunPlan(runID, string(raw)); err != nil {
 				logrus.Warnf("[agent-run] update plan_json failed: %v", err)
 			}
 		}
@@ -472,23 +505,23 @@ func (s *Service) saveMessage(sessionID, userID, role, content, metadata string)
 		SessionID: sessionID, UserID: userID, Role: role,
 		Content: content, Metadata: metadata,
 	}
-	if err := mysqlrepo.CreateMessage(msg); err != nil {
+	if err := s.repository().CreateMessage(msg); err != nil {
 		return nil, err
 	}
 	if err := repositories.PushRecentMessage(context.Background(), sessionID, msg); err != nil {
 		logrus.Warnf("[agent-run] push recent message failed: %v", err)
 	}
-	count, err := mysqlrepo.CountMessages(sessionID, userID)
+	count, err := s.repository().CountMessages(sessionID, userID)
 	if err == nil {
-		_ = mysqlrepo.UpdateConversationMessageCount(sessionID, userID, int(count))
+		_ = s.repository().UpdateConversationMessageCount(sessionID, userID, int(count))
 	}
 	return msg, nil
 }
 
 // ensureConversation 校验或创建 Agent 会话
-func ensureConversation(req StartRequest) (*models.Conversation, error) {
+func (s *Service) ensureConversation(req StartRequest) (*models.Conversation, error) {
 	if req.SessionID != "" {
-		conv, err := mysqlrepo.FindConversationBySessionAndUser(req.SessionID, req.Username)
+		conv, err := s.repository().FindConversationBySessionAndUser(req.SessionID, req.Username)
 		if err != nil {
 			return nil, ecode.Wrap(err, "查询会话失败")
 		}
@@ -506,18 +539,42 @@ func ensureConversation(req StartRequest) (*models.Conversation, error) {
 		Title:     truncateTitle(req.Input),
 		Status:    models.ConversationStatusActive,
 	}
-	if err := mysqlrepo.CreateConversation(conv); err != nil {
+	if err := s.repository().CreateConversation(conv); err != nil {
 		return nil, ecode.Wrap(err, "创建会话失败")
 	}
 	return conv, nil
 }
 
-// stepRecorder 把循环步骤写入 MySQL
-type stepRecorder struct{ runID string }
+// stepRecorder 把循环步骤写入 MySQL。
+// plan 子任务共用 runID，但 seq 非空时由 run 级原子序号统一分配 StepIndex，
+// 保证并行任务和失败重试不会撞 (run_id, step_index) 唯一键。
+type stepRecorder struct {
+	repo   runRepository
+	runID  string
+	taskID string
+	seq    *atomic.Int64
+}
+
+func (r *stepRecorder) repository() runRepository {
+	if r.repo != nil {
+		return r.repo
+	}
+	return mysqlRunRepository{}
+}
+
+func (r *stepRecorder) prepare(step *models.AgentStep) {
+	step.RunID = r.runID
+	if r.taskID != "" {
+		step.TaskID = r.taskID
+	}
+	if r.seq != nil {
+		step.StepIndex = int(r.seq.Add(1))
+	}
+}
 
 func (r *stepRecorder) RecordStep(step *models.AgentStep) error {
-	step.RunID = r.runID
-	return mysqlrepo.CreateAgentStep(step)
+	r.prepare(step)
+	return r.repository().CreateAgentStep(step)
 }
 
 func validate(req StartRequest) error {

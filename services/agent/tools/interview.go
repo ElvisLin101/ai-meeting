@@ -3,7 +3,6 @@ package tools
 import (
 	"ai-meeting/dto"
 	"ai-meeting/pkg/ecode"
-	mysqlrepo "ai-meeting/repositories/mysql"
 	"ai-meeting/services/interview"
 	"context"
 	"encoding/json"
@@ -180,7 +179,7 @@ func ensureInterviewOwnership(ctx context.Context, sessionID, userID string) err
 	if userID == "" {
 		return ecode.New(ecode.NotLogin, "缺少用户身份")
 	}
-	session, err := mysqlrepo.FindInterviewSession(ctx, sessionID, userID)
+	session, err := interviewSessionRepo.FindInterviewSession(ctx, sessionID, userID)
 	if err != nil || session == nil {
 		// 查询失败与不存在统一按"无权限/不存在"处理, 避免泄露会话是否存在
 		return ecode.New(ecode.ErrSessionNotFound, "面试会话不存在或无权限")

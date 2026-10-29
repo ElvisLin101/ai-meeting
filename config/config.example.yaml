@@ -51,9 +51,10 @@ agent:
     max_concurrent_runs: 0      # 单用户并发 run 上限，0 不限制
     daily_token_limit: 0        # 单用户每日 token 上限，0 不限制
   search:
-    provider: "tavily"          # tavily | serper
-    endpoint: "https://api.tavily.com/search"
-    api_key: ""                 # 也可用 AGENT_SEARCH_API_KEY 覆盖
+    provider: "deepseek"        # deepseek | tavily | serper
+    endpoint: ""                # 留空使用 provider 默认；deepseek: /v1/tools/search
+    fetch_endpoint: ""          # 留空使用 provider 默认；deepseek: /v1/tools/fetch
+    api_key: ""                 # deepseek 时留空自动复用 ai.deepseek.api_key；也可用 AGENT_SEARCH_API_KEY
     max_results: 5
   plan:
     enabled: true               # 复杂任务先规划再执行；失败自动回退线性 ReAct

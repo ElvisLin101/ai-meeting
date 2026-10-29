@@ -5,7 +5,6 @@ import (
 	"ai-meeting/dto"
 	"ai-meeting/models"
 	"ai-meeting/pkg/ecode"
-	mysqlrepo "ai-meeting/repositories/mysql"
 	"context"
 	"errors"
 	"fmt"
@@ -105,7 +104,7 @@ func (s *AiMessageService) prepareAiChat(ctx context.Context, sessionID, userID,
 	}
 
 	userMessage := &models.Message{SessionID: sessionID, UserID: userID, Role: "user", Content: content}
-	if err := mysqlrepo.CreateMessage(userMessage); err != nil {
+	if err := s.repository().CreateMessage(userMessage); err != nil {
 		return nil, "", err
 	}
 
@@ -120,11 +119,11 @@ func (s *AiMessageService) prepareAiChat(ctx context.Context, sessionID, userID,
 // finishAiChat 完成聊天：保存 assistant 消息 → 更新会话消息数 → 异步触发记忆压缩 → 返回响应 DTO
 func (s *AiMessageService) finishAiChat(ctx context.Context, sessionID, userID string, userMessage *models.Message, reply string, threshold int) (*dto.AiChatRespDTO, error) {
 	assistantMessage := &models.Message{SessionID: sessionID, UserID: userID, Role: "assistant", Content: reply}
-	if err := mysqlrepo.CreateMessage(assistantMessage); err != nil {
+	if err := s.repository().CreateMessage(assistantMessage); err != nil {
 		return nil, err
 	}
 
-	if total, err := mysqlrepo.CountMessages(sessionID, userID); err == nil {
+	if total, err := s.repository().CountMessages(sessionID, userID); err == nil {
 		if err := GetAiConversationService().UpdateConversationMessageCount(sessionID, userID, int(total)); err != nil {
 			logrus.Warnf("Failed to update AI conversation message count, session=%s, err=%v", sessionID, err)
 		}

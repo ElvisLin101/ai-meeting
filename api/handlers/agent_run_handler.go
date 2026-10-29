@@ -78,7 +78,10 @@ func (c *AgentRunController) RunStream(ctx *gin.Context) {
 
 // Get 查询 run 详情（含 step 回放）
 func (c *AgentRunController) Get(ctx *gin.Context) {
-	username, _ := ctx.Get("username")
+	username, ok := mustUsername(ctx)
+	if !ok {
+		return
+	}
 	runID := ctx.Param("runId")
 
 	record, err := mysqlrepo.FindAgentRun(runID)
@@ -109,7 +112,7 @@ func (c *AgentRunController) Get(ctx *gin.Context) {
 	}
 	for _, s := range steps {
 		detail.StepDetail = append(detail.StepDetail, dto.AgentRunStepRespDTO{
-			StepIndex: s.StepIndex, Thought: s.Thought, Action: s.Action,
+			TaskID: s.TaskID, StepIndex: s.StepIndex, Thought: s.Thought, Action: s.Action,
 			ActionInput: s.ActionInput, Observation: s.Observation,
 			Status: s.Status, DurationMs: s.DurationMs, Error: s.Error,
 		})
@@ -119,7 +122,10 @@ func (c *AgentRunController) Get(ctx *gin.Context) {
 
 // Page 分页查询当前用户的 run
 func (c *AgentRunController) Page(ctx *gin.Context) {
-	username, _ := ctx.Get("username")
+	username, ok := mustUsername(ctx)
+	if !ok {
+		return
+	}
 	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
 	size, _ := strconv.Atoi(ctx.DefaultQuery("size", "10"))
 	if page < 1 {
@@ -129,7 +135,7 @@ func (c *AgentRunController) Page(ctx *gin.Context) {
 		size = 10
 	}
 
-	runs, total, err := mysqlrepo.PageAgentRuns(username.(string), (page-1)*size, size)
+	runs, total, err := mysqlrepo.PageAgentRuns(username, (page-1)*size, size)
 	if err != nil {
 		respx.Respond(ctx, ecode.Wrap(err, "查询 run 列表失败"), nil)
 		return
@@ -151,19 +157,17 @@ func (c *AgentRunController) bindRequest(ctx *gin.Context) (agentrun.StartReques
 		respx.Fail(ctx, ecode.RequestErr, err.Error())
 		return agentrun.StartRequest{}, false
 	}
-	username, ok := ctx.Get("username")
-	if !ok || username == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	username, ok := mustUsername(ctx)
+	if !ok {
 		return agentrun.StartRequest{}, false
 	}
-	userID, ok := ctx.Get("user_id")
-	if !ok || userID == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	userID, ok := mustUserID(ctx)
+	if !ok {
 		return agentrun.StartRequest{}, false
 	}
 	return agentrun.StartRequest{
-		UserID:    userID.(string),
-		Username:  username.(string),
+		UserID:    userID,
+		Username:  username,
 		SessionID: body.SessionID,
 		AgentID:   body.AgentID,
 		Input:     body.Input,

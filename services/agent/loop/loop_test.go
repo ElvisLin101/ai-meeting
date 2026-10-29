@@ -169,13 +169,55 @@ func TestRun_RepeatedAction(t *testing.T) {
 			FinishReason: "tool_calls",
 		}, nil
 	})
-	l, _ := newLoop(t, &echoTool{}, Config{MaxSteps: 10, MaxRepeatActions: 2, TotalTimeout: time.Second})
+	l, rec := newLoop(t, &echoTool{}, Config{MaxSteps: 10, MaxRepeatActions: 2, TotalTimeout: time.Second})
 	res, err := l.Run(context.Background(), &tools.Context{}, nil, "hi", nil)
 	if err != nil {
 		t.Fatalf("run failed: %v", err)
 	}
 	if res.StopReason != "repeated_action" {
 		t.Fatalf("want repeated_action, got %+v", res)
+	}
+	if len(rec.steps) != 2 {
+		t.Fatalf("repeated_action should record the stopped step, got %d steps", len(rec.steps))
+	}
+	last := rec.steps[len(rec.steps)-1]
+	if last.Status != models.AgentStepStatusFailed || last.Error != "repeated_action" {
+		t.Fatalf("unexpected stopped step: %+v", last)
+	}
+}
+
+func TestRun_NonConsecutiveActionsNotRepeated(t *testing.T) {
+	step := 0
+	withFakeLLM(t, func(ctx context.Context, messages []clients.ToolMessage) (*clients.ToolChatResult, error) {
+		step++
+		switch step {
+		case 1, 3:
+			return &clients.ToolChatResult{
+				ToolCalls: []clients.ToolCall{{
+					ID: "a", Type: "function",
+					Function: clients.ToolCallFunction{Name: "echo", Arguments: `{"x":1}`},
+				}},
+				FinishReason: "tool_calls",
+			}, nil
+		case 2:
+			return &clients.ToolChatResult{
+				ToolCalls: []clients.ToolCall{{
+					ID: "b", Type: "function",
+					Function: clients.ToolCallFunction{Name: "echo", Arguments: `{"x":2}`},
+				}},
+				FinishReason: "tool_calls",
+			}, nil
+		default:
+			return &clients.ToolChatResult{Content: "done", FinishReason: "stop"}, nil
+		}
+	})
+	l, _ := newLoop(t, &echoTool{}, Config{MaxSteps: 10, MaxRepeatActions: 2, TotalTimeout: time.Second})
+	res, err := l.Run(context.Background(), &tools.Context{}, nil, "hi", nil)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if res.StopReason != "final_answer" {
+		t.Fatalf("non-consecutive actions should not trigger repeated_action: %+v", res)
 	}
 }
 

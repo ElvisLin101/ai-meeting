@@ -14,7 +14,6 @@ import (
 	"ai-meeting/models"
 	"ai-meeting/pkg/singleflight"
 	"ai-meeting/repositories"
-	mysqlrepo "ai-meeting/repositories/mysql"
 )
 
 // ============================================================
@@ -47,8 +46,8 @@ func ConsolidateAsync(userID, sessionID string) {
 	if userID == "" || sessionID == "" {
 		return
 	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	runAsync(func(parent context.Context) {
+		ctx, cancel := context.WithTimeout(parent, 90*time.Second)
 		defer cancel()
 
 		sfKey := "profile:consolidate:" + userID
@@ -58,7 +57,7 @@ func ConsolidateAsync(userID, sessionID string) {
 		if err != nil {
 			logrus.Warnf("[agent-profile] consolidate failed user=%s err=%v", userID, err)
 		}
-	}()
+	})
 }
 
 // ConsolidateIfNeeded 在满足触发条件时执行一次 consolidation。
@@ -74,11 +73,11 @@ func ConsolidateIfNeeded(ctx context.Context, userID, sessionID string) error {
 	}
 	NormalizeProfile(profile)
 
-	candidates, err := mysqlrepo.ListPendingProfileCandidates(userID, 50)
+	candidates, err := currentRepository().ListPendingProfileCandidates(userID, 50)
 	if err != nil {
 		return err
 	}
-	userMessages, err := mysqlrepo.CountUserMessagesAfter(sessionID, userID, profile.LastConsolidatedSeq)
+	userMessages, err := currentRepository().CountUserMessagesAfter(sessionID, userID, profile.LastConsolidatedSeq)
 	if err != nil {
 		return err
 	}
@@ -124,12 +123,12 @@ func ConsolidateIfNeeded(ctx context.Context, userID, sessionID string) error {
 			return err
 		}
 		if len(diff.Used) == 0 && len(diff.Reject) == 0 {
-			return mysqlrepo.MarkProfileCandidates(userID, candidateIDs(candidates), "rejected")
+			return currentRepository().MarkProfileCandidates(userID, candidateIDs(candidates), "rejected")
 		}
-		if err := mysqlrepo.MarkProfileCandidates(userID, diff.Used, "promoted"); err != nil {
+		if err := currentRepository().MarkProfileCandidates(userID, diff.Used, "promoted"); err != nil {
 			logrus.Warnf("[agent-profile] mark used candidates failed: %v", err)
 		}
-		return mysqlrepo.MarkProfileCandidates(userID, diff.Reject, "rejected")
+		return currentRepository().MarkProfileCandidates(userID, diff.Reject, "rejected")
 	}
 
 	next, questions, changed, err := ApplyProfileDiff(profile, diff)
@@ -148,14 +147,14 @@ func ConsolidateIfNeeded(ctx context.Context, userID, sessionID string) error {
 		}
 	}
 
-	if err := mysqlrepo.MarkProfileCandidates(userID, diff.Used, "promoted"); err != nil {
+	if err := currentRepository().MarkProfileCandidates(userID, diff.Used, "promoted"); err != nil {
 		logrus.Warnf("[agent-profile] mark used candidates failed: %v", err)
 	}
-	if err := mysqlrepo.MarkProfileCandidates(userID, diff.Reject, "rejected"); err != nil {
+	if err := currentRepository().MarkProfileCandidates(userID, diff.Reject, "rejected"); err != nil {
 		logrus.Warnf("[agent-profile] mark rejected candidates failed: %v", err)
 	}
 	for _, q := range questions {
-		if err := mysqlrepo.CreateProfileConfirmation(&models.ProfileConfirmation{
+		if err := currentRepository().CreateProfileConfirmation(&models.ProfileConfirmation{
 			UserID: userID, Field: q.Field, Key: q.Key, Value: q.Value,
 			Question: q.Question, Status: "pending",
 		}); err != nil {
@@ -163,7 +162,7 @@ func ConsolidateIfNeeded(ctx context.Context, userID, sessionID string) error {
 		}
 	}
 	if diffJSON, err := json.Marshal(diff); err == nil {
-		if err := mysqlrepo.CreateProfileEvent(&models.ProfileEvent{
+		if err := currentRepository().CreateProfileEvent(&models.ProfileEvent{
 			UserID: userID, Reason: diff.Reason, DiffJSON: string(diffJSON),
 		}); err != nil {
 			logrus.Warnf("[agent-profile] save profile event failed: %v", err)
@@ -184,7 +183,7 @@ func persistConsolidatedProfile(ctx context.Context, userID string, profile *Use
 		if err != nil {
 			return err
 		}
-		if err := mysqlrepo.UpsertUserProfile(&models.UserProfile{
+		if err := currentRepository().UpsertUserProfile(&models.UserProfile{
 			UserID: userID, ProfileJSON: string(raw), SchemaVersion: 1,
 			Version: profile.Version, LastConsolidatedSeq: profile.LastConsolidatedSeq,
 		}); err != nil {
@@ -202,7 +201,7 @@ func persistConsolidatedProfile(ctx context.Context, userID string, profile *Use
 	if err != nil {
 		return err
 	}
-	ok, err := mysqlrepo.UpdateUserProfileCAS(userID, string(raw), expected, profile.LastConsolidatedSeq)
+	ok, err := currentRepository().UpdateUserProfileCAS(userID, string(raw), expected, profile.LastConsolidatedSeq)
 	if err != nil {
 		return err
 	}

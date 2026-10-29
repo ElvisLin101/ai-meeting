@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"ai-meeting/clients"
 )
@@ -68,5 +69,23 @@ func TestExecutor_TruncatesResult(t *testing.T) {
 	}
 	if !res.Truncated || len(res.Content) >= 1000 {
 		t.Fatalf("result should be truncated, got len=%d truncated=%v", len(res.Content), res.Truncated)
+	}
+}
+
+func TestTruncateRunesUsesByteBudget(t *testing.T) {
+	ascii := truncateRunes(strings.Repeat("a", 1000), 100)
+	if len(ascii) > 100 {
+		t.Fatalf("ascii result exceeds byte budget: %d", len(ascii))
+	}
+	if len(ascii) < 90 {
+		t.Fatalf("ascii result wastes byte budget: %d", len(ascii))
+	}
+
+	chinese := truncateRunes(strings.Repeat("中", 1000), 100)
+	if len(chinese) > 100 {
+		t.Fatalf("chinese result exceeds byte budget: %d", len(chinese))
+	}
+	if !utf8.ValidString(chinese) {
+		t.Fatalf("chinese result is not valid UTF-8: %q", chinese)
 	}
 }

@@ -52,8 +52,10 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 - L2 consolidation: `services/agent/context/profile_consolidate.go` 每 3 个用户回合或 pending 候选 ≥5 触发；输入当前 active facts、候选和最近 user/assistant 对话，输出 `ProfileDiff`；`services/agent/context/profile_apply.go` 负责 add/update/supersede/ask_confirm，冲突低置信不覆盖；`user_profiles` 用 version CAS 更新，确认项落 `profile_confirmations`，审计落 `profile_events`。
 - 画像注入: `services/agent/context/assembler.go` 的 `renderProfile` 只渲染 active facts；旧 `ProfileExtractor` 已不再由 run 服务调用。
 - 当前边界: 确认项已有查询/确认接口和调试页入口；工具大结果尚未转 artifact ref。
+- 后台任务: `CompressAsync` / `ConsolidateAsync` 走 `services/agent/context/workers.go` 的 worker pool；`main.go` 停机时先 cancel + Wait，再关 DB/Redis，避免异步任务丢写。
+- 仓储注入: 所有生产服务层通过 `xxxRepository` 接口依赖 MySQL，生产 adapter 在 `services/*/...repository.go`，测试注入 fake；`agent/context`、`interview/runtime`、`metric`、`tools/interview` 也已迁移，服务层不再直连 `mysqlrepo`。
 - 确定性 eval: `internal/eval/cases.json` + `go run ./cmd/eval`，覆盖路由（15）、画像规则（10）、画像冲突（5）；CI 在 race 测试后执行。
-- Live eval: `test/eval/live_cases.json` + `go run ./cmd/liveeval`，用真实模型和 MySQL/Redis 跑 10 条任务，输出 `tmp/live_eval_report.json`；需要配置和 key，不进 CI。
+- Live eval: `test/eval/live_cases.json` + `go run ./cmd/liveeval`，用真实模型和 MySQL/Redis 跑 10 条任务，输出 `tmp/live_eval_report.json`；默认 `-isolate=true` 使用独立 eval 用户和 `tmp/eval-runs/<label>/sandbox`，每个用例前清空 sandbox；用例支持 `seed_files` 夹具和 `max_plan_steps`，`-judge` 开启 LLM 逐条语义评分；统计 `completed` / `quality_pass` / `avg_quality` / `judge_pass` / `avg_judge_score`；需要配置和 key，不进 CI。
 - 配额: `services/agent/run/quota.go` 用 Redis 计数控制单用户并发 run 与每日 token；`agent.quota.*` 配置，0 表示不限制；超限返回 `-4012`/429，Redis 故障降级放行。
 - 前端: `static/index.html` Agent tab 支持查看 run 详情（`context_report_json`/`plan_json`）和待确认画像的确认/拒绝。
 
@@ -62,8 +64,10 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 - 入口: `services/agent/loop/loop.go` 中 `l.batch.Execute(runCtx, tc, resp.ToolCalls)`。
 - 策略: 整批工具都实现 `MetaProvider` 且 `Meta().ConcurrencySafe=true` → 并行（信号量限制 `agent.max_parallel_tools`）；否则整批串行。
 - 结果: 按原始 `ToolCalls` 顺序返回，`tool` message 的 `tool_call_id` 与模型返回的 call id 对齐；单个失败不取消同批其他调用。
+- 截断: `services/agent/tools/executor.go` 按 UTF-8 字节预算切结果，保证不破坏多字节字符；默认 32KB。
 - 事件: `tool_call` / `tool_result` 新增 `CallID`，便于前端在同一步多个并发调用时关联。
-- 只读且无共享状态的工具（`pdf_parse`、`file_list`、`file_read`、`web_search`）已声明 `ConcurrencySafe=true`；写文件、面试状态推进默认不声明，保持串行。
+- 只读且无共享状态的工具（`pdf_parse`、`file_list`、`file_read`、`web_search`、`web_fetch`）已声明 `ConcurrencySafe=true`；写文件、面试状态推进默认不声明，保持串行。
+- 搜索/抓取: `web_search` 支持 `deepseek` / `tavily` / `serper`；`deepseek` 复用 `ai.deepseek.api_key`，搜索走 `/v1/tools/search`，`web_fetch` 走 `/v1/tools/fetch` 返回 Markdown。`web_fetch` 只放行公网 http/https，拒绝 localhost/内网/元数据 IP/非标准端口，正文截断 12000 rune 并标记不可信。
 - 当前边界: 这是"并行批次"，不是带 `depends_on` 的完整 DAG；有先后依赖的调用必须由模型分步发起，后续再引入 GraphScheduler。
 
 ### Plan-and-Execute 编排（plan 包）
@@ -75,7 +79,7 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 - 事件: `route` / `plan_ready` / `plan_task_start` / `plan_task_done` / `plan_task_failed` / `plan_task_skipped` / `plan_replanned` / `plan_done`，复用 `services/agent/loop/loop.go` 的 `Event`。
 - 前置路由: `services/agent/plan/router.go` 用规则打分决定是否进 plan，不调用 LLM。强多步信号/中信号/长度/多问号/多行加分；纯问候、明确“直接回答”、短且无强信号减分。`services/agent/run/service.go` 只有 `UsePlan=true` 才调用 `planSvc.Run`，并发送 `route` 事件；`StartResult.PlanMode` 返回 `plan` / `plan_fallback` / `direct`。
 - 路由配置: `agent.plan.mode`（auto/always/never）、`agent.plan.min_score`、`agent.plan.fast_path_runes`。规则是启发式的，边界请求可能欠/过触发；需要更准时可加 cheap classifier，但不要给每个请求都加一次模型调用。
-- 持久化: `agent_runs.plan_json` 保存任务图与每个任务的最终状态；plan 任务不写 `agent_steps`，详情接口返回 `plan_json`。
+- 持久化: `agent_runs.plan_json` 保存任务图与每个任务的最终状态；plan 子任务的 step 同时写入 `agent_steps`，用 `task_id` 标识所属子任务（最终合成为 `synthesis`），`step_index` 由 run 级原子序号统一分配，避免并行任务/重试撞唯一键；重试会为同一 `task_id` 追加 step 行；详情接口同时返回 `plan_json` 和 `step_detail`。
 - Replan 安全机制:
   - `services/agent/plan/scheduler.go` 的 `RunRound` 在一批任务结束后统一评估失败/hint，多个触发合并成一次；计划修改只发生在轮次边界，由 `services/agent/plan/service.go` 单线程串行应用，不存在并发改 Plan。
   - `services/agent/plan/replanner.go` 只产出增量 `PlanDiff`（add/update/remove），不返回整张新计划；`ApplyDiff` 拒绝修改/删除已完成任务。
@@ -85,7 +89,7 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
   - `services/agent/plan/ledger.go` 是单 run 内的幂等账本：同 `idempotency_key` 并发只跑一次，成功结果缓存供 replan 复用，失败不缓存以允许重试。
   - `idempotency_key` 由任务语义（type/tool/goal/params/上游 key）计算，模型不能指定。
   - `services/agent/plan/service.go` 只对 `Retryable=true` 的失败重试；默认 `agent.plan.retry_max_attempts=2`、指数退避；调用过非只读工具的 agent 任务不自动重试。
-- 当前边界: 幂等账本只在进程内、单 run 内有效，进程重启后无法续跑；任务级结果只落在 `plan_json`，没有独立 `agent_plan_tasks` 表；replan 只处理失败/hint，不做每步评估。
+- 当前边界: 幂等账本只在进程内、单 run 内有效，进程重启后无法续跑；任务级结果同时落在 `plan_json` 和 `agent_steps`（按 `task_id` 分组），但没有独立 `agent_plan_tasks` 表；replan 只处理失败/hint，不做每步评估。
 
 ## 核心流程
 

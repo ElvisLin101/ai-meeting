@@ -6,7 +6,6 @@ import (
 	"ai-meeting/models"
 	"ai-meeting/pkg/ecode"
 	"ai-meeting/repositories"
-	mysqlrepo "ai-meeting/repositories/mysql"
 	"ai-meeting/services/interview/evaluation"
 	"ai-meeting/services/interview/flow"
 	"ai-meeting/services/interview/runtime"
@@ -18,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -26,12 +26,20 @@ import (
 
 // InterviewSessionFacade 面试会话门面服务，封装面试会话相关的业务逻辑
 type InterviewSessionFacade struct {
+	repo             interviewRepository
 	answerPipeline   *flow.AnswerPipeline
 	flowStateMachine *flow.FlowStateMachine
 	flowCache        *runtime.FlowCache
 	scoreCache       *runtime.ScoreCache
 	questionCache    *runtime.QuestionCache
 	extractionSvc    *evaluation.ExtractionService
+}
+
+func (s *InterviewSessionFacade) repository() interviewRepository {
+	if s.repo != nil {
+		return s.repo
+	}
+	return mysqlInterviewRepository{}
 }
 
 // CreateSession 创建面试会话
@@ -41,7 +49,7 @@ func (s *InterviewSessionFacade) CreateSession(userID string) (*dto.InterviewSes
 	session := models.InterviewSession{SessionID: sessionID, UserID: userID, Status: 1}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := mysqlrepo.CreateInterviewSession(ctx, &session); err != nil {
+	if err := s.repository().CreateInterviewSession(ctx, &session); err != nil {
 		return nil, err
 	}
 
@@ -54,9 +62,9 @@ func (s *InterviewSessionFacade) CreateSession(userID string) (*dto.InterviewSes
 		Status:       models.ConversationStatusActive,
 		MessageCount: 0,
 	}
-	if err := mysqlrepo.CreateConversation(&conv); err != nil {
+	if err := s.repository().CreateConversation(&conv); err != nil {
 		// 补偿: 删除已创建的面试会话, 保证要么全部成功要么失败
-		_ = mysqlrepo.DeleteInterviewSession(ctx, sessionID)
+		_ = s.repository().DeleteInterviewSession(ctx, sessionID)
 		return nil, err
 	}
 	return &dto.InterviewSessionCreateRespDTO{SessionID: sessionID}, nil
@@ -65,7 +73,7 @@ func (s *InterviewSessionFacade) CreateSession(userID string) (*dto.InterviewSes
 // PageConversations 分页查询面试会话列表
 func (s *InterviewSessionFacade) PageConversations(userID string, req dto.InterviewConversationPageReqDTO) ([]models.AgentConversation, int64, error) {
 	offset := (req.Page - 1) * req.Size
-	convs, total, err := mysqlrepo.PageConversations(userID, models.ConversationSceneInterview, offset, req.Size)
+	convs, total, err := s.repository().PageConversations(userID, models.ConversationSceneInterview, offset, req.Size)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -83,7 +91,7 @@ func (s *InterviewSessionFacade) PageConversations(userID string, req dto.Interv
 
 // GetConversationHistory 获取会话历史消息
 func (s *InterviewSessionFacade) GetConversationHistory(sessionID, userID string) ([]models.AgentMessage, error) {
-	messages, err := mysqlrepo.ListMessagesAsc(sessionID, userID)
+	messages, err := s.repository().ListMessagesAsc(sessionID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +107,7 @@ func (s *InterviewSessionFacade) GetConversationHistory(sessionID, userID string
 
 // PageHistoryMessages 分页查询历史消息
 func (s *InterviewSessionFacade) PageHistoryMessages(sessionID string, page, size int, userID string) ([]models.AgentMessage, int64, error) {
-	messages, total, err := mysqlrepo.PageMessages(sessionID, userID, page, size)
+	messages, total, err := s.repository().PageMessages(sessionID, userID, page, size)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -117,12 +125,12 @@ func (s *InterviewSessionFacade) PageHistoryMessages(sessionID string, page, siz
 func (s *InterviewSessionFacade) FinishSession(sessionID, userID string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return mysqlrepo.EndInterviewSession(ctx, sessionID, userID)
+	return s.repository().EndInterviewSession(ctx, sessionID, userID)
 }
 
 // EndConversation 结束会话
 func (s *InterviewSessionFacade) EndConversation(sessionID, userID string) error {
-	return mysqlrepo.EndConversation(sessionID, userID)
+	return s.repository().EndConversation(sessionID, userID)
 }
 
 // ExtractInterviewQuestions 从简历提取面试问题
@@ -221,7 +229,7 @@ func (s *InterviewSessionFacade) UploadResume(sessionID, userID string, fileHead
 	// 4. 回填 ResumePath 到 Mongo
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := mysqlrepo.UpdateResumePath(ctx, sessionID, userID, savePath); err != nil {
+	if err := s.repository().UpdateResumePath(ctx, sessionID, userID, savePath); err != nil {
 		logrus.Warnf("Failed to update resume path, session=%s, err=%v", sessionID, err)
 	}
 
@@ -390,7 +398,7 @@ func (s *InterviewSessionFacade) PreviewResume(sessionID, userID string) (string
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	session, err := mysqlrepo.FindInterviewSession(ctx, sessionID, userID)
+	session, err := s.repository().FindInterviewSession(ctx, sessionID, userID)
 	if err != nil {
 		return "", ecode.New(ecode.ErrSessionNotFound, "面试会话不存在")
 	}
@@ -405,11 +413,14 @@ func (s *InterviewSessionFacade) PreviewResume(sessionID, userID string) (string
 	return content, nil
 }
 
-var interviewSessionFacadeInstance *InterviewSessionFacade
+var (
+	interviewSessionFacadeInstance *InterviewSessionFacade
+	interviewSessionFacadeOnce     sync.Once
+)
 
 // GetInterviewSessionFacade 获取InterviewSessionFacade单例
 func GetInterviewSessionFacade() *InterviewSessionFacade {
-	if interviewSessionFacadeInstance == nil {
+	interviewSessionFacadeOnce.Do(func() {
 		rdb := repositories.RedisClient
 		flowCache := runtime.NewFlowCache(rdb)
 		scoreCache := runtime.NewScoreCache(rdb)
@@ -426,6 +437,7 @@ func GetInterviewSessionFacade() *InterviewSessionFacade {
 		pipeline := flow.NewAnswerPipeline(rdb, fsm, flowCache, scoreCache, turnLogCache, questionCache, snapshotSvc, turnRepairSvc, evalSvc, followUpSvc, idempotencySvc)
 
 		interviewSessionFacadeInstance = &InterviewSessionFacade{
+			repo:             mysqlInterviewRepository{},
 			answerPipeline:   pipeline,
 			flowStateMachine: fsm,
 			flowCache:        flowCache,
@@ -433,34 +445,43 @@ func GetInterviewSessionFacade() *InterviewSessionFacade {
 			questionCache:    questionCache,
 			extractionSvc:    extractionSvc,
 		}
-	}
-	logrus.Info("InterviewSessionFacade instance created")
+		logrus.Info("InterviewSessionFacade instance created")
+	})
 	return interviewSessionFacadeInstance
 }
 
 // InterviewRecordService 面试记录服务，负责面试记录的保存与查询
-type InterviewRecordService struct{}
+type InterviewRecordService struct {
+	repo interviewRepository
+}
+
+func (s *InterviewRecordService) repository() interviewRepository {
+	if s.repo != nil {
+		return s.repo
+	}
+	return mysqlInterviewRepository{}
+}
 
 // SaveInterviewRecord 保存面试记录
 func (s *InterviewRecordService) SaveInterviewRecord(sessionID, userID string, req dto.InterviewRecordSaveReqDTO) error {
 	record := models.InterviewRecord{SessionID: sessionID, UserID: userID, QuestionNum: req.QuestionNum, Question: req.Question, Answer: req.Answer, Score: req.Score, Suggestions: req.Suggestions}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return mysqlrepo.CreateInterviewRecord(ctx, &record)
+	return s.repository().CreateInterviewRecord(ctx, &record)
 }
 
 // PageInterviewRecords 分页查询面试记录
 func (s *InterviewRecordService) PageInterviewRecords(userID string, req dto.InterviewRecordPageReqDTO) ([]models.InterviewRecord, int64, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return mysqlrepo.PageInterviewRecords(ctx, userID, req.SessionID, req.Page, req.Size)
+	return s.repository().PageInterviewRecords(ctx, userID, req.SessionID, req.Page, req.Size)
 }
 
 // GetBySessionId 根据会话ID查询面试记录
 func (s *InterviewRecordService) GetBySessionId(sessionID, userID string) (*models.InterviewRecord, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return mysqlrepo.FindInterviewRecordBySessionID(ctx, sessionID, userID)
+	return s.repository().FindInterviewRecordBySessionID(ctx, sessionID, userID)
 }
 
 // SaveInterviewRecordFromRedis 从 TurnArchive 汇总生成面试报告, 写入 InterviewRecord(Mongo)
@@ -469,7 +490,7 @@ func (s *InterviewRecordService) SaveInterviewRecordFromRedis(sessionID, userID 
 	defer cancel()
 
 	// 1. 从 Mongo TurnArchive 读全部轮次
-	archives, err := mysqlrepo.FindTurnArchives(ctx, sessionID)
+	archives, err := s.repository().FindTurnArchives(ctx, sessionID)
 	if err != nil {
 		return ecode.Wrap(err, "读取轮次归档失败")
 	}
@@ -504,7 +525,7 @@ func (s *InterviewRecordService) SaveInterviewRecordFromRedis(sessionID, userID 
 		Score:       totalScore,
 		Suggestions: lastTurn.Feedback,
 	}
-	if err := mysqlrepo.CreateInterviewRecord(ctx, record); err != nil {
+	if err := s.repository().CreateInterviewRecord(ctx, record); err != nil {
 		return ecode.Wrap(err, "保存面试报告失败")
 	}
 
@@ -512,13 +533,16 @@ func (s *InterviewRecordService) SaveInterviewRecordFromRedis(sessionID, userID 
 	return nil
 }
 
-var interviewRecordServiceInstance *InterviewRecordService
+var (
+	interviewRecordServiceInstance *InterviewRecordService
+	interviewRecordServiceOnce     sync.Once
+)
 
 // GetInterviewRecordService 获取InterviewRecordService单例
 func GetInterviewRecordService() *InterviewRecordService {
-	if interviewRecordServiceInstance == nil {
-		interviewRecordServiceInstance = &InterviewRecordService{}
-	}
-	logrus.Info("InterviewRecordService instance created")
+	interviewRecordServiceOnce.Do(func() {
+		interviewRecordServiceInstance = &InterviewRecordService{repo: mysqlInterviewRepository{}}
+		logrus.Info("InterviewRecordService instance created")
+	})
 	return interviewRecordServiceInstance
 }

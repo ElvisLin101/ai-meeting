@@ -5,7 +5,6 @@ import (
 	"ai-meeting/models"
 	"ai-meeting/pkg/singleflight"
 	"ai-meeting/repositories"
-	mysqlrepo "ai-meeting/repositories/mysql"
 	"context"
 	"errors"
 	"fmt"
@@ -32,17 +31,31 @@ const (
 )
 
 type AiMemoryService struct {
+	repo      aiMemoryRepository
 	mu        sync.RWMutex
 	threshold int
 }
 
-var aiMemoryServiceInstance *AiMemoryService
+func (s *AiMemoryService) repository() aiMemoryRepository {
+	if s.repo != nil {
+		return s.repo
+	}
+	return mysqlAIRepository{}
+}
+
+var (
+	aiMemoryServiceInstance *AiMemoryService
+	aiMemoryServiceOnce     sync.Once
+)
 
 // GetAiMemoryService 获取 AI 记忆服务单例
 func GetAiMemoryService() *AiMemoryService {
-	if aiMemoryServiceInstance == nil {
-		aiMemoryServiceInstance = &AiMemoryService{threshold: COMPRESSION_THRESHOLD}
-	}
+	aiMemoryServiceOnce.Do(func() {
+		aiMemoryServiceInstance = &AiMemoryService{
+			repo:      mysqlAIRepository{},
+			threshold: COMPRESSION_THRESHOLD,
+		}
+	})
 	return aiMemoryServiceInstance
 }
 
@@ -51,7 +64,7 @@ func (s *AiMemoryService) GetContext(ctx context.Context, sessionID, userID stri
 	threshold = s.normalizeThreshold(threshold)
 
 	compressedCtx, compressedIndex := s.loadCompressedContext(ctx, sessionID)
-	messages, err := mysqlrepo.ListMessagesAfterSequenceDesc(sessionID, userID, compressedIndex)
+	messages, err := s.repository().ListMessagesAfterSequenceDesc(sessionID, userID, compressedIndex)
 	if err != nil {
 		return "", err
 	}
@@ -84,7 +97,7 @@ func (s *AiMemoryService) CompressContext(sessionID, userID string, threshold in
 // doCompressAiContext 执行实际压缩：取消息 → 阈值判断 → 压缩旧 80% → AI 摘要 → 存 Redis → 异步存 Mongo
 // writer 用于在流式压缩过程中刷新 singleflight 心跳进度。
 func (s *AiMemoryService) doCompressAiContext(ctx context.Context, writer *singleflight.StreamWriter, sessionID, userID string, threshold int) (interface{}, error) {
-	messages, err := mysqlrepo.ListMessagesDesc(sessionID, userID)
+	messages, err := s.repository().ListMessagesDesc(sessionID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get AI messages: %w", err)
 	}
@@ -187,7 +200,7 @@ func (s *AiMemoryService) syncToRedis(sessionID, compressedContent string, index
 
 // persistCompressedContext 异步将压缩上下文持久化到数据库（upsert）
 func (s *AiMemoryService) persistCompressedContext(sessionID, compressedContent string, index int64, totalLength, messageCount int) {
-	err := mysqlrepo.UpsertCompressedContext(&models.CompressedContextRecord{
+	err := s.repository().UpsertCompressedContext(&models.CompressedContextRecord{
 		SessionID:         sessionID,
 		MemoryScope:       aiMemoryScope,
 		CompressedContent: compressedContent,
@@ -204,7 +217,7 @@ func (s *AiMemoryService) persistCompressedContext(sessionID, compressedContent 
 
 // getCompressedContextFromDB 从数据库 读取 AI 压缩上下文
 func (s *AiMemoryService) getCompressedContextFromDB(sessionID string) (*models.CompressedContextRecord, error) {
-	return mysqlrepo.FindCompressedContext(sessionID)
+	return s.repository().FindCompressedContext(sessionID)
 }
 
 // buildContextWithWindow 用预算窗口拼接压缩摘要 + 近期消息，超预算时截断
@@ -291,7 +304,7 @@ func (s *AiMemoryService) ClearCompressedContext(sessionID string) error {
 
 // clearFromDB 异步清理 数据库中的 AI 压缩上下文
 func (s *AiMemoryService) clearFromDB(sessionID string) {
-	if err := mysqlrepo.DeleteCompressedContext(sessionID); err != nil {
+	if err := s.repository().DeleteCompressedContext(sessionID); err != nil {
 		logrus.Error("Failed to delete AI compressed context from MongoDB:", err)
 	}
 }

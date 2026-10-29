@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"runtime/debug"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sirupsen/logrus"
 )
@@ -105,21 +107,32 @@ func (e *Executor) executeSafe(ctx context.Context, tool Tool, tc *Context, args
 	return tool.Execute(ctx, tc, args)
 }
 
-// truncateRunes 按 rune 截断, 避免切坏中文 UTF-8
+// truncateRunes 按字节预算截断，保证不切坏 UTF-8。
+// 旧实现按 maxBytes/3 估算 rune 数，会让纯 ASCII 结果只剩约三分之一。
 func truncateRunes(text string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
 	if len(text) <= maxBytes {
 		return text
 	}
-	runes := []rune(text)
-	// 粗略按 rune 数截断 (maxBytes 当作字节预算, 中文最多 3 字节)
-	budget := maxBytes / 3
-	if budget < 1 {
-		budget = 1
+	const suffix = "\n...[结果已截断]"
+	if maxBytes <= len(suffix) {
+		return suffix[:maxBytes]
 	}
-	if len(runes) <= budget {
-		return text
+
+	budget := maxBytes - len(suffix)
+	var b strings.Builder
+	used := 0
+	for _, r := range text {
+		n := utf8.RuneLen(r)
+		if used+n > budget {
+			break
+		}
+		b.WriteRune(r)
+		used += n
 	}
-	return string(runes[:budget]) + "\n...[结果已截断]"
+	return b.String() + suffix
 }
 
 // ============================================================

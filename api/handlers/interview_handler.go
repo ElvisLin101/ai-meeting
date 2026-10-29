@@ -28,13 +28,12 @@ func NewInterviewSessionController() *InterviewSessionController {
 }
 
 func (c *InterviewSessionController) CreateSession(ctx *gin.Context) {
-	userID, exists := ctx.Get("user_id")
-	if !exists || userID == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	userID, ok := mustUserID(ctx)
+	if !ok {
 		return
 	}
 
-	result, err := c.sessionFacade.CreateSession(userID.(string))
+	result, err := c.sessionFacade.CreateSession(userID)
 	if err != nil {
 		respx.Respond(ctx, err, nil)
 		return
@@ -50,13 +49,12 @@ func (c *InterviewSessionController) PageConversations(ctx *gin.Context) {
 		return
 	}
 
-	userID, exists := ctx.Get("user_id")
-	if !exists || userID == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	userID, ok := mustUserID(ctx)
+	if !ok {
 		return
 	}
 
-	conversations, total, err := c.sessionFacade.PageConversations(userID.(string), req)
+	conversations, total, err := c.sessionFacade.PageConversations(userID, req)
 	if err != nil {
 		respx.Respond(ctx, err, nil)
 		return
@@ -81,13 +79,12 @@ func (c *InterviewSessionController) PageConversations(ctx *gin.Context) {
 
 func (c *InterviewSessionController) GetConversationHistory(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
-	userID, exists := ctx.Get("user_id")
-	if !exists || userID == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	userID, ok := mustUserID(ctx)
+	if !ok {
 		return
 	}
 
-	messages, err := c.sessionFacade.GetConversationHistory(sessionID, userID.(string))
+	messages, err := c.sessionFacade.GetConversationHistory(sessionID, userID)
 	if err != nil {
 		respx.Respond(ctx, err, nil)
 		return
@@ -116,13 +113,12 @@ func (c *InterviewSessionController) PageHistoryMessages(ctx *gin.Context) {
 		size = 100
 	}
 
-	userID, exists := ctx.Get("user_id")
-	if !exists || userID == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	userID, ok := mustUserID(ctx)
+	if !ok {
 		return
 	}
 
-	messages, total, err := c.sessionFacade.PageHistoryMessages(sessionID, current, size, userID.(string))
+	messages, total, err := c.sessionFacade.PageHistoryMessages(sessionID, current, size, userID)
 	if err != nil {
 		respx.Respond(ctx, err, nil)
 		return
@@ -141,13 +137,12 @@ func (c *InterviewSessionController) PageHistoryMessages(ctx *gin.Context) {
 
 func (c *InterviewSessionController) FinishSession(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
-	userID, exists := ctx.Get("user_id")
-	if !exists || userID == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	userID, ok := mustUserID(ctx)
+	if !ok {
 		return
 	}
 
-	if err := c.sessionFacade.FinishSession(sessionID, userID.(string)); err != nil {
+	if err := c.sessionFacade.FinishSession(sessionID, userID); err != nil {
 		respx.Respond(ctx, err, nil)
 		return
 	}
@@ -157,13 +152,12 @@ func (c *InterviewSessionController) FinishSession(ctx *gin.Context) {
 
 func (c *InterviewSessionController) EndConversation(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
-	userID, exists := ctx.Get("user_id")
-	if !exists || userID == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	userID, ok := mustUserID(ctx)
+	if !ok {
 		return
 	}
 
-	if err := c.sessionFacade.EndConversation(sessionID, userID.(string)); err != nil {
+	if err := c.sessionFacade.EndConversation(sessionID, userID); err != nil {
 		respx.Respond(ctx, err, nil)
 		return
 	}
@@ -174,9 +168,8 @@ func (c *InterviewSessionController) EndConversation(ctx *gin.Context) {
 func (c *InterviewSessionController) ExtractInterviewQuestions(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
 
-	userID, exists := ctx.Get("user_id")
-	if !exists || userID == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	userID, ok := mustUserID(ctx)
+	if !ok {
 		return
 	}
 
@@ -188,7 +181,7 @@ func (c *InterviewSessionController) ExtractInterviewQuestions(ctx *gin.Context)
 		req.ResumeContent = ""
 	}
 
-	result, err := c.sessionFacade.ExtractInterviewQuestions(sessionID, userID.(string), req.ResumeContent)
+	result, err := c.sessionFacade.ExtractInterviewQuestions(sessionID, userID, req.ResumeContent)
 	if err != nil {
 		respx.Respond(ctx, err, nil)
 		return
@@ -201,9 +194,8 @@ func (c *InterviewSessionController) ExtractInterviewQuestions(ctx *gin.Context)
 func (c *InterviewSessionController) UploadResume(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
 
-	userID, exists := ctx.Get("user_id")
-	if !exists || userID == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	userID, ok := mustUserID(ctx)
+	if !ok {
 		return
 	}
 
@@ -219,7 +211,7 @@ func (c *InterviewSessionController) UploadResume(ctx *gin.Context) {
 		return
 	}
 
-	result, err := c.sessionFacade.UploadResume(sessionID, userID.(string), file)
+	result, err := c.sessionFacade.UploadResume(sessionID, userID, file)
 	if err != nil {
 		respx.Respond(ctx, err, nil)
 		return
@@ -234,9 +226,8 @@ func (c *InterviewSessionController) AnswerInterviewQuestion(ctx *gin.Context) {
 	answerContent := ctx.Query("answerContent")
 	requestId := ctx.Query("requestId")
 
-	userID, exists := ctx.Get("user_id")
-	if !exists || userID == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	userID, ok := mustUserID(ctx)
+	if !ok {
 		return
 	}
 
@@ -246,7 +237,7 @@ func (c *InterviewSessionController) AnswerInterviewQuestion(ctx *gin.Context) {
 		RequestId:      requestId,
 	}
 
-	result, err := c.sessionFacade.AnswerInterviewQuestion(sessionID, req, userID.(string))
+	result, err := c.sessionFacade.AnswerInterviewQuestion(sessionID, req, userID)
 	if err != nil {
 		respx.Respond(ctx, err, nil)
 		return
@@ -263,13 +254,12 @@ func (c *InterviewSessionController) AnswerInterviewQuestionJson(ctx *gin.Contex
 		return
 	}
 
-	userID, exists := ctx.Get("user_id")
-	if !exists || userID == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	userID, ok := mustUserID(ctx)
+	if !ok {
 		return
 	}
 
-	result, err := c.sessionFacade.AnswerInterviewQuestion(sessionID, req, userID.(string))
+	result, err := c.sessionFacade.AnswerInterviewQuestion(sessionID, req, userID)
 	if err != nil {
 		respx.Respond(ctx, err, nil)
 		return
@@ -280,13 +270,12 @@ func (c *InterviewSessionController) AnswerInterviewQuestionJson(ctx *gin.Contex
 
 func (c *InterviewSessionController) GetNextQuestion(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
-	userID, exists := ctx.Get("user_id")
-	if !exists || userID == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	userID, ok := mustUserID(ctx)
+	if !ok {
 		return
 	}
 
-	result, err := c.sessionFacade.GetNextQuestion(sessionID, userID.(string))
+	result, err := c.sessionFacade.GetNextQuestion(sessionID, userID)
 	if err != nil {
 		respx.Respond(ctx, err, nil)
 		return
@@ -297,13 +286,12 @@ func (c *InterviewSessionController) GetNextQuestion(ctx *gin.Context) {
 
 func (c *InterviewSessionController) GetCurrentQuestion(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
-	userID, exists := ctx.Get("user_id")
-	if !exists || userID == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	userID, ok := mustUserID(ctx)
+	if !ok {
 		return
 	}
 
-	result, err := c.sessionFacade.GetCurrentQuestion(sessionID, userID.(string))
+	result, err := c.sessionFacade.GetCurrentQuestion(sessionID, userID)
 	if err != nil {
 		respx.Respond(ctx, err, nil)
 		return
@@ -314,13 +302,12 @@ func (c *InterviewSessionController) GetCurrentQuestion(ctx *gin.Context) {
 
 func (c *InterviewSessionController) RestoreInterviewSession(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
-	userID, exists := ctx.Get("user_id")
-	if !exists || userID == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	userID, ok := mustUserID(ctx)
+	if !ok {
 		return
 	}
 
-	result, err := c.sessionFacade.RestoreInterviewSession(sessionID, userID.(string))
+	result, err := c.sessionFacade.RestoreInterviewSession(sessionID, userID)
 	if err != nil {
 		respx.Respond(ctx, err, nil)
 		return
@@ -331,13 +318,12 @@ func (c *InterviewSessionController) RestoreInterviewSession(ctx *gin.Context) {
 
 func (c *InterviewSessionController) GetSessionInterviewQuestions(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
-	userID, exists := ctx.Get("user_id")
-	if !exists || userID == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	userID, ok := mustUserID(ctx)
+	if !ok {
 		return
 	}
 
-	result, err := c.sessionFacade.GetSessionInterviewQuestions(sessionID, userID.(string))
+	result, err := c.sessionFacade.GetSessionInterviewQuestions(sessionID, userID)
 	if err != nil {
 		respx.Respond(ctx, err, nil)
 		return
@@ -348,13 +334,12 @@ func (c *InterviewSessionController) GetSessionInterviewQuestions(ctx *gin.Conte
 
 func (c *InterviewSessionController) GetSessionTotalScore(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
-	userID, exists := ctx.Get("user_id")
-	if !exists || userID == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	userID, ok := mustUserID(ctx)
+	if !ok {
 		return
 	}
 
-	result, err := c.sessionFacade.GetSessionTotalScore(sessionID, userID.(string))
+	result, err := c.sessionFacade.GetSessionTotalScore(sessionID, userID)
 	if err != nil {
 		respx.Respond(ctx, err, nil)
 		return
@@ -365,13 +350,12 @@ func (c *InterviewSessionController) GetSessionTotalScore(ctx *gin.Context) {
 
 func (c *InterviewSessionController) GetSessionInterviewSuggestions(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
-	userID, exists := ctx.Get("user_id")
-	if !exists || userID == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	userID, ok := mustUserID(ctx)
+	if !ok {
 		return
 	}
 
-	result, err := c.sessionFacade.GetSessionInterviewSuggestions(sessionID, userID.(string))
+	result, err := c.sessionFacade.GetSessionInterviewSuggestions(sessionID, userID)
 	if err != nil {
 		respx.Respond(ctx, err, nil)
 		return
@@ -382,13 +366,12 @@ func (c *InterviewSessionController) GetSessionInterviewSuggestions(ctx *gin.Con
 
 func (c *InterviewSessionController) GetSessionResumeScore(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
-	userID, exists := ctx.Get("user_id")
-	if !exists || userID == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	userID, ok := mustUserID(ctx)
+	if !ok {
 		return
 	}
 
-	result, err := c.sessionFacade.GetSessionResumeScore(sessionID, userID.(string))
+	result, err := c.sessionFacade.GetSessionResumeScore(sessionID, userID)
 	if err != nil {
 		respx.Respond(ctx, err, nil)
 		return
@@ -399,13 +382,12 @@ func (c *InterviewSessionController) GetSessionResumeScore(ctx *gin.Context) {
 
 func (c *InterviewSessionController) GetRadarChartData(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
-	userID, exists := ctx.Get("user_id")
-	if !exists || userID == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	userID, ok := mustUserID(ctx)
+	if !ok {
 		return
 	}
 
-	result, err := c.sessionFacade.GetRadarChartData(sessionID, userID.(string))
+	result, err := c.sessionFacade.GetRadarChartData(sessionID, userID)
 	if err != nil {
 		respx.Respond(ctx, err, nil)
 		return
@@ -431,13 +413,12 @@ func (c *InterviewRecordController) SaveInterviewRecord(ctx *gin.Context) {
 		return
 	}
 
-	userID, exists := ctx.Get("user_id")
-	if !exists || userID == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	userID, ok := mustUserID(ctx)
+	if !ok {
 		return
 	}
 
-	if err := c.recordService.SaveInterviewRecord(req.SessionID, userID.(string), req); err != nil {
+	if err := c.recordService.SaveInterviewRecord(req.SessionID, userID, req); err != nil {
 		respx.Respond(ctx, err, nil)
 		return
 	}
@@ -452,13 +433,12 @@ func (c *InterviewRecordController) PageInterviewRecords(ctx *gin.Context) {
 		return
 	}
 
-	userID, exists := ctx.Get("user_id")
-	if !exists || userID == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	userID, ok := mustUserID(ctx)
+	if !ok {
 		return
 	}
 
-	records, total, err := c.recordService.PageInterviewRecords(userID.(string), req)
+	records, total, err := c.recordService.PageInterviewRecords(userID, req)
 	if err != nil {
 		respx.Respond(ctx, err, nil)
 		return
@@ -477,13 +457,12 @@ func (c *InterviewRecordController) PageInterviewRecords(ctx *gin.Context) {
 
 func (c *InterviewRecordController) GetInterviewRecordBySessionId(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
-	userID, exists := ctx.Get("user_id")
-	if !exists || userID == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	userID, ok := mustUserID(ctx)
+	if !ok {
 		return
 	}
 
-	record, err := c.recordService.GetBySessionId(sessionID, userID.(string))
+	record, err := c.recordService.GetBySessionId(sessionID, userID)
 	if err != nil {
 		respx.Fail(ctx, ecode.NotExist, "Not found")
 		return
@@ -494,13 +473,12 @@ func (c *InterviewRecordController) GetInterviewRecordBySessionId(ctx *gin.Conte
 
 func (c *InterviewRecordController) SaveInterviewRecordFromRedis(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
-	userID, exists := ctx.Get("user_id")
-	if !exists || userID == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	userID, ok := mustUserID(ctx)
+	if !ok {
 		return
 	}
 
-	if err := c.recordService.SaveInterviewRecordFromRedis(sessionID, userID.(string)); err != nil {
+	if err := c.recordService.SaveInterviewRecordFromRedis(sessionID, userID); err != nil {
 		respx.Respond(ctx, err, nil)
 		return
 	}
@@ -521,13 +499,12 @@ func NewInterviewResumeController() *InterviewResumeController {
 func (c *InterviewResumeController) PreviewResume(ctx *gin.Context) {
 	sessionID := ctx.Param("sessionId")
 
-	userID, exists := ctx.Get("user_id")
-	if !exists || userID == "" {
-		respx.Fail(ctx, ecode.NotLogin, "Unauthorized")
+	userID, ok := mustUserID(ctx)
+	if !ok {
 		return
 	}
 
-	content, err := c.sessionFacade.PreviewResume(sessionID, userID.(string))
+	content, err := c.sessionFacade.PreviewResume(sessionID, userID)
 	if err != nil {
 		respx.Respond(ctx, err, nil)
 		return

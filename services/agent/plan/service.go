@@ -15,6 +15,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"ai-meeting/clients"
+	"ai-meeting/models"
 	"ai-meeting/pkg/ecode"
 	"ai-meeting/services/agent/loop"
 	"ai-meeting/services/agent/tools"
@@ -283,14 +284,19 @@ func (s *Service) runTask(ctx context.Context, in Input, task Task, upstream map
 		AgentID: in.AgentID,
 	}
 
+	var recorder loop.Recorder
+	if in.RecorderFor != nil {
+		recorder = in.RecorderFor(task.ID)
+	}
+
 	var res TaskResult
 	switch task.Type {
 	case TaskTypeTool:
-		res = s.runToolTask(ctx, tc, task)
+		res = s.runToolTask(ctx, tc, task, recorder)
 	case TaskTypeLLM:
-		res = s.runLLMTask(ctx, tc, in.AgentID, task, upstream, in.ContextHint)
+		res = s.runLLMTask(ctx, tc, in.AgentID, task, upstream, in.ContextHint, recorder)
 	default:
-		res = s.runAgentTask(ctx, tc, in.AgentID, task, upstream, in.ContextHint)
+		res = s.runAgentTask(ctx, tc, in.AgentID, task, upstream, in.ContextHint, recorder)
 	}
 	if res.ID == "" {
 		res.ID = task.ID
@@ -305,7 +311,7 @@ func (s *Service) runTask(ctx context.Context, in Input, task Task, upstream map
 }
 
 // runAgentTask 用一个独立 ReAct 循环完成子任务，可调用工具。
-func (s *Service) runAgentTask(ctx context.Context, tc *tools.Context, aiID uint, task Task, upstream map[string]TaskResult, contextHint string) TaskResult {
+func (s *Service) runAgentTask(ctx context.Context, tc *tools.Context, aiID uint, task Task, upstream map[string]TaskResult, contextHint string, recorder loop.Recorder) TaskResult {
 	runner := loop.New(s.registry, s.executor, loop.Config{
 		AIID:                       aiID,
 		MaxSteps:                   s.taskMaxSteps(task),
@@ -314,7 +320,7 @@ func (s *Service) runAgentTask(ctx context.Context, tc *tools.Context, aiID uint
 		MaxConsecutiveToolFailures: 2,
 		MaxParallelToolCalls:       4,
 		Temperature:                0.7,
-	}, nil)
+	}, recorder)
 
 	initial := []clients.ToolMessage{{Role: "system", Content: taskSystemPrompt(task, upstream, contextHint)}}
 	res, err := runner.Run(ctx, tc, initial, task.Goal, nil)
@@ -349,11 +355,13 @@ func (s *Service) runAgentTask(ctx context.Context, tc *tools.Context, aiID uint
 }
 
 // runToolTask 直接调用一次只读工具，适合确定性步骤。
-func (s *Service) runToolTask(ctx context.Context, tc *tools.Context, task Task) TaskResult {
+func (s *Service) runToolTask(ctx context.Context, tc *tools.Context, task Task, recorder loop.Recorder) TaskResult {
 	args, err := json.Marshal(task.Params)
 	if err != nil {
+		recordPlanToolStep(recorder, task, "", "", models.AgentStepStatusFailed, err, 0)
 		return TaskResult{ID: task.ID, Status: StatusFailed, Error: "marshal params: " + err.Error()}
 	}
+	start := time.Now()
 	res, err := s.executor.Execute(ctx, tc, clients.ToolCall{
 		ID:   task.ID,
 		Type: "function",
@@ -362,17 +370,42 @@ func (s *Service) runToolTask(ctx context.Context, tc *tools.Context, task Task)
 			Arguments: string(args),
 		},
 	})
+	durationMs := time.Since(start).Milliseconds()
 	if err != nil {
+		recordPlanToolStep(recorder, task, string(args), "", models.AgentStepStatusFailed, err, durationMs)
 		return TaskResult{
 			ID: task.ID, Status: StatusFailed, Error: err.Error(), Steps: 1,
 			Retryable: isRetryableError(err), IdempotencyKey: task.IdempotencyKey,
 		}
 	}
+	recordPlanToolStep(recorder, task, string(args), res.Content, models.AgentStepStatusOK, nil, durationMs)
 	return TaskResult{ID: task.ID, Status: StatusDone, Summary: res.Content, Steps: 1, IdempotencyKey: task.IdempotencyKey}
 }
 
+// recordPlanToolStep 把一次 tool 任务落成一条 step；agent/llm 任务的 step 由 loop 记录。
+func recordPlanToolStep(recorder loop.Recorder, task Task, args, observation, status string, stepErr error, durationMs int64) {
+	if recorder == nil {
+		return
+	}
+	step := &models.AgentStep{
+		StepIndex:   1,
+		Thought:     task.Goal,
+		Action:      task.Tool,
+		ActionInput: args,
+		Observation: observation,
+		Status:      status,
+		DurationMs:  durationMs,
+	}
+	if stepErr != nil {
+		step.Error = stepErr.Error()
+	}
+	if err := recorder.RecordStep(step); err != nil {
+		logrus.Warnf("[agent-plan] record tool step failed: %v", err)
+	}
+}
+
 // runLLMTask 不调用工具，只做一次文本推理/总结。
-func (s *Service) runLLMTask(ctx context.Context, tc *tools.Context, aiID uint, task Task, upstream map[string]TaskResult, contextHint string) TaskResult {
+func (s *Service) runLLMTask(ctx context.Context, tc *tools.Context, aiID uint, task Task, upstream map[string]TaskResult, contextHint string, recorder loop.Recorder) TaskResult {
 	empty := tools.NewRegistry()
 	exec := tools.NewExecutor(empty, 5*time.Second, 32*1024)
 	runner := loop.New(empty, exec, loop.Config{
@@ -383,7 +416,7 @@ func (s *Service) runLLMTask(ctx context.Context, tc *tools.Context, aiID uint, 
 		MaxConsecutiveToolFailures: 1,
 		MaxParallelToolCalls:       1,
 		Temperature:                0.3,
-	}, nil)
+	}, recorder)
 
 	initial := []clients.ToolMessage{{Role: "system", Content: taskSystemPrompt(task, upstream, contextHint)}}
 	res, err := runner.Run(ctx, tc, initial, task.Goal, nil)
@@ -428,6 +461,10 @@ func (s *Service) synthesize(ctx context.Context, in Input, p *Plan, results []T
 
 	empty := tools.NewRegistry()
 	exec := tools.NewExecutor(empty, 5*time.Second, 32*1024)
+	var recorder loop.Recorder
+	if in.RecorderFor != nil {
+		recorder = in.RecorderFor("synthesis")
+	}
 	runner := loop.New(empty, exec, loop.Config{
 		AIID:                       in.AgentID,
 		MaxSteps:                   1,
@@ -436,7 +473,7 @@ func (s *Service) synthesize(ctx context.Context, in Input, p *Plan, results []T
 		MaxConsecutiveToolFailures: 1,
 		MaxParallelToolCalls:       1,
 		Temperature:                0.3,
-	}, nil)
+	}, recorder)
 
 	tc := &tools.Context{
 		UserID: in.UserID, Username: in.Username,
@@ -484,7 +521,7 @@ func taskSystemPrompt(task Task, upstream map[string]TaskResult, contextHint str
 	b.WriteString("\n")
 	if len(task.Acceptance) > 0 {
 		b.WriteString("验收标准：\n- ")
-		b.WriteString(strings.Join(task.Acceptance, "\n- "))
+		b.WriteString(strings.Join([]string(task.Acceptance), "\n- "))
 		b.WriteString("\n")
 	}
 	if up := upstreamText(upstream); up != "" {

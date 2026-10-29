@@ -3,7 +3,6 @@ package agentctx
 import (
 	"ai-meeting/models"
 	"ai-meeting/repositories"
-	mysqlrepo "ai-meeting/repositories/mysql"
 	"context"
 	"encoding/json"
 
@@ -39,7 +38,7 @@ func LoadRecentMessagesAfter(ctx context.Context, sessionID, userID string, afte
 		}
 	}
 
-	messages, err := mysqlrepo.ListRecentMessagesAfter(sessionID, userID, afterSeq, limit)
+	messages, err := currentRepository().ListRecentMessagesAfter(sessionID, userID, afterSeq, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +56,7 @@ func LoadSummary(ctx context.Context, sessionID string) (string, int64) {
 	if summary, index, ok := repositories.GetCompressedSummary(ctx, sessionID); ok {
 		return summary, index
 	}
-	record, err := mysqlrepo.FindCompressedContext(sessionID)
+	record, err := currentRepository().FindCompressedContext(sessionID)
 	if err != nil {
 		logrus.Warnf("[agent-ctx] read compressed context failed: %v", err)
 		return "", 0
@@ -82,7 +81,7 @@ func SaveSummary(ctx context.Context, sessionID, userID, summary string, index i
 		TotalLength:       totalLength,
 		MessageCount:      count,
 	}
-	if err := mysqlrepo.UpsertCompressedContext(record); err != nil {
+	if err := currentRepository().UpsertCompressedContext(record); err != nil {
 		return err
 	}
 	if err := repositories.SetCompressedSummary(ctx, sessionID, summary, index); err != nil {
@@ -100,7 +99,7 @@ func LoadProfile(ctx context.Context, userID string) *UserProfileData {
 			return &profile
 		}
 	}
-	record, err := mysqlrepo.FindUserProfile(userID)
+	record, err := currentRepository().FindUserProfile(userID)
 	if err != nil || record == nil || record.ProfileJSON == "" {
 		return nil
 	}
@@ -137,7 +136,7 @@ func SaveProfile(ctx context.Context, userID string, profile *UserProfileData) e
 		Version:             profile.Version,
 		LastConsolidatedSeq: profile.LastConsolidatedSeq,
 	}
-	if err := mysqlrepo.UpsertUserProfile(record); err != nil {
+	if err := currentRepository().UpsertUserProfile(record); err != nil {
 		return err
 	}
 	if err := repositories.SetUserProfile(ctx, userID, string(raw)); err != nil {
@@ -154,7 +153,7 @@ func LoadIdentity(ctx context.Context, agentID uint) *AgentIdentityData {
 			return &identity
 		}
 	}
-	record, err := mysqlrepo.FindAgentIdentity(agentID)
+	record, err := currentRepository().FindAgentIdentity(agentID)
 	if err != nil || record == nil || record.IdentityJSON == "" {
 		return DefaultIdentity()
 	}
@@ -182,7 +181,7 @@ func SaveIdentity(ctx context.Context, agentID uint, identity *AgentIdentityData
 		IdentityJSON: string(raw),
 		Version:      identity.Version,
 	}
-	if err := mysqlrepo.UpsertAgentIdentity(record); err != nil {
+	if err := currentRepository().UpsertAgentIdentity(record); err != nil {
 		return err
 	}
 	if err := repositories.SetAgentIdentity(ctx, agentID, string(raw)); err != nil {

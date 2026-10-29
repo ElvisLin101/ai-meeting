@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -147,7 +148,8 @@ func (l *Loop) Run(ctx context.Context, tc *tools.Context, initial []clients.Too
 
 	toolDefs := l.registry.Defs()
 	result := &Result{}
-	recentActions := make(map[string]int)
+	lastStepSignature := ""
+	consecutiveRepeats := 0
 	consecutiveFailures := 0
 
 	for step := 1; step <= l.cfg.MaxSteps; step++ {
@@ -202,15 +204,31 @@ func (l *Loop) Run(ctx context.Context, tc *tools.Context, initial []clients.Too
 			return result, nil
 		}
 
-		// 重复动作检测（同一工具+参数连续出现）
-		for _, call := range resp.ToolCalls {
-			sig := actionSignature(call)
-			recentActions[sig]++
-			if recentActions[sig] >= l.cfg.MaxRepeatActions {
+		// 重复动作检测：只统计“连续步骤”的同一组工具调用。
+		// 不同阶段再次读同一文件不应被误杀。
+		stepSig := stepActionSignature(resp.ToolCalls)
+		if l.cfg.MaxRepeatActions > 0 {
+			if stepSig == lastStepSignature {
+				consecutiveRepeats++
+			} else {
+				consecutiveRepeats = 1
+				lastStepSignature = stepSig
+			}
+			if consecutiveRepeats >= l.cfg.MaxRepeatActions {
 				result.StopReason = "repeated_action"
 				result.Content = resp.Content
 				result.Steps = step
 				result.Transcript = messages
+				l.recordStep(&models.AgentStep{
+					StepIndex:   step,
+					Thought:     resp.Content,
+					Action:      strings.Join(toolNames(resp.ToolCalls), ","),
+					ActionInput: toolInputs(resp.ToolCalls),
+					Observation: "检测到连续重复动作，已停止",
+					Status:      models.AgentStepStatusFailed,
+					Error:       "repeated_action",
+					DurationMs:  time.Since(stepStart).Milliseconds(),
+				})
 				if emit != nil {
 					emit(Event{Type: EventDone, StepIndex: step, StopReason: "repeated_action", Content: resp.Content})
 				}
@@ -316,6 +334,16 @@ func (l *Loop) recordStep(step *models.AgentStep) {
 func actionSignature(call clients.ToolCall) string {
 	sum := sha256.Sum256([]byte(call.Function.Name + "|" + call.Function.Arguments))
 	return call.Function.Name + ":" + hex.EncodeToString(sum[:8])
+}
+
+// stepActionSignature 把一步内的工具调用归一成签名集合，用于判断“连续重复批次”。
+func stepActionSignature(calls []clients.ToolCall) string {
+	sigs := make([]string, 0, len(calls))
+	for _, call := range calls {
+		sigs = append(sigs, actionSignature(call))
+	}
+	sort.Strings(sigs)
+	return strings.Join(sigs, "|")
 }
 
 func toolNames(calls []clients.ToolCall) []string {

@@ -55,3 +55,21 @@ func TestFlush_EmptyBatch(t *testing.T) {
 	s.flush(nil)
 	s.flush([]models.MetricLog{})
 }
+
+type fakeMetricRepository struct {
+	batch []models.MetricLog
+}
+
+func (f *fakeMetricRepository) BatchCreateMetricLogs(logs []models.MetricLog) error {
+	f.batch = append(f.batch, logs...)
+	return nil
+}
+
+func TestFlush_UsesInjectedRepository(t *testing.T) {
+	repo := &fakeMetricRepository{}
+	s := &MetricService{repo: repo}
+	s.flush([]models.MetricLog{{Module: "a", Event: "e"}})
+	if len(repo.batch) != 1 || repo.batch[0].Module != "a" {
+		t.Fatalf("unexpected batch: %+v", repo.batch)
+	}
+}

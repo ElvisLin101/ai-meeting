@@ -7,6 +7,36 @@
 > 求职/面试是示例领域；结构化模拟面试作为「确定性流程工具」接入，用来展示自主编排与确定性编排的边界。
 > 不依赖任何 Agent 框架，存储统一为 Redis（热数据）+ MySQL（真相源 / 全量历史 / 恢复源）。
 
+## v1.0 面试作品
+
+这个版本按“面试作品”收尾：主链路、可观测性、测试和取舍说明优先，不承诺生产级 SLA。
+
+```text
+Client
+  └─ Gin
+      └─ AgentRunService
+           ├─ Router → Plan/DAG → Scheduler → 子任务 ReAct
+           ├─ ContextAssembler → identity / profile / summary / recent
+           ├─ Tools → pdf_parse / file_* / web_search / web_fetch / interview_*
+           └─ Memory → Redis 热数据 + MySQL 真相源
+```
+
+**关键取舍**：
+
+- **手写 ReAct + Plan**：不引入 Agent 框架，换取可解释的终止条件、重试、幂等和上下文预算。
+- **Redis + MySQL**：MySQL 保真相和恢复，Redis 保热路径；所有 Redis 数据都能从 MySQL 重建。
+- **不开放 bash**：文件工具限制在 sandbox 内，简历改写用 `pdf_parse` + `file_edit`，避免把 RCE 入口交给模型。
+- **服务层依赖 Repository 接口**：生产 adapter 在 `services/*/...repository.go`，测试注入 fake，不依赖 sqlmock 和全局 DB。
+- **搜索/抓取复用 DeepSeek key**：`web_search` 和 `web_fetch` 不需要额外 Tavily key。
+
+**实测结果**：
+
+- Live eval：10/10 硬性通过，judge 8/10，平均 3.9 步、18462 tokens、21.5 秒；judge 抓出了两个真实的 plan 质量问题（缺 JD 对比、JD 步骤超限）。
+- SingleFlight：单机 500 并发只执行 1 次底层调用；3 实例集群去重/换主均 150/150 结果一致。
+- 测试：`go test -race ./...` 全绿，当前总覆盖率 38.3%，CI 门槛 38%（目标 40%）。
+
+生产级边界（run 恢复、plan 总预算、Prometheus/OTel、版本化迁移等）见下方「已知边界」。
+
 ## 技术栈
 
 | 维度 | 技术 |
@@ -69,7 +99,7 @@
 - 工具连续失败达到上限（默认 3）
 - ctx 取消 / 总超时（默认 120s）
 
-**工具执行统一收口**：JSON Schema 校验（required + 顶层类型）、单工具超时、panic recovery、结果 32KB 截断、审计日志。
+**工具执行统一收口**：JSON Schema 校验（required + 顶层类型）、单工具超时、panic recovery、结果 32KB 字节预算截断（按 UTF-8 边界，不切坏多字节字符）、审计日志。
 
 **单步工具批调度**：同一条 assistant 消息里的多个 tool call 默认并行；只有整批工具都声明 `ConcurrencySafe` 才并行，任一工具未声明（如写文件、面试状态推进）则整批串行。结果按原始 call 顺序回填，单个工具失败不取消同批兄弟调用。并行上限由 `agent.max_parallel_tools` 控制（默认 4）。
 
@@ -84,7 +114,8 @@
 | 工具 | 能力 | 安全边界 |
 |---|---|---|
 | `pdf_parse` | 解析沙箱内 PDF | 扩展名 + `%PDF-` 魔数 + 10MB 上限 |
-| `web_search` | 真实搜索 API（Tavily/Serper） | 超时、条数/长度限制、结果标记为不可信 |
+| `web_search` | 搜索公开网页（DeepSeek / Tavily / Serper） | 超时、条数/长度限制、结果标记为不可信 |
+| `web_fetch` | 抓取公开网页正文（DeepSeek Fetch，返回 Markdown） | 仅 http/https；拒绝 localhost/内网/元数据 IP/非标准端口；正文截断并标记不可信 |
 | `file_list/read/write/edit` | 沙箱内文本文件操作 | 拒绝绝对路径/`..`/符号链接逃逸；原子写 + 写前备份 |
 | `interview_*` | 结构化模拟面试 | 包装确定性状态机 + 会话归属校验 |
 
@@ -209,11 +240,11 @@ open http://localhost:8080
 mysql -uroot -p -e "CREATE DATABASE IF NOT EXISTS ai_meeting DEFAULT CHARSET utf8mb4;"
 # 2. 配置
 cp config/config.example.yaml config/config.yaml
-# 3. 运行（启动时 AutoMigrate 自动建表）
+# 3. 运行（启动时 AutoMigrate 自动建表；迁移失败会阻断启动）
 go run main.go
 ```
 
-> `ai.deepseek.api_key` 为空时，依赖模型的功能不可用；`agent.search.api_key` 为空时 `web_search` 工具不会注册。
+> `ai.deepseek.api_key` 为空时，依赖模型的功能不可用。搜索 provider 默认 `deepseek`，`agent.search.api_key` 留空会复用 `ai.deepseek.api_key`，同时启用 `web_search` 与 `web_fetch`；切到 Tavily/Serper 时需单独配置 `agent.search.api_key`，且只启用 `web_search`。
 > 文件工具只能操作 `agent.sandbox_root`（默认 `./sandbox`）内的相对路径。
 
 ## 测试与 CI
@@ -224,21 +255,32 @@ go test ./...
 go vet ./...
 go run ./cmd/eval          # 确定性 eval：路由/画像规则/画像冲突
 go run ./cmd/liveeval      # Live eval：真实模型 + MySQL/Redis
+go run ./cmd/liveeval -judge  # 追加 LLM 逐条语义评分
 scripts/knowledge-check.sh diff
 ```
 
+`cmd/liveeval` 默认 `-agent-id 0`，模型配置来自 `config/config.yaml` 的 `ai.deepseek`；`-agent-id >0` 时改用 MySQL `ai_properties` 里的启用配置。key 也可用 `AI_DEEPSEEK_API_KEY` 覆盖。未配置 key 时会在启动前直接报错，不会空跑用例。
+
+默认 `-isolate=true`：每轮生成独立 eval 用户（`eval-<timestamp>-<pid>`）和独立 sandbox（`tmp/eval-runs/<label>/sandbox`），每个用例前清空 sandbox，避免文件、画像和历史 run 跨轮污染。需要复用固定用户/沙箱时用 `-isolate=false -username <name> -user-id <id>`。用例可用 `seed_files` 预置简历/JD 等夹具；plan 用例用 `max_plan_steps` 限制总步数，direct 用 `max_steps`。报告输出 `completed`、`quality_pass`、`avg_quality`，开启 `-judge` 后额外输出 `judge_pass`、`avg_judge_score`；关键词 quality 默认阈值 `-quality-threshold 0.7`。
+
 - 单元测试覆盖：循环终止/熔断/重复动作、工具参数校验、沙箱路径逃逸、上下文预算与画像合并、路由鉴权
 - 确定性 eval：15 条路由、10 条画像规则、5 条冲突用例，CI 直接跑
-- Live eval：`cmd/liveeval` 用真实模型跑 10 条任务，输出 direct/plan 成功率、步数、token、延迟到 `tmp/live_eval_report.json`；需要 `config/config.yaml`、MySQL、Redis 和模型 key，不进 CI
+- Live eval：`cmd/liveeval` 用真实模型跑 10 条任务，输出 direct/plan 成功率、步数、token、延迟到 `tmp/live_eval_report.json`；默认隔离用户和 sandbox，需要 `config/config.yaml`、MySQL、Redis 和模型 key，不进 CI
 - 分布式组件：SingleFlight 单测 + 真实 Redis 集成测试 + 集群压测脚本
-- CI：gofmt → build → vet → race 测试 → eval → 覆盖率
+- CI：gofmt → build → vet → race 测试 → eval → 覆盖率（低于 38% 失败，目标 40%）
 
 ## 已知边界
 
 - 流式 run 的 SingleFlight 只做幂等，不复用 chunk（如实说明）
 - 换主机制基于租约，安全性是概率性收敛，不是强一致（边界见 `docs/agent-knowledge/references/`）
+- **Run 进程重启后不会自动恢复**：状态为 running 的 run 没有 reaper/断点续跑，跨实例幂等仍以单 run 为主
+- **Plan 没有 run 级总 token/step 预算**：只有单任务超时、最大任务数和 replan 次数
+- **可观测性以日志 + MySQL `metric_logs` 为主**：没有 Prometheus/OpenTelemetry/request-id 全链路
+- **生产迁移仍用 AutoMigrate**：失败会阻断启动，但没有版本化 migrations 和回滚脚本
+- **前端还没有接 SSE**：后端有 `/agent/runs/stream`，页面仍是非流式；run 历史/Markdown 渲染也未做
 - 画像「每次模型调用提炼」采用异步 + 节流，避免成本翻倍
-- 网页搜索依赖外部 API key 与网络
+- Live eval 的 judge 仍有波动：本轮 10/10 硬性通过，但 judge 8/10，两个 plan 用例分别卡在 JD 读取和步骤上限
+- 网页搜索/抓取依赖外部 API、额度与网络；DeepSeek Search/Fetch 与模型共用 API key，但按请求单独计费
 
 ## License
 
