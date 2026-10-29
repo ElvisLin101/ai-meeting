@@ -7,6 +7,36 @@
 > 求职/面试是示例领域；结构化模拟面试作为「确定性流程工具」接入，用来展示自主编排与确定性编排的边界。
 > 不依赖任何 Agent 框架，存储统一为 Redis（热数据）+ MySQL（真相源 / 全量历史 / 恢复源）。
 
+## v1.0 面试作品
+
+这个版本按“面试作品”收尾：主链路、可观测性、测试和取舍说明优先，不承诺生产级 SLA。
+
+```text
+Client
+  └─ Gin
+      └─ AgentRunService
+           ├─ Router → Plan/DAG → Scheduler → 子任务 ReAct
+           ├─ ContextAssembler → identity / profile / summary / recent
+           ├─ Tools → pdf_parse / file_* / web_search / web_fetch / interview_*
+           └─ Memory → Redis 热数据 + MySQL 真相源
+```
+
+**关键取舍**：
+
+- **手写 ReAct + Plan**：不引入 Agent 框架，换取可解释的终止条件、重试、幂等和上下文预算。
+- **Redis + MySQL**：MySQL 保真相和恢复，Redis 保热路径；所有 Redis 数据都能从 MySQL 重建。
+- **不开放 bash**：文件工具限制在 sandbox 内，简历改写用 `pdf_parse` + `file_edit`，避免把 RCE 入口交给模型。
+- **服务层依赖 Repository 接口**：生产 adapter 在 `services/*/...repository.go`，测试注入 fake，不依赖 sqlmock 和全局 DB。
+- **搜索/抓取复用 DeepSeek key**：`web_search` 和 `web_fetch` 不需要额外 Tavily key。
+
+**实测结果**：
+
+- Live eval：10/10 硬性通过，judge 8/10，平均 3.9 步、18462 tokens、21.5 秒；judge 抓出了两个真实的 plan 质量问题（缺 JD 对比、JD 步骤超限）。
+- SingleFlight：单机 500 并发只执行 1 次底层调用；3 实例集群去重/换主均 150/150 结果一致。
+- 测试：`go test -race ./...` 全绿，当前总覆盖率 38.3%，CI 门槛 38%（目标 40%）。
+
+生产级边界（run 恢复、plan 总预算、Prometheus/OTel、版本化迁移等）见下方「已知边界」。
+
 ## 技术栈
 
 | 维度 | 技术 |
@@ -243,7 +273,13 @@ scripts/knowledge-check.sh diff
 
 - 流式 run 的 SingleFlight 只做幂等，不复用 chunk（如实说明）
 - 换主机制基于租约，安全性是概率性收敛，不是强一致（边界见 `docs/agent-knowledge/references/`）
+- **Run 进程重启后不会自动恢复**：状态为 running 的 run 没有 reaper/断点续跑，跨实例幂等仍以单 run 为主
+- **Plan 没有 run 级总 token/step 预算**：只有单任务超时、最大任务数和 replan 次数
+- **可观测性以日志 + MySQL `metric_logs` 为主**：没有 Prometheus/OpenTelemetry/request-id 全链路
+- **生产迁移仍用 AutoMigrate**：失败会阻断启动，但没有版本化 migrations 和回滚脚本
+- **前端还没有接 SSE**：后端有 `/agent/runs/stream`，页面仍是非流式；run 历史/Markdown 渲染也未做
 - 画像「每次模型调用提炼」采用异步 + 节流，避免成本翻倍
+- Live eval 的 judge 仍有波动：本轮 10/10 硬性通过，但 judge 8/10，两个 plan 用例分别卡在 JD 读取和步骤上限
 - 网页搜索/抓取依赖外部 API、额度与网络；DeepSeek Search/Fetch 与模型共用 API key，但按请求单独计费
 
 ## License
