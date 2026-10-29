@@ -27,6 +27,13 @@ type agentRepository interface {
 
 type mysqlAgentRepository struct{}
 
+// agentPropertiesLoaderRepository 是启动缓存加载器需要的最小接口。
+type agentPropertiesLoaderRepository interface {
+	ListActiveAgentProperties() ([]models.AgentProperties, error)
+	FindAgentPropertiesByID(id uint) (*models.AgentProperties, error)
+	FindAgentPropertiesByName(name string) (*models.AgentProperties, error)
+}
+
 func (mysqlAgentRepository) CreateConversation(conv *models.Conversation) error {
 	return mysqlrepo.CreateConversation(conv)
 }
@@ -85,4 +92,12 @@ func (mysqlAgentRepository) PageAgentProperties(limit int) ([]models.AgentProper
 
 func (mysqlAgentRepository) CreateAgentFileAsset(asset *models.AgentFileAsset) error {
 	return mysqlrepo.CreateAgentFileAsset(asset)
+}
+
+func (mysqlAgentRepository) ListActiveAgentProperties() ([]models.AgentProperties, error) {
+	return mysqlrepo.ListActiveAgentProperties()
+}
+
+func (mysqlAgentRepository) FindAgentPropertiesByID(id uint) (*models.AgentProperties, error) {
+	return mysqlrepo.FindAgentPropertiesByID(id)
 }
