@@ -233,6 +233,10 @@ func (c *AgentFileController) Upload(ctx *gin.Context) {
 		respx.Fail(ctx, ecode.RequestErr, "File is required")
 		return
 	}
+	if err := validateAgentUpload(file); err != nil {
+		respx.Respond(ctx, err, nil)
+		return
+	}
 
 	username, ok := mustUsername(ctx)
 	if !ok {

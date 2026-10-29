@@ -9,10 +9,12 @@ import (
 	agentctx "ai-meeting/services/agent/context"
 	"ai-meeting/services/metric"
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -28,6 +30,9 @@ func main() {
 
 	if err := config.LoadConfig(); err != nil {
 		log.Fatalf("Failed to load config: %v", err)
+	}
+	if err := validateJWTSecret(config.AppConfig.JWT.Secret); err != nil {
+		log.Fatalf("Invalid JWT config: %v", err)
 	}
 
 	if err := mysqlrepo.InitDB(); err != nil {
@@ -110,4 +115,18 @@ func closeConnections() {
 		_ = repositories.RedisClient.Close()
 	}
 
+}
+
+func validateJWTSecret(secret string) error {
+	s := strings.TrimSpace(secret)
+	if s == "" {
+		return fmt.Errorf("jwt.secret 不能为空")
+	}
+	if s == "your-secret-key-here" {
+		return fmt.Errorf("jwt.secret 仍是示例默认值，请改为随机长密钥")
+	}
+	if len(s) < 16 {
+		return fmt.Errorf("jwt.secret 至少 16 个字符")
+	}
+	return nil
 }
