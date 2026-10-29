@@ -3,7 +3,7 @@
 ![CI](https://img.shields.io/github/actions/workflow/status/ElvisLin101/ai-meeting/ci.yml?branch=main&label=CI)
 [![Go Version](https://img.shields.io/badge/Go-1.24.1-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 
-> 一个面向长任务的自主 Agent 后端：手写 ReAct 循环 + Function Calling 工具编排 + 四层上下文管理。
+> 一个面向长任务的自主 Agent 后端：手写 ReAct 循环 + Function Calling 工具编排 + 四层上下文管理，并用 Redis 分布式 SingleFlight 做跨实例请求合并、主从选举、流式心跳和自动换主。
 > 求职/面试是示例领域；结构化模拟面试作为「确定性流程工具」接入，用来展示自主编排与确定性编排的边界。
 > 不依赖任何 Agent 框架，存储统一为 Redis（热数据）+ MySQL（真相源 / 全量历史 / 恢复源）。
 
