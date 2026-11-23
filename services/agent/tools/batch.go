@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"ai-meeting/clients"
 )
@@ -24,9 +25,10 @@ import (
 
 // CallOutcome 是单个 tool call 的执行结果
 type CallOutcome struct {
-	Call   clients.ToolCall
-	Result Result
-	Err    error
+	Call       clients.ToolCall
+	Result     Result
+	Err        error
+	DurationMs int64
 }
 
 // BatchExecutor 负责一批 tool call 的并发/串行调度
@@ -91,8 +93,9 @@ func (b *BatchExecutor) runOne(ctx context.Context, tc *Context, call clients.To
 	if err := ctx.Err(); err != nil {
 		return CallOutcome{Call: call, Err: err}
 	}
+	start := time.Now()
 	res, err := b.executor.Execute(ctx, tc, call)
-	return CallOutcome{Call: call, Result: res, Err: err}
+	return CallOutcome{Call: call, Result: res, Err: err, DurationMs: time.Since(start).Milliseconds()}
 }
 
 // allConcurrencySafe 判断整批是否都可以并行。

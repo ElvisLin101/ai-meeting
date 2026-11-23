@@ -63,12 +63,22 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 
 - 入口: `services/agent/loop/loop.go` 中 `l.batch.Execute(runCtx, tc, resp.ToolCalls)`。
 - 策略: 整批工具都实现 `MetaProvider` 且 `Meta().ConcurrencySafe=true` → 并行（信号量限制 `agent.max_parallel_tools`）；否则整批串行。
-- 结果: 按原始 `ToolCalls` 顺序返回，`tool` message 的 `tool_call_id` 与模型返回的 call id 对齐；单个失败不取消同批其他调用。
+- 结果: 按原始 `ToolCalls` 顺序返回，`tool` message 的 `tool_call_id` 与模型返回的 call id 对齐；单个失败不取消同批其他调用。`CallOutcome.DurationMs` 记录单次工具耗时，供 lifecycle callback 使用。
 - 截断: `services/agent/tools/executor.go` 按 UTF-8 字节预算切结果，保证不破坏多字节字符；默认 32KB。
 - 事件: `tool_call` / `tool_result` 新增 `CallID`，便于前端在同一步多个并发调用时关联。
 - 只读且无共享状态的工具（`pdf_parse`、`file_list`、`file_read`、`web_search`、`web_fetch`）已声明 `ConcurrencySafe=true`；写文件、面试状态推进默认不声明，保持串行。
 - 搜索/抓取: `web_search` 支持 `deepseek` / `tavily` / `serper`；`deepseek` 复用 `ai.deepseek.api_key`，搜索走 `/v1/tools/search`，`web_fetch` 走 `/v1/tools/fetch` 返回 Markdown。`web_fetch` 只放行公网 http/https，拒绝 localhost/内网/元数据 IP/非标准端口，正文截断 12000 rune 并标记不可信。
 - 当前边界: 这是"并行批次"，不是带 `depends_on` 的完整 DAG；有先后依赖的调用必须由模型分步发起，后续再引入 GraphScheduler。
+
+### 生命周期回调（callback 包）
+
+- 入口: `services/agent/callback/callback.go`。与 SSE 的 `loop.Event` 解耦：Event 面向终端用户，callback 面向日志/指标/追踪。
+- 接口: `Handler` 定义 `OnRunStart/OnRunEnd/OnLLMStart/OnLLMEnd/OnToolStart/OnToolEnd`；事件只携带 RunID/SessionID/Step/耗时/token/工具名/错误等元数据，不携带 prompt 与工具结果正文。
+- 组合: 嵌入 `Base` 获得空实现；`Multi` 按注册顺序分发并忽略 nil；`OrNop` 把 nil 归一为空实现。
+- 默认实现: `Logging` 基于 logrus；run start 用 Info，LLM/tool start 用 Debug，正常结束用 Info，错误用 Warn。
+- 接入: `services/agent/run/service.go` 在 `GetService` 构造 `Multi{NewLogging(...)}`；直接 ReAct 通过 `runner.SetCallbacks` 挂载，plan 通过 `plan.Config.Callbacks` 传给三个子 loop。plan 子任务 RunID 形如 `<runID>:<taskID>`，合成为 `<runID>:synthesis`。
+- 覆盖: direct ReAct 与 plan 的 agent/llm/synthesis 子 loop；planner/replanner 的模型调用和 plan 直调 tool 任务尚未接入。tool start 在执行整批之前触发，tool end 在整批完成后按原始调用顺序触发；`DurationMs` 是单次执行耗时。
+- 约定: Handler 同步执行，必须并发安全（plan 子任务并行）；回调只读，不参与循环控制，也不修改运行结果。当前未做回调 panic 隔离。
 
 ### Plan-and-Execute 编排（plan 包）
 

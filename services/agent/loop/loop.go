@@ -4,6 +4,7 @@ import (
 	"ai-meeting/clients"
 	"ai-meeting/models"
 	"ai-meeting/pkg/ecode"
+	"ai-meeting/services/agent/callback"
 	"ai-meeting/services/agent/tools"
 	"context"
 	"crypto/sha256"
@@ -101,10 +102,11 @@ type Result struct {
 
 // Loop Agent 循环
 type Loop struct {
-	registry *tools.Registry
-	batch    *tools.BatchExecutor
-	cfg      Config
-	recorder Recorder
+	registry  *tools.Registry
+	batch     *tools.BatchExecutor
+	cfg       Config
+	recorder  Recorder
+	callbacks callback.Handler
 }
 
 // New 创建循环
@@ -128,18 +130,51 @@ func New(registry *tools.Registry, executor *tools.Executor, cfg Config, recorde
 		cfg.MaxParallelToolCalls = 4
 	}
 	return &Loop{
-		registry: registry,
-		batch:    tools.NewBatchExecutor(registry, executor, cfg.MaxParallelToolCalls),
-		cfg:      cfg,
-		recorder: recorder,
+		registry:  registry,
+		batch:     tools.NewBatchExecutor(registry, executor, cfg.MaxParallelToolCalls),
+		cfg:       cfg,
+		recorder:  recorder,
+		callbacks: callback.OrNop(nil),
 	}
+}
+
+// SetCallbacks 挂载生命周期回调；nil 会被归一为空实现。
+// 回调只读，不参与循环控制，也不应修改运行结果。
+func (l *Loop) SetCallbacks(h callback.Handler) {
+	l.callbacks = callback.OrNop(h)
 }
 
 // callLLM 抽成变量便于单测注入假模型
 var callLLM = clients.CallConfiguredAIChatWithToolsStream
 
 // Run 执行一次 Agent 任务
-func (l *Loop) Run(ctx context.Context, tc *tools.Context, initial []clients.ToolMessage, userInput string, emit Emitter) (*Result, error) {
+func (l *Loop) Run(ctx context.Context, tc *tools.Context, initial []clients.ToolMessage, userInput string, emit Emitter) (result *Result, retErr error) {
+	runStart := time.Now()
+	var runID, sessionID string
+	if tc != nil {
+		runID, sessionID = tc.RunID, tc.SessionID
+	}
+	l.callbacks.OnRunStart(ctx, callback.RunStartEvent{
+		RunID:      runID,
+		SessionID:  sessionID,
+		AgentID:    l.cfg.AIID,
+		InputRunes: len([]rune(userInput)),
+	})
+	defer func() {
+		ev := callback.RunEndEvent{
+			RunID:     runID,
+			SessionID: sessionID,
+			Duration:  time.Since(runStart),
+			Err:       retErr,
+		}
+		if result != nil {
+			ev.Steps = result.Steps
+			ev.Tokens = result.Tokens
+			ev.StopReason = result.StopReason
+		}
+		l.callbacks.OnRunEnd(ctx, ev)
+	}()
+
 	runCtx, cancel := context.WithTimeout(ctx, l.cfg.TotalTimeout)
 	defer cancel()
 
@@ -147,7 +182,7 @@ func (l *Loop) Run(ctx context.Context, tc *tools.Context, initial []clients.Too
 	messages = append(messages, clients.ToolMessage{Role: "user", Content: userInput})
 
 	toolDefs := l.registry.Defs()
-	result := &Result{}
+	result = &Result{}
 	lastStepSignature := ""
 	consecutiveRepeats := 0
 	consecutiveFailures := 0
@@ -160,6 +195,14 @@ func (l *Loop) Run(ctx context.Context, tc *tools.Context, initial []clients.Too
 		}
 
 		stepStart := time.Now()
+		l.callbacks.OnLLMStart(runCtx, callback.LLMStartEvent{
+			RunID:        runID,
+			SessionID:    sessionID,
+			Step:         step,
+			AgentID:      l.cfg.AIID,
+			MessageCount: len(messages),
+			ToolCount:    len(toolDefs),
+		})
 		resp, err := callLLM(runCtx, l.cfg.AIID, messages, toolDefs, l.cfg.Temperature,
 			func(delta clients.ToolStreamDelta) error {
 				if delta.Content != "" && emit != nil {
@@ -168,6 +211,13 @@ func (l *Loop) Run(ctx context.Context, tc *tools.Context, initial []clients.Too
 				return nil
 			})
 		if err != nil {
+			l.callbacks.OnLLMEnd(runCtx, callback.LLMEndEvent{
+				RunID:     runID,
+				SessionID: sessionID,
+				Step:      step,
+				Duration:  time.Since(stepStart),
+				Err:       err,
+			})
 			stepRecord := &models.AgentStep{
 				StepIndex:  step,
 				Status:     models.AgentStepStatusFailed,
@@ -179,9 +229,20 @@ func (l *Loop) Run(ctx context.Context, tc *tools.Context, initial []clients.Too
 			result.Transcript = messages
 			return result, ecode.Wrap(err, "调用模型失败")
 		}
+		stepTokens := 0
 		if resp.Usage != nil {
-			result.Tokens += resp.Usage.TotalTokens
+			stepTokens = resp.Usage.TotalTokens
+			result.Tokens += stepTokens
 		}
+		l.callbacks.OnLLMEnd(runCtx, callback.LLMEndEvent{
+			RunID:        runID,
+			SessionID:    sessionID,
+			Step:         step,
+			Duration:     time.Since(stepStart),
+			Tokens:       stepTokens,
+			ToolCalls:    toolNames(resp.ToolCalls),
+			ContentRunes: len([]rune(resp.Content)),
+		})
 
 		// 无工具调用 → 最终回答
 		if len(resp.ToolCalls) == 0 {
@@ -248,6 +309,14 @@ func (l *Loop) Run(ctx context.Context, tc *tools.Context, initial []clients.Too
 		// 全部并发安全 → 并行；否则整批串行。结果按原始顺序回填，
 		// 保证 tool message 与 tool_call_id 一一对应。
 		for _, call := range resp.ToolCalls {
+			l.callbacks.OnToolStart(runCtx, callback.ToolStartEvent{
+				RunID:     runID,
+				SessionID: sessionID,
+				Step:      step,
+				CallID:    call.ID,
+				ToolName:  call.Function.Name,
+				ArgsBytes: len(call.Function.Arguments),
+			})
 			if emit != nil {
 				emit(Event{Type: EventToolCall, StepIndex: step, CallID: call.ID,
 					ToolName: call.Function.Name, ToolInput: call.Function.Arguments})
@@ -258,6 +327,17 @@ func (l *Loop) Run(ctx context.Context, tc *tools.Context, initial []clients.Too
 		var observations []string
 		for _, outcome := range outcomes {
 			call := outcome.Call
+			l.callbacks.OnToolEnd(runCtx, callback.ToolEndEvent{
+				RunID:       runID,
+				SessionID:   sessionID,
+				Step:        step,
+				CallID:      call.ID,
+				ToolName:    call.Function.Name,
+				Duration:    time.Duration(outcome.DurationMs) * time.Millisecond,
+				ResultBytes: len(outcome.Result.Content),
+				Success:     outcome.Err == nil,
+				Err:         outcome.Err,
+			})
 			observation := outcome.Result.Content
 			if outcome.Err != nil {
 				consecutiveFailures++

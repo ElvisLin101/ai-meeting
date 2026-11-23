@@ -321,6 +321,7 @@ func (s *Service) runAgentTask(ctx context.Context, tc *tools.Context, aiID uint
 		MaxParallelToolCalls:       4,
 		Temperature:                0.7,
 	}, recorder)
+	runner.SetCallbacks(s.cfg.Callbacks)
 
 	initial := []clients.ToolMessage{{Role: "system", Content: taskSystemPrompt(task, upstream, contextHint)}}
 	res, err := runner.Run(ctx, tc, initial, task.Goal, nil)
@@ -417,6 +418,7 @@ func (s *Service) runLLMTask(ctx context.Context, tc *tools.Context, aiID uint, 
 		MaxParallelToolCalls:       1,
 		Temperature:                0.3,
 	}, recorder)
+	runner.SetCallbacks(s.cfg.Callbacks)
 
 	initial := []clients.ToolMessage{{Role: "system", Content: taskSystemPrompt(task, upstream, contextHint)}}
 	res, err := runner.Run(ctx, tc, initial, task.Goal, nil)
@@ -474,6 +476,7 @@ func (s *Service) synthesize(ctx context.Context, in Input, p *Plan, results []T
 		MaxParallelToolCalls:       1,
 		Temperature:                0.3,
 	}, recorder)
+	runner.SetCallbacks(s.cfg.Callbacks)
 
 	tc := &tools.Context{
 		UserID: in.UserID, Username: in.Username,

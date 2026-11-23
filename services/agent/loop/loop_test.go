@@ -3,11 +3,13 @@ package loop
 import (
 	"ai-meeting/clients"
 	"ai-meeting/models"
+	"ai-meeting/services/agent/callback"
 	"ai-meeting/services/agent/tools"
 	"context"
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -326,5 +328,89 @@ func TestRun_ParallelToolFailureDoesNotAbortSiblings(t *testing.T) {
 	if !strings.Contains(rec.steps[0].Observation, "echo-ok") ||
 		!strings.Contains(rec.steps[0].Observation, "工具执行失败") {
 		t.Fatalf("step observation should contain both outcomes, got %q", rec.steps[0].Observation)
+	}
+}
+
+// recordingCallback 收集生命周期事件，用于断言回调顺序与元数据。
+type recordingCallback struct {
+	callback.Base
+	mu    sync.Mutex
+	order []string
+	runs  []callback.RunEndEvent
+	tools []callback.ToolEndEvent
+}
+
+func (r *recordingCallback) add(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.order = append(r.order, name)
+}
+
+func (r *recordingCallback) OnRunStart(context.Context, callback.RunStartEvent) { r.add("run_start") }
+func (r *recordingCallback) OnLLMStart(context.Context, callback.LLMStartEvent) { r.add("llm_start") }
+func (r *recordingCallback) OnLLMEnd(context.Context, callback.LLMEndEvent)     { r.add("llm_end") }
+func (r *recordingCallback) OnToolStart(context.Context, callback.ToolStartEvent) {
+	r.add("tool_start")
+}
+
+func (r *recordingCallback) OnToolEnd(_ context.Context, ev callback.ToolEndEvent) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.order = append(r.order, "tool_end")
+	r.tools = append(r.tools, ev)
+}
+
+func (r *recordingCallback) OnRunEnd(_ context.Context, ev callback.RunEndEvent) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.order = append(r.order, "run_end")
+	r.runs = append(r.runs, ev)
+}
+
+func TestRun_CallbackLifecycle(t *testing.T) {
+	calls := 0
+	withFakeLLM(t, func(ctx context.Context, messages []clients.ToolMessage) (*clients.ToolChatResult, error) {
+		calls++
+		if calls == 1 {
+			return &clients.ToolChatResult{
+				ToolCalls: []clients.ToolCall{{
+					ID: "call-1", Type: "function",
+					Function: clients.ToolCallFunction{Name: "echo", Arguments: "{}"},
+				}},
+				FinishReason: "tool_calls",
+			}, nil
+		}
+		return &clients.ToolChatResult{Content: "done", FinishReason: "stop"}, nil
+	})
+
+	l, _ := newLoop(t, &echoTool{}, Config{MaxSteps: 4, TotalTimeout: time.Second})
+	cb := &recordingCallback{}
+	l.SetCallbacks(cb)
+
+	res, err := l.Run(context.Background(), &tools.Context{RunID: "run-1", SessionID: "sess-1"}, nil, "hi", nil)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if res.StopReason != "final_answer" {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	want := []string{"run_start", "llm_start", "llm_end", "tool_start", "tool_end", "llm_start", "llm_end", "run_end"}
+	if strings.Join(cb.order, ",") != strings.Join(want, ",") {
+		t.Fatalf("callback order = %v, want %v", cb.order, want)
+	}
+	if len(cb.runs) != 1 {
+		t.Fatalf("want 1 run end event, got %d", len(cb.runs))
+	}
+	if got := cb.runs[0]; got.RunID != "run-1" || got.SessionID != "sess-1" || got.StopReason != "final_answer" || got.Steps != 2 || got.Err != nil {
+		t.Fatalf("unexpected run end event: %+v", got)
+	}
+	if len(cb.tools) != 1 {
+		t.Fatalf("want 1 tool end event, got %d", len(cb.tools))
+	}
+	if got := cb.tools[0]; got.RunID != "run-1" || got.ToolName != "echo" || !got.Success || got.Err != nil {
+		t.Fatalf("unexpected tool end event: %+v", got)
 	}
 }

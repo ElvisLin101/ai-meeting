@@ -7,7 +7,8 @@ import (
 	"ai-meeting/pkg/ecode"
 	"ai-meeting/pkg/singleflight"
 	"ai-meeting/repositories"
-	"ai-meeting/services/agent/context"
+	"ai-meeting/services/agent/callback"
+	agentctx "ai-meeting/services/agent/context"
 	"ai-meeting/services/agent/loop"
 	planpkg "ai-meeting/services/agent/plan"
 	"ai-meeting/services/agent/tools"
@@ -64,6 +65,7 @@ type Service struct {
 	cfg       config.AgentConfig
 	planCfg   planpkg.Config
 	quota     config.QuotaConfig
+	callbacks callback.Handler
 }
 
 func (s *Service) repository() runRepository {
@@ -91,6 +93,8 @@ func GetService() *Service {
 				DurationMs: durationMs, ErrorType: errType,
 			})
 		})
+		// 生命周期回调：默认只落日志；后续接 metrics/tracing 时在这里追加 Handler。
+		callbacks := callback.Multi{callback.NewLogging(logrus.StandardLogger())}
 		serviceInstance = &Service{
 			repo:     mysqlRunRepository{},
 			registry: registry,
@@ -103,7 +107,8 @@ func GetService() *Service {
 				RecentMaxTokens:         cfg.Context.RecentMaxTokens,
 				CompressThresholdTokens: cfg.Context.CompressThresholdTokens,
 			}),
-			cfg: cfg,
+			cfg:       cfg,
+			callbacks: callbacks,
 			planCfg: planpkg.Config{
 				Enabled:          cfg.Plan.Enabled,
 				MaxTasks:         cfg.Plan.MaxTasks,
@@ -119,6 +124,7 @@ func GetService() *Service {
 				RouteMode:        cfg.Plan.RouteMode,
 				RouteMinScore:    cfg.Plan.RouteMinScore,
 				FastPathRunes:    cfg.Plan.FastPathRunes,
+				Callbacks:        callbacks,
 			},
 			quota: cfg.Quota,
 		}
@@ -362,6 +368,7 @@ func (s *Service) execute(ctx context.Context, req StartRequest, emit func(loop.
 		MaxParallelToolCalls:       s.cfg.MaxParallelTools,
 		Temperature:                0.7,
 	}, recorder)
+	runner.SetCallbacks(s.callbacks)
 
 	start := time.Now()
 	loopResult, loopErr := runner.Run(ctx, tc, initial, req.Input, emit)

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"ai-meeting/services/agent/callback"
 	"ai-meeting/services/agent/loop"
 )
 
@@ -39,6 +40,8 @@ type Config struct {
 	RouteMinScore int
 	// FastPathRunes 是短查询快速通道阈值；短且无强信号时直接走 ReAct。
 	FastPathRunes int
+	// Callbacks 是子任务 ReAct 循环使用的生命周期回调；nil 表示不回调。
+	Callbacks callback.Handler
 }
 
 // withDefaults 补齐零值，避免配置漏填导致计划无法运行。
