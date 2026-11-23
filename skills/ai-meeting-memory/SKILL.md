@@ -1,85 +1,63 @@
 ---
 name: ai-meeting-memory
-description: 当需求涉及 AI 长上下文、历史消息窗口、压缩摘要、Redis/MySQL 恢复、压缩阈值、分布式 SingleFlight 去重或 message sequence 时使用。
+description: 当需求涉及 AI 或 Agent Run 上下文、压缩摘要、画像、Redis/MySQL 恢复、历史窗口、消息序列或分布式 SingleFlight 时使用。
 ---
 
 # AI-Meeting Memory Skill
 
 ## 何时使用
 
-读取本 Skill 的场景:
+- AI 长上下文拼接、压缩阈值、摘要恢复和清理。
+- Agent Run 四层上下文、token 预算、压缩边界、画像候选/合并/确认。
+- 消息 `sequence`、Redis 热数据或 SingleFlight 共享执行。
+- AI 聊天入口同时读 AI Skill，Agent 编排同时读 Agent Skill，面试运行态恢复先读 Interview Skill。
 
-- 修改 AI 历史上下文拼接、压缩、恢复或清理。
-- 修改 `AiMessage` 的写入顺序、查询顺序或 `sequence` 规则。
-- 接入真实 AI 摘要模型、调整压缩阈值、Redis key 或 MySQL 持久化。
-- 调查上下文重复、丢失、顺序错乱或压缩不触发。
-- 修改分布式 SingleFlight 去重逻辑。
-
-不适用场景:
-
-- AI 普通会话入口、模型调用和响应 DTO 先读 `ai-meeting-ai`。
-- Agent 侧不使用压缩记忆, Agent 相关需求读 `ai-meeting-agent`。
-- 面试历史接口虽然复用 `AgentMessageHistoryRespDTO`, 但业务入口先读 `ai-meeting-interview`。
+旧 `AgentChatSSE` 不使用压缩；当前 Agent Run 使用压缩。两条链路不能互相推断。
 
 ## 代码地图
 
-- AI 记忆服务: `services/ai/ai_memory_service.go`（AiMemoryService + 压缩常量）。
-- 分布式 SingleFlight: `pkg/singleflight/singleflight.go`（DistributedGroup）。
-- SingleFlight 初始化: `repositories/redis.go`（全局 `SingleFlight` 实例）。
-- Agent 消息仓储: `repositories/mysql/message_repository.go`（Agent 侧不压缩, 但消息存储仍用）。
-- AI 消息仓储: `repositories/mysql/message_repository.go`。
-- 压缩上下文模型: `models/agent_runtime.go`。
-- AI 聊天中触发压缩: `services/ai/ai_chat_service.go`（finishAiChat 中调用 CompressContext）。
+- AI：`services/ai/ai_memory_service.go`、`services/ai/ai_chat_service.go`。
+- Agent：`services/agent/context/assembler.go`、`services/agent/context/tokens.go`、`services/agent/context/store.go`、`services/agent/context/compress.go`。
+- 画像：`services/agent/context/profile_rules.go`、`services/agent/context/profile_consolidate.go`、`services/agent/context/profile_apply.go`。
+- 后台生命周期：`services/agent/context/workers.go`；根编排：`services/agent/run/service.go`。
+- 热数据：`repositories/redis_hot.go`；连接和全局 SingleFlight：`repositories/redis.go`。
+- 持久化：`repositories/mysql/message_repository.go`、`repositories/mysql/sequence_repository.go`、`repositories/mysql/compressed_context_repository.go`。
+- 模型：`models/conversation.go`、`models/agent_runtime.go`。
+- 分布式去重：`pkg/singleflight/singleflight.go`。
 
-## 核心流程
+## AI 压缩
 
-`AiMemory`
+1. Chat / ChatStream 先 `GetContext`，再保存 user、调用模型、保存 assistant，成功一轮后异步 `CompressContext`。
+2. 摘要缓存为 `memory:ai:{sid}:summary` / `:index`，TTL 7 天；原文窗口查 MySQL `messages`。
+3. 按格式化消息字节长度触发（默认 threshold=4096，触发偏移 500，可设范围 1024～32768），较旧的 80% 消息生成摘要，近期 20% 留原文；流式摘要失败回退本地截断。先写 Redis，再独立 goroutine upsert MySQL，并非同步持久化。
+4. 持久快照为 `compressed_contexts`，实际 `session_id` 使用原始 sid，`memory_scope=ai`。旧 `ai:` 前缀 helper 未用于当前持久化路径。
+5. 压缩调用 SingleFlight，key 为 `compress:ai:<sid>:<uid>`；模型 chunk 调 `writer.Write` 更新进度。
+6. `/api/xunzhi/v1/ai/memory/threshold` 只调整当前进程内阈值，重启失效。
 
-- 入口: `services/ai/ai_chat_service.go` 中 `AiMessageService.Chat` / `ChatStream`。
-- 聊天链路先调用 `AiMemoryService.GetContext`, 再保存用户消息、调用模型、保存 assistant 回复, 最后触发 `AiMemoryService.CompressContext`。
-- Redis key 使用命名空间, 摘要为 `memory:ai:{sessionId}:summary`, 索引为 `memory:ai:{sessionId}:index`。
-- MySQL `compressed_contexts` 中 AI 压缩快照 `session_id=ai:{sessionId}`。
-- AI memory 压缩接入分布式 SingleFlight: key 为 `"compress:ai:"+sessionID+":"+userID`。
-- AI memory 有独立阈值接口: `/api/xunzhi/v1/ai/memory/threshold`。
+## Agent Run 上下文
 
-`分布式 SingleFlight 机制`
+- 装配顺序为 identity → active profile facts → summary → recent；各 system 段先独立截断，再给近期消息剩余预算。估算器为 CJK 1 token/字、其他字符约 4 字符/token、乘 1.15，不是精确 tokenizer；不能声称所有输入均满足严格总 token 上限。
+- 摘要的 `Index` 即 covered sequence；近期只取 `sequence > Index`。Redis miss 的 MySQL 回填最多取 500 条，是恢复窗口限制。
+- `PushRecentMessage` 不做 LTRIM；压缩成功后按保留 tail 重建近期列表，避免先裁掉尚未摘要覆盖的消息。
+- 只压缩对话，按估算 token 触发；增量合并未覆盖的旧消息与已有摘要，保留最近约 20% 或至少 600 token。先写 MySQL 摘要，再写 Redis。
+- 根装配丢弃近期消息时，run 服务会以 30s 预算同步尝试压缩并重新装配；结果记录到 `agent_runs.context_report_json`。
+- 每个 user 消息异步捕获规则候选；L2 当前仅在“无候选且用户消息不足 3 条”时跳过，定义的候选阈值 5 未参与判断。合并输出 diff，正式画像 version CAS，确认与审计分别落库；已有确认接口和调试页。renderProfile 优先 active facts，无 active facts 时回退序列化旧画像 JSON。
+- 候选、压缩、合并任务使用 goroutine + cancel/WaitGroup 管理，没有固定 worker/队列/并发上限。旧画像提取与 AI 压缩不在该管理范围。
 
-- 代码: `pkg/singleflight/singleflight.go`。
-- 初始化: `repositories/redis.go` 中 `InitRedis` 创建全局 `SingleFlight *singleflight.DistributedGroup`。
-- 核心方法: `Do(ctx, key, fn)` — 相同 key 只执行一次 fn, 其余等结果。
-- 主节点: SET NX 抢锁 → 心跳续期 → 执行 fn → 写结果 → Pub/Sub 通知 → 释放锁。
-- 从节点: 订阅 channel → 轮询检查主节点健康 → 收到通知读结果。
-- AI 流式输出作心跳: 主节点压缩时走 `CallConfiguredAIChatStream`, 在 `onChunk` 中调 `writer.Write` 刷新 `progressKey`(`累计字节数:时间戳`); 从节点检测 `progressKey` 停滞超 30s 则换主。`streamKey` 已移除, follower 仅靠 `progressKey` 判停滞, 不消费流内容。
-- 换主时**双通道**通知旧主停止: `notifyCancel` 同时 `Publish cancelChan`（Pub/Sub 毫秒级推送）+ 写 `cancelKey`（5s 轮询兜底）; 旧主 `watchCancel` 收到匹配自己 nodeID 的信号后 cancel context 自动断开 AI 调用。
-- 换主竞态(已修复): 新 leader 抢锁后清空 `progressKey` 但 fn 首段输出前有空窗口, 迟到的旧 follower 会误判新 leader 卡死并 cancel 它。修复: `runAsLeader` 清理后立即写占位进度 `0:<now>`(TTL LockTTL*2)。集群压测见 `cmd/sfcluster` + `scripts/sfcluster-run.sh`。
-- Redis 故障降级为本地 singleflight（`localGroup`）, 此时 `writer.redis` 为 nil, `Write` 直接 no-op。
+## SingleFlight 实际边界
 
-## 关键不变量
+- Redis SET NX 租约选 leader，Pub/Sub 通知 follower，轮询检查进度；leader 流式 `writer.Write` 记录 `累计字节:时间戳`，停滞超过 30s 可触发接管。
+- 取消信号用 Pub/Sub 与 cancel key 轮询传递；新 leader 初始占位进度减少首段输出前的误判窗口。
+- Redis 故障可降级进程内合并，writer 为 no-op；非流式 Agent run 共享结果，流式 run 使用独立 Redis 幂等锁，不共享 chunk。
+- 当前存在 follower 缓存命中状态与“继续等待”同值的问题；轮询命中可能被忽略。共享执行继承 leader 请求 context，断连可能影响其他等待者。
+- 续租和写结果错误未完整处理，结果/进度写入缺少 ownership/fencing 保护；不响应 cancel 的执行、panic 清理及本地等待取消仍需治理。占位进度修复不等于故障接管强一致。
+- Agent run 和画像合并未更新 writer，长任务可能被停滞检测误判。历史模拟压测不能证明这些业务路径可靠。
 
-- 同一会话的 `sequence` 必须单调递增（由 MySQL `session_sequences` 序列原子分配, 见 `repositories/mysql/sequence_repository.go`, 勿改回"读 max+1"——并发会重复）。
-- 上下文压缩只能基于当前用户自己的消息。
-- MySQL `ai_messages` 是普通 AI 会话消息永久记忆真相源。
-- Redis 是热缓存, MySQL `compressed_contexts` 是压缩上下文持久恢复层。
-- Redis 中只存压缩摘要和 index, 当前 Redis TTL 是 7 天。
-- 如果改压缩索引规则, 必须检查是否会把已压缩消息重复拼回上下文。
-- AI 压缩快照必须以 `ai:{sessionId}` 为 `_id` 覆盖写入。
-- AI 压缩 SingleFlight key 为 `"compress:ai:"+sessionID+":"+userID`。
-- 记忆/压缩能力仅属 AI 侧; Agent 侧不压缩, 未来上下文由状态机结构化状态管理。
+## 不变量与修改检查
 
-## 当前风险
-
-- `SetCompressionThreshold` 是运行时内存配置, 服务重启后恢复默认值。
-- AI 压缩请求默认按 OpenAI-compatible SSE 流式响应解析（`CallConfiguredAIChatStream`）, 当前 config fallback 是 DeepSeek; 如果接入非兼容 provider 需要改 `clients/ai_model_client.go`。流式失败时回退本地截断 `fallbackAiCompressedSummary`。
-- SingleFlight 的 sync.Map 防重复已替换为分布式版本, 但 `localGroup` 降级模式下仍为单进程。
-- 当前记忆仅支持有损压缩摘要, 不支持向量召回, 早期消息的具体细节被压缩后无法精准检索回原文。后续演进方案见 `docs/agent-knowledge/references/ai-memory-evolution.md`。
-- 压缩阈值用字节长度（`len()`）而非 token 数, MySQL 字段名 `total_token_count` 实际存字节数, 中文场景下与真实 token 数偏差较大。
-
-## 修改指南
-
-1. 先读 `docs/agent-knowledge/references/memory-context-flow.md`。
-2. 改 `AiMessage.Sequence` 相关逻辑时, 同时检查 `repositories/mysql/message_repository.go` 和 `services/ai/ai_memory_service.go`。
-3. 接入真实摘要模型时, 不要在压缩服务中硬编码 provider, 优先复用 `clients/ai_model_client.go` 和 `config.ai.deepseek` 或新增清晰的 client 边界。
-4. 改 Redis key 或 MySQL 字段时, 同步更新 `models/agent_runtime.go` 和 `data-models.md`。
-5. 修改 SingleFlight 逻辑时, 同步检查 `pkg/singleflight/singleflight.go` 和 `repositories/redis.go`。
-6. 规划向量召回等记忆演进时, 先读 `docs/agent-knowledge/references/ai-memory-evolution.md`。
-7. 完成后运行 `go build ./...` 和 `scripts/knowledge-check.sh diff`。
+- MySQL `messages` 是全量消息真相源；`session_sequences` 原子分配序列，禁止改回查询 max+1。
+- 摘要与近期消息按 sequence 划界，并保留用户归属校验。
+- `compressed_contexts` 唯一键仅为 session_id；`memory_scope` 不是联合唯一维度。`TotalLength` 在 AI 路径是字节数，在 Agent 路径是估算 token 数，不能混读。
+- 先读 `docs/agent-knowledge/references/memory-context-flow.md`；并发和故障边界读 `docs/agent-knowledge/references/placeholder-risk-register.md`。
+- 向量召回尚未实现，规划时读 `docs/agent-knowledge/references/ai-memory-evolution.md`。
+- 改存储同步 `data-models.md`，改 HTTP 同步 `routes-map.md`；代码变更运行相应测试及 `scripts/knowledge-check.sh diff`，文档整理运行 `full`。

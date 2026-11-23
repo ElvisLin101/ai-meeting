@@ -1,6 +1,6 @@
 # Data Models Map
 
-存储架构: **MySQL 为真相源（全量历史/恢复源）+ Redis 为热数据（可丢失可重建）**。已移除 MySQL。
+存储架构: **MySQL 为真相源（全量历史/恢复源）+ Redis 为热数据**。已移除 MongoDB。代码核对日期：2026-11-23；面试部分运行态恢复仍有完整性边界，不能假定所有 Redis key 均能完整重建最新提交。
 
 ## User
 
@@ -25,7 +25,7 @@
 
 Redis 热数据（`repositories/redis_hot.go`）：
 
-- `agent:session:{sid}:recent` List：近期对话（LTRIM 200），miss 从 MySQL 重建
+- `agent:session:{sid}:recent` List：近期对话，Push 不做 LTRIM；压缩成功后以未覆盖 tail 重建，miss 的 MySQL 回填最多 500 条
 - `agent:session:{sid}:summary` / `:summary_idx`：压缩摘要与边界
 - `user:{uid}:profile`：用户画像 JSON
 - `agent:{aid}:identity`：Agent 自我定位 JSON
@@ -47,8 +47,10 @@ Redis 热数据（`repositories/redis_hot.go`）：
   - `TaskID=synthesis` 表示最终合成步骤；任务重试会为同一 `TaskID` 追加新的 step 行，`StepIndex` 继续全局递增
 - `AgentProperties` -> MySQL `agent_properties`（配置元数据，启动缓存到 `AgentPropertiesLoader`）
 - `AgentFileAsset` -> MySQL `agent_file_assets`
-- `CompressedContextRecord` -> MySQL `compressed_contexts`（Agent 中期摘要）
+- `CompressedContextRecord` -> MySQL `compressed_contexts`（Agent / AI 摘要）
   - 一个会话一行；再次压缩 UPDATE 同一行。
+  - `SessionID` 唯一，`MemoryScope` 不参与联合唯一；AI 当前保存原始 sessionID 并设 scope=ai。
+  - `TotalLength`：AI 路径为字节数，Agent 路径为估算 token 数；不是统一精确 token 统计。
   - `Index` 是 `CoveredThroughSeq`：摘要覆盖 `sequence <= Index`，短期消息只取 `sequence > Index`，二者不重叠。
   - Redis key: `agent:session:{sessionID}:summary` / `:summary_idx`；短期消息 `agent:session:{sessionID}:recent`。
 
@@ -58,6 +60,7 @@ Redis 热数据（`repositories/redis_hot.go`）：
   - `UserID` 唯一；`ProfileJSON` 结构见 `services/agent/context/types.go` 的 `UserProfileData`
   - 字段: facts（结构化事实）/ preferences / goals / constraints / background / confidence / version / schema_version / last_consolidated_seq / updated_at
   - MySQL 是画像真相源，Redis `user:{uid}:profile` 只是缓存；L2 用 version CAS 更新。
+  - `LastConsolidatedSeq` 属于用户级画像，而消息 Sequence 属于会话；跨会话进度比较需注意。
 - `ProfileCandidate` -> MySQL `profile_candidates`
   - L1 规则候选：`user_id`, `session_id`, `message_id`, `field`, `quote`, `rule`, `confidence`, `status`(pending/promoted/rejected)
   - `value_hash` 唯一，保证同一条消息同一字段不会重复入候选；L2 consolidation 才写正式画像。
@@ -76,7 +79,7 @@ Redis 热数据（`repositories/redis_hot.go`）：
 
 - `AiProperties` -> MySQL `ai_properties`（配置元数据）
 - `AiConversation` / `AiMessage` 为历史响应模型，数据实际存 `conversations` / `messages`（scene=ai），服务层做转换。
-- AI 压缩快照 -> MySQL `compressed_contexts`（Redis 摘要 key: `memory:ai:{sessionId}:summary` / `:index`）。
+- AI 压缩快照 -> MySQL `compressed_contexts`（原始 sessionID，scope=ai；Redis 摘要 key: `memory:ai:{sessionId}:summary` / `:index`，TTL 7 天）。
 
 ## Interview
 
@@ -87,10 +90,12 @@ Redis 热数据（`repositories/redis_hot.go`）：
 - `InterviewQuestionRow` -> MySQL `interview_questions`
 - `InterviewHotSnapshotRow` -> MySQL `interview_session_runtime_hot_snapshot`
   - `FlowJSON`/`FollowUpQuestionsJSON`/`RecentTurnsJSON` 以 JSON 文本存储；`SnapshotVersion` 做 CAS
+  - 当前热快照构建继承旧 ScoreSum/ScoreCount，未从本轮评估累加；恢复计分完整性需验证
 - `InterviewColdSnapshotRow` -> MySQL `interview_session_runtime_cold_snapshot`
 - `InterviewTurnArchiveRow` -> MySQL `interview_session_turn_archive`
   - 唯一索引 `(session_id, request_id)` 幂等、`(session_id, seq)` 单调；seq 由 `session_sequences`（前缀 `turn:`）分配
 - 面试会话列表复用 `conversations`（scene=interview）
+- Redis processing TTL 300s，replay TTL 24h；题锁 TTL 300s，答题 facade 预算 120s。热快照命中只回填 flow/score/follow-up，不继续回填冷材料和 turn。
 
 ## MetricLog
 

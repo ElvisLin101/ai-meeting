@@ -1,220 +1,69 @@
-# Interview Runtime Governance（面试长会话运行态治理）
+# 面试运行态：当前流程与待实现治理
 
-> 本文档是面试运行态治理的设计知识库, 不是代码流程说明。先理解"为什么会丢状态"和"分层", 再看"恢复"和"更新"两条链路。
+代码核对日期：2026-11-23。本文以当前代码为依据；末尾的恢复治理目标尚未实现，不能用于推断运行时保证。
 
-## 1. 问题: 为什么会丢状态
+## 存储分工
 
-### 1.1 丢状态不是"数据没了", 是"系统不知道进行到哪了"
+- MySQL：interview_sessions、interview_questions、interview_records、热/冷快照、turn archive；conversations 的 scene=interview 记录用于列表。
+- Redis：flow、score、follow-up、questions、suggestions、resume context/score、turn log、processing/replay。
+- 领域及行模型：`models/interview.go`、`models/interview_runtime.go`、`models/interview_sql.go`；仓储：`repositories/mysql/interview_repository.go`。
 
-模拟面试是 10-20 分钟的**在线过程型长会话**, 后端必须持续维护一整套运行态: 当前第几题、是否追问、追问几轮、最近几轮问答、流程节点(出题/作答/评分)、总分和各维度分。只要缺一部分, 系统就无法安全判断"下一步该继续问哪题、该不该追问、该不该累计分数"。
+Redis 是运行时热状态，快照是检查点。已写 Redis 的最新轮次未必已进入 MySQL 快照，不能承诺所有 key 丢失后完整恢复最新进度。
 
-所谓丢状态, 本质是: **系统已无法准确判断这个会话现在进行到哪里、下一步该怎么走、还能不能继续写。**
+## 答题流水线
 
-### 1.2 长会话为什么特别容易丢状态
+入口：`services/interview/interview_service.go`；编排：`services/interview/flow/answer_pipeline.go`。
 
-长会话运行态同时具备六个特征: 跨请求、跨时间、高频变化、依赖顺序、依赖幂等、依赖并发控制。它不是普通缓存:
+1. 请求未传 request_id 时按输入生成 SHA 请求标识；幂等服务先看 replay，再申请 processing。
+2. processing TTL 为 300s，replay TTL 为 24h（`services/interview/flow/idempotency_service.go`）。
+3. 恢复运行态并获取题级锁；锁 TTL 300s，facade 执行预算 120s（`pkg/lock/lock.go`）。
+4. 评分只产生评估结果，再推进 flow、写 score 和 turn log；状态机用版本 CAS 控制并发（`services/interview/flow/flow_state_machine.go`）。
+5. 评分失败回到 ASKING；推进后失败调用 `services/interview/runtime/flow_cache.go` 的 RollbackFlowCAS，仅在 flow 仍为本请求推进后的版本时回滚。不得改成无条件 SaveFlow。
+6. turn log 写失败由 `services/interview/flow/turn_repair_service.go` 补偿；成功提交先记录 replay，再启动独立 goroutine，以 10s 预算读取最新 flow 并刷新快照/归档，不阻塞响应。
 
-- 半小时内缓存过期
-- 某次请求写成功但补充刷新失败
-- 实例抖动导致局部状态没写完
-- 并发请求互相覆盖
-- 恢复时读到不完整的中间结果
+processing、题锁、flow CAS 各有职责，不构成 MySQL/Redis 跨存储事务。
 
-### 1.3 最典型的丢状态时间线
+## 出题与模型调用
 
-风险点不在某一步失败, 而在 **"运行态已变、检查点未稳"** 这个窗口:
+`services/interview/evaluation/extraction_service.go` 出题使用 configured AI client、SingleFlight 和 writer 进度；题目、简历上下文等进入 question cache。`services/interview/evaluation/evaluation_service.go` 评分使用 JSON 流式解析，未接 SingleFlight。追问在 `services/interview/evaluation/followup_service.go`。
 
-1. 用户答第 5 题, 幂等层抢到 processing
-2. ensureRuntime 恢复运行态, 题级锁锁住当前题
-3. 评估算分(只算不入账)
-4. Redis 运行态先推进: flow 前进、分数写入
-5. turn log 写入 Redis
-6. 标记成功, 触发快照刷新
-7. **若此时 Redis key 过期/被覆盖, 而快照刷新还没完成**: 新请求进来发现题号不完整、turn log 不完整、replay 不完整、恢复材料落后于真实进度
-8. 系统尝试重建, 但最新一轮还没沉淀成检查点 → 用户体感"明明答完了, 系统却像没答一样"
+出题 hashContent 仅取前 64 字符，不能作为可靠内容哈希；follower 解码类型与 *ExtractionResult 断言存在不匹配，详见风险登记。
 
-### 1.4 结论: 不幻想永不丢, 而是丢了也能恢复
+## EnsureRuntime 实际恢复分支
 
-成熟的设计承认运行态会缺失, 提前设计好: 恢复入口、恢复依据、恢复边界。于是有两条链路:
+代码：`services/interview/runtime/snapshot_service.go`。
 
-- **恢复机制**: 以 `ensureRuntime(...)` 为核心
-- **数据更新机制**: 以 `refreshSnapshot(...)` / Patch + CAS + 幂等补偿 为核心
+1. Redis 已有 flow：立即返回，不检查其他运行态 key 是否齐全。
+2. 无 flow 且有 MySQL hot snapshot：回填 flow、score、follow-up 后立即返回，不继续补齐 cold 材料和 turn log。
+3. 无 hot snapshot：尝试读取 cold snapshot 与 archives 回填对应数据，最后返回 nil；没有统一的完整性判定或写入许可等级。
 
-## 2. 分层: 什么放 Redis, 什么放 MySQL
+当前没有恢复锁/rehydrate scope，没有 EXACT / READ_ONLY 等级检查，没有主数据完整兜底。代码中出现的设计常量不代表这些机制已接入。
 
-### 2.1 四层存储 + 主数据源
+## RefreshAfterAnswerCommitted 实际刷新
 
-| 层 | 存储 | 存什么 | 变化频率 | 恢复角色 |
-|---|---|---|---|---|
-| 在线运行态 | Redis(TTL 24h) | flow/分数/最近轮次/幂等集/材料 | 每轮都改 | 命中即零开销 |
-| 热快照 | MySQL `interview_session_runtime_hot_snapshot` | flow/分数聚合/最近20轮窗口/幂等控制字段/snapshotVersion | 每轮答题 commit 后刷 | Redis miss 后第一重建源 |
-| 冷快照 | MySQL `interview_session_runtime_cold_snapshot` | 题面/建议/简历上下文/评分材料 | 出题/评价/finalize 时刷 | 补充材料 |
-| 轮次归档 | MySQL `interview_session_turn_archive` | 完整不可变的轮次历史, 按 seq 单调 | 每轮一条 | 热快照窗口溢出后的权威源 |
-| MySQL 主数据 | MySQL `interview_sessions`/`interview_questions` | 会话身份/题目材料 | 低频 | 快照+归档全空时的最后重建源 |
-| MySQL 最终报告 | MySQL `interview_records` | 面试结束总结报告 | finalize 一次 | 不参与运行态恢复, 仅业务展示 |
+1. 读取当前 hot snapshot；读失败返回，LastMutationID 已等于 requestID 则短路；否则将轮次归档到 MySQL。
+2. buildHotSnapshot 构建检查点，有旧快照则最多三次版本 CAS，没有则 upsert。
+3. 失败写 warn，CAS 重试耗尽记录 metric；并未通过协调器安排防抖、强制 flush 或定时重试。调用方先记录 replay 再异步刷新，因此可回放成功响应时检查点未必已更新。
 
-### 2.2 热冷快照的分工(关键设计)
+当前没有 HotRefreshCoordinator、单调性拒绝或 soft replay。buildHotSnapshot 的 ScoreSum/ScoreCount 继承已有热快照，未从本轮评分累加；需验证丢 Redis 后的计分完整性。
 
-- **热快照**: 高频变化的流程态, 上 CAS 乐观锁(`snapshotVersion`), 有单调性校验(`lastTurnSeq`/`archiveWatermark`/`scoreCount`/`flow.currentIndex` 回退直接抛异常)。只存最近 20 轮窗口, 靠 `archiveWatermark` 水位线衔接 TurnArchive。
-- **冷快照**: 低频变化的材料, **故意不上 CAS**(last-writer-wins), 靠"ACTIVE 阶段跳过冷层刷新"避免每轮重写。高频字段必须防并发覆盖, 低频材料覆盖即可——这个取舍是分层的精髓。
+## 已实现与待实现的区别
 
-### 2.3 Redis key 命名规则
+| 能力 | 当前状态 |
+| --- | --- |
+| 显式状态机、flow CAS、条件回滚 | 已实现 |
+| processing/replay 幂等、题锁 | 已实现，受 TTL 和执行预算约束 |
+| turn log 修复、轮次归档、热快照 CAS | 已实现 |
+| hot/cold/archive 分支回填 | 已实现基础版本，非完整恢复保证 |
+| 恢复互斥锁与完整性等级 | 未实现 |
+| 最新已提交轮次的单调快照、完整分数重建 | 需治理和验证 |
+| 防抖刷新、forceFlush、soft replay | 未实现 |
+| 所有模型路径共享去重 | 未实现，评分未接 SingleFlight |
 
-统一前缀 `interview:` + 业务域 + `:session:` + sessionId:
+## 后续治理与验证
 
-| key 模式 | 结构 | 用途 |
-|---|---|---|
-| `interview:questions:session:{sid}` | Hash | 主题号→题目内容 |
-| `interview:suggestions:session:{sid}` | Hash | 题号→建议 |
-| `interview:flow:session:{sid}` | Hash | 面试流程状态 |
-| `interview:follow_up_questions:session:{sid}` | Hash | 追问题号(含-F)→内容 |
-| `interview:score:session:{sid}` | Value | 会话总分 |
-| `interview:score_sum:session:{sid}` | Value | 累计得分和 |
-| `interview:score_count:session:{sid}` | Value | 计分次数 |
-| `interview:turns:session:{sid}` | List | 完整轮次日志(JSON) |
-| `interview:answer:req:session:{sid}` | Set | 答题 requestId 幂等集 |
-| `interview:turn:req:session:{sid}` | Set | turn requestId 幂等集 |
-| `interview:resume_context:session:{sid}` | Value | 简历解析上下文 |
-| `interview:direction:session:{sid}` | Value | 面试方向 |
-
-幂等独立 key:
-- `interview:answer:idempotency:processing:{sid}:{reqId}` — 处理中标记(TTL 300s)
-- `interview:answer:idempotency:replay:{sid}:{reqId}` — 成功结果缓存(TTL 24h)
-
-锁 key:
-- `interview:runtime:rehydrate:lock:{sid}` — 恢复分布式锁
-- `interview:answer:lock:{sid}:{questionNo}` — 题级锁
-
-## 3. 恢复机制: ensureRuntime
-
-### 3.1 核心原则
-
-**恢复只写 Redis, 绝不回写 MySQL 快照。** 避免恢复路径触发写放大, 快照由业务节点的协调器异步刷。
-
-### 3.2 恢复链路
-
-```
-ensureRuntime(sessionId, loadMode, scope)
-  ├─ 1. isRuntimeReady? 查 Redis(按 scope 检查对应 key 非空)
-  │     命中 → 返回 EXACT/CACHE 视图(零开销快速路径)
-  ├─ 2. miss → 抢 rehydrate 分布式锁(wait=0, lease=60s)
-  │     拿不到(follower) → 轮询 4×80ms 复查 Redis(复用 leader 重建结果)
-  ├─ 3. 双重检查(拿锁后再查一次, 防 leader 已建好)
-  └─ 4. rebuildRuntime
-       ├─ 4a. findSnapshot(热+冷组装) → 够用 → writeSnapshotToCache → RUNTIME_SNAPSHOT
-       └─ 4b. 不够 → 下钻 MySQL 主数据(Session/Question + loadPersistedTurns)
-              → buildRuntimeMaterial(每个字段多级回退) → writePartialMaterial
-              → 全空 → NONE/READ_ONLY(不下钻 MySQL, 宁可只读)
-```
-
-### 3.3 关键设计点
-
-1. **leader/follower 模式**: follower 拿不到锁不阻塞等, 轮询 Redis 复用 leader 重建结果, 减少锁竞争。
-2. **scope 精细化**: 6 种 scope(FLOW_ONLY/SCORE_ONLY/PLAYBACK_ONLY/MATERIAL_ONLY/HOT_RUNTIME/FULL_RUNTIME), 调用方只请求需要的子集。
-3. **置信度分级**: EXACT(缓存/快照命中, 可写) → DERIVED(主数据派生, 可写但推导值) → READ_ONLY(材料不足, 只读) → TERMINAL(会话已结束)。`canWrite()` 只在 EXACT/DERIVED 时为 true, 防止从残缺状态推进业务。
-4. **每个字段多级回退**: turns 优先级 `TurnArchive > Redis缓存 > snapshot.recentTurns > record JSON`; 分数 `snapshot → 从turns派生 → record`。任何单点缺失都不让重建失败。
-
-### 3.4 恢复边界
-
-- 四源全空 → NONE
-- 缺题目且要求可写 → 降级 TERMINAL/READ_ONLY
-- 任何异常 → 兜底 READ_ONLY
-- **宁可只读也不让调用方在残缺状态上写。**
-
-## 4. 数据更新机制: refreshSnapshot + Patch + CAS + 幂等补偿
-
-### 4.1 触发: 合并写 + 防抖/强刷二选一
-
-`HotRefreshCoordinator` 是单节点本地协调(非全异步队列):
-- 普通中间态(出题/神态评价) → 防抖延迟刷(150ms 窗口, 最大聚合 500ms), 同 session 多次意图合并。
-- 答题 commit / finalize → `forceFlush=true`, 调用线程同步等(最多 600ms), 保证检查点及时落盘。
-- 跨节点并发靠 MySQL CAS 兜底, 不靠这个协调器。
-
-### 4.2 落盘: CAS + 单调性 + 幂等短路
-
-`refreshSnapshot` 重试循环(最多 3 次):
-1. `archiveTurn` 先写 TurnArchive(requestId 幂等查重, 返回 seq 作 watermark)。
-2. `buildHotPatch` 构造增量补丁, `snapshotVersion = current+1`。
-3. 三个短路: `shouldSkipHotPatch`(全相等跳过)、`isMutationAlreadyApplied`(`lastMutationId==requestId` 跳过)、`seedHotSnapshot`(快照不存在写种子重试)。
-4. 单调性校验: `lastTurnSeq/archiveWatermark/scoreCount/flow.currentIndex` 回退直接抛异常(不容忍, 不重试)。
-5. CAS 写入: `updateFirst({sessionId, snapshotVersion:expected}, {$set:...})`, `modifiedCount>0` 才成功。失败 → 重读 + 复判 mutation → 退避重试。
-
-**CAS 用 `snapshotVersion` 单字段**, 只防并发覆盖; 乱序到达由单调性校验兜底。冷层故意无 CAS。
-
-### 4.3 幂等补偿: 三层防线
-
-| 层 | 机制 | 覆盖场景 |
-|---|---|---|
-| ① Redis replay key(24h) | `tryStart` 命中即回放 | 客户端 24h 内重试, 最快 |
-| ② 热快照 lastMutationId + TurnArchive | `findReplayResponse` 软回放 | replay key 过期, 重建响应并补写 replay |
-| ③ lastCommittedTurnDigest(SHA256) | 题号+答案内容摘要匹配 | requestId 缺失时的兜底 |
-
-### 4.4 答题完整时序
-
-```
-幂等检查(tryStart) → ensureRuntime(READ_WRITE) → 题级锁 → 锁后再校验题号
-→ 评估(只算不入账) → 推进flow → 写分数(commitScoreAtSuccess) → 写turn log
-→ markSucceeded(写replay+删processing) → 刷新快照(forceFlush)
-```
-
-- **题级锁 TTL(300s) > 答题执行预算(120s)**: 锁不先于请求过期, 杜绝"锁过期但旧请求仍在评分 → 新请求同题双执行、双计分"。
-- **回滚粒度(条件回滚, `RollbackFlowCAS`)**: ① 评分失败 → 回滚 `EVALUATING→ASKING`(flow 不卡死评分态); ② 推进后失败(如分数提交失败) → 回滚到评分前快照。回滚均为 CAS 条件回滚, **仅当 flow 仍是自己推进后的 version 才回滚, 已被其他请求推进则放弃**——绝不无条件覆盖, 防止砸掉并发已提交的进度。回滚发生在写 turn log 之前, 不会有"写了 turn log 但分数没入账"的脏数据。
-- **turn log 写失败不回滚**, 走异步补偿队列(每 3s 重试, 最多 6 次), 因为响应已组装成功应当返回客户端。
-- **markSucceeded 不可逆地先于快照刷新**: 即使快照 CAS 3 次用尽失败, replay key 已写, 客户端重试命中 replay; 此窗口靠软回放(热快照/归档)兜底。
-
-## 5. Go 落地映射
-
-### 5.1 现状评估
-
-Go 侧面试模块会话/题目/记录已迁 MySQL, 运行态状态机 P0 骨架已落地。
-
-**已落地(P0)**:
-- 状态机模型: `models/interview_runtime.go`(`InterviewFlowState` + `InterviewTurnLog` + 阶段枚举)
-- Redis key 常量: `services/interview/runtime/cache_keys.go`
-- flow 缓存 + CAS: `services/interview/runtime/flow_cache.go`(Lua 乐观锁, 5 次重试)
-- 分数缓存: `services/interview/runtime/score_cache.go`(Lua 原子累计平均分)
-- turn log 缓存: `services/interview/runtime/turn_log_cache.go`(List + requestId 幂等)
-- 状态机: `services/interview/flow/flow_state_machine.go`(转移方法 + 合法性校验 + 条件回滚 `RestoreFlow`)
-- 追问规则链: `services/interview/flow/follow_up_rule.go`(纯 Go 函数, 5 条短路规则)
-- AI 调用: `services/interview/evaluation/`(评分/出题/追问, 走 DeepSeek 流式 + JSON 解析容错)
-  - 评分/出题接入分布式 SingleFlight(流式 chunk 作心跳, 同一题/同一简历并发去重)
-  - 追问走流式但不接 SingleFlight(输入差异大, 重复概率低)
-- 通用分布式锁: `pkg/lock/lock.go`(SetNX + Lua 释放, 题级锁/幂等锁)
-- 答题流水线: `services/interview/flow/answer_pipeline.go`(幂等→锁→评分→推进flow→写分→turn log→标记成功; 失败走条件回滚 `RollbackFlowCAS`)
-- 幂等机制: `services/interview/flow/idempotency_service.go`(processing/replay 双 key + requestId 自动生成)
-
-**现成可复用**:
-- Redis 客户端 `repositories.RedisClient`
-- 分布式 SingleFlight `repositories.SingleFlight`(可复用于流式评分去重, 但常量硬编码不可配)
-- DeepSeek 客户端 `clients/ai_model_client.go`(CallConfiguredAIChatStream/Chat, OpenAI 兼容)
-- 场景路由 `services/agent/agent_scene.go`(5 场景含面试评分, 但 `ResolveRequired` 从未被调用)
-- AgentChatSSE 范式 `services/agent/agent_service.go`(归属校验→解析props→存消息→调DeepSeek→存结果)
-
-**需要新建(P1/P2)**:
-- 通用分布式锁(同题锁/幂等锁/状态机推进锁, 语义是"拒绝/排队"不是"去重")
-- MySQL CAS / FindOneAndUpdate 带条件(状态机原子推进)
-- ~~原子 sequence 生成(`$inc` 计数器, 当前 `nextXxxSequence` 非原子)~~ **已完成: `repositories/mysql/sequence_repository.go`(`counters` 集合 `findOneAndUpdate`+`$inc`, 覆盖 TurnArchive/AiMessage/AgentMessage)**
-- 面试配置块(singleflight 常量改可配)
-- 面试运行态 repository(MySQL 热/冷快照 + TurnArchive 持久化)
-- 幂等机制(processing/replay 双 key)
-- 答题流水线(pipeline 编排)
-- 评分/出题的 AI 调用接 DeepSeek(CallConfiguredAIChatStream, aiID=0 走 config fallback)
-
-### 5.2 singleflight 复用边界
-
-- **可直接复用**: 面试评分/神态的流式 AI 调用去重, key 如 `interview:score:{sessionID}:{questionNo}`, 照搬 `services/ai/ai_memory_service.go` 的 onChunk→writer.Write 接法。
-- **需改造**: 分 stage 可配 TTL/超时; 补 Fencing Token 防旧主换主后写库。
-- **不能复用**: 同题互斥锁——singleflight 是"去重"语义(follower 拿 leader 结果), 同题锁要"拒绝/排队"语义(其他请求直接失败), 需另建 `pkg/lock`。
-
-### 5.3 落地优先级
-
-- **P0(已完成)**: 状态机模型 + Redis key 常量 + flow cache(CAS) + score cache(Lua 原子) + turn log cache + 状态机转移方法 + 追问规则链
-- **P1(部分完成)**: 通用分布式锁 `pkg/lock` ✅ + 幂等机制 ✅ + 答题流水线(条件回滚) ✅ + 评分/出题/追问 AI 调用 ✅ + MySQL 热冷快照 + TurnArchive ✅ + ensureRuntime 恢复 ✅ + refreshSnapshot 更新 ✅ + turn log 异步补偿 ✅ + 面试报告归档 ✅ + 原子 sequence(`repositories/mysql/sequence_repository.go`) ✅ + 复合索引(`repositories/mysql/database.go` AutoMigrate) ✅ | 待做: 出题流程的冷快照在 ensureRuntime 中恢复材料的完善
-- **P2(待做)**: singleflight 分 stage 可配 + Fencing Token + worker pool/AI Guard
-
-## 6. 修改时必查
-
-- 设计变更时先回读本文档的分层和两条链路, 确认改动不破坏恢复/更新解耦。
-- 新增 Redis key 时遵循 `interview:` 前缀规范, 同步更新本文档 §2.3。
-- 改热快照字段时同步检查 CAS 条件(`snapshotVersion`)和单调性校验字段。
-- Go 落地每完成一层, 回读 §5 确认复用/新建边界未被违反。
+- 用真实提交轮次验证快照 ScoreSum/ScoreCount，分别丢失 flow、score、题目、cold 材料和 turn key，核对恢复是否完整。
+- 若引入恢复等级，应根据可恢复材料定义允许继续写的条件，缺少关键状态时返回明确错误，不能只依赖常量命名。
+- 若引入刷新协调器，应实现版本单调性、退出 flush 和失败重试，并验证多个请求/实例同时刷新。
+- 保持条件回滚及幂等 replay 语义，测试推进后写失败与其他请求已提交的场景。
+- 新增字段同步 `data-models.md`，新增接口同步 `routes-map.md`，更新 Interview Skill 和风险登记并运行 `scripts/knowledge-check.sh diff`。

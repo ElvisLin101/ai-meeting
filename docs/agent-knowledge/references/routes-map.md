@@ -2,6 +2,8 @@
 
 基础前缀: `/api/xunzhi/v1`
 
+代码核对日期：2026-11-23，依据 `api/routes/routes.go`。静态调试页 `/` 单独挂载，媒体路由已移除；生命周期 callback 是内部扩展，无新增 HTTP 路由。
+
 认证: `AuthMiddleware` 全局解析 JWT(有效则注入 `username`/`user_id`); 除下表标注「公开」的接口外, 其余全部挂在 `RequireAuth` 受保护组(`api/routes/routes.go` 的 `authed`), 无有效 JWT 直接 401。
 
 ## User

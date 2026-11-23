@@ -11,7 +11,7 @@ description: 当需求涉及面试会话、面试题、作答评分、建议、�
 
 - `/interview/**` 接口变更。
 - 面试会话生命周期、题目抽取、答题评分、下一题、恢复会话。
-- 简历评分、雷达图、表情评估。
+- 简历评分、雷达图（表情/神态评估已移除）。
 - 面试记录保存、查询和从 Redis 归档。
 - 面试长会话运行态治理(状态机、运行态恢复、热冷快照、轮次归档、幂等补偿) → 先读 `docs/agent-knowledge/references/interview-runtime-governance.md`。
 
@@ -22,16 +22,16 @@ description: 当需求涉及面试会话、面试题、作答评分、建议、�
 - Service: `services/interview/interview_service.go`。
 - 状态机: `services/interview/flow/flow_state_machine.go`, `services/interview/flow/follow_up_rule.go`。
 - 答题流水线: `services/interview/flow/answer_pipeline.go`(编排: 幂等→锁→评分→推进flow→写分→turn log; 失败走条件回滚), `services/interview/flow/idempotency_service.go`(processing/replay双key), `services/interview/flow/turn_repair_service.go`(turn log 写失败异步补偿)。
-- 快照/恢复: `services/interview/runtime/snapshot_service.go`(refreshSnapshot 写 MySQL CAS + ensureRuntime 从 MySQL 重建 Redis)。
+- 快照/恢复: `services/interview/runtime/snapshot_service.go`（`EnsureRuntime` 分支回填 Redis、`RefreshAfterAnswerCommitted` 归档并最多三次 CAS 写热快照；完整边界见 runtime 引用文档）。
 - 通用分布式锁: `pkg/lock/lock.go`(题级锁 SetNX+Lua)。
-- AI 调用(评分/出题/追问): `services/interview/evaluation/evaluation_service.go`, `services/interview/evaluation/extraction_service.go`, `services/interview/evaluation/followup_service.go`, `services/interview/evaluation/prompt.go`, `services/interview/evaluation/response_parser.go`。走 DeepSeek(`CallConfiguredAIChat`, aiID=0)。
+- AI 调用(评分/出题/追问): `services/interview/evaluation/evaluation_service.go`, `services/interview/evaluation/extraction_service.go`, `services/interview/evaluation/followup_service.go`, `services/interview/evaluation/prompt.go`, `services/interview/evaluation/response_parser.go`。复用 configured AI client（aiID=0，config fallback）；出题接入 SingleFlight + 流式心跳，评分走 JSON 流式解析而未接入 SingleFlight。
 - 运行态缓存: `services/interview/runtime/cache_keys.go`, `services/interview/runtime/flow_cache.go`, `services/interview/runtime/score_cache.go`, `services/interview/runtime/turn_log_cache.go`, `services/interview/runtime/question_cache.go`(题目/建议/简历上下文)。
-- MySQL 仓储: `repositories/mysql/interview_repository.go`, `repositories/mysql/interview_repository.go`, `repositories/mysql/interview_repository.go`。
+- MySQL 仓储: `repositories/mysql/interview_repository.go`（面试领域数据），`repositories/mysql/conversation_repository.go`（列表）。
 - 历史消息查询复用 MySQL: `repositories/mysql/message_repository.go`。
 - DTO: `dto/interview.go`。
 - 模型: `models/interview.go`(会话/记录/题目), `models/interview_runtime.go`(FlowState/TurnLog/阶段枚举)。
 - PDF 简历解析: `clients/resume_parser.go`(ledongthuc/pdf, 提取文本)。
-- 会话列表当前部分复用 `models.AgentConversation` 和 `models.AgentMessage`。
+- 会话列表/历史使用统一 `conversations`（scene=interview）和 `messages`，部分 DTO 保留 Agent 命名；命名不代表仍使用旧 Agent 表。
 
 ## 核心流程
 
@@ -39,13 +39,12 @@ description: 当需求涉及面试会话、面试题、作答评分、建议、�
 
 - 路由: `POST /api/xunzhi/v1/interview/sessions`。
 - Handler 读取 JWT 上下文 `user_id`。
-- Service 创建 `models.InterviewSession`, 状态为 1。
+- Service 创建 `models.InterviewSession`, 状态为 1，并写 `conversations`（scene=interview，标题“模拟面试”）；列表写入失败时补偿删除领域会话。
 
 `InterviewConversationList`
 
 - 路由: `GET /api/xunzhi/v1/interview/conversations`。
-- 当前 Service 查询的是 `models.AgentConversation`, 不是 `InterviewSession`。
-- 如果产品语义是面试会话列表, 修改前要确认是否应迁移到 `InterviewSession` 或专门的 conversation 表。
+- Service 查询统一 `conversations` 并限定 scene=interview，转换为兼容响应；详细领域信息仍来自 `interview_sessions`。
 
 `InterviewQuestionAndAnswer`
 
@@ -76,12 +75,13 @@ description: 当需求涉及面试会话、面试题、作答评分、建议、�
 1. 先读 `docs/agent-knowledge/references/placeholder-risk-register.md`, 判断是不是在替换占位逻辑。
 2. 新增真实面试状态时, 优先补齐模型字段和状态流转, 再接 AI 调用。
 3. 涉及用户隔离时使用 `user_id`, 不要误用 `username`。
-4. 如果复用 Agent 消息表, 明确区分普通 Agent 会话和面试会话。
+4. 修改统一会话/消息查询时，保留用户隔离与 scene 区分，不能按兼容 DTO 名推断物理表名。
 5. 修改接口后同步更新 `routes-map.md`; 修改表结构后同步更新 `data-models.md`。
 
 ## 当前风险
 
-- 会话创建写 MySQL `interview_sessions`, 会话列表却读 MySQL `agent_conversations`（数据源错位, 均在 MySQL 但表不同）。
+- 会话与列表采用双写及失败补偿，尚不是跨写入步骤的完整事务。
 - 面试记录按 session 查询只取第一条, 不适合多题记录展示。
 - **答题流水线回滚是条件回滚(CAS, `services/interview/runtime/flow_cache.go: RollbackFlowCAS`): 只有 flow 未被他人推进时才回滚, 严禁改回无条件覆盖(`SaveFlow`)——那会砸掉并发已提交的进度。**
-- 运行态治理(状态机/运行态恢复/热冷快照/轮次归档/幂等补偿)已落地, 详见 `docs/agent-knowledge/references/interview-runtime-governance.md` 及 `services/interview/flow/`、`services/interview/runtime/`、`services/interview/evaluation/` 目录。`InterviewQuestion` 已有 MySQL 仓储并被 `question_cache` 使用。
+- 已有状态机、快照/归档、processing/replay 幂等及 turn log 修复，但尚无恢复锁、恢复完整性等级、刷新防抖协调器或 soft replay。热快照命中会立即返回，不继续补齐冷材料/turn；详见 `docs/agent-knowledge/references/interview-runtime-governance.md`。
+- 出题 `hashContent` 仅截取前 64 字符，不同简历可能共用去重 key；SingleFlight follower 的 JSON 解码值与 `*ExtractionResult` 类型断言不一致。不能据此声称出题去重完整可靠。

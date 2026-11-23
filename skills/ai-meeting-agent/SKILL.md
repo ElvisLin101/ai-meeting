@@ -1,6 +1,6 @@
 ---
 name: ai-meeting-agent
-description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、AgentMessage、文件上传、场景绑定或 Agent 历史消息时使用。
+description: 当需求涉及 Agent 会话、Agent Run、ReAct、工具批调度、Plan、生命周期回调、配置、文件上传或历史消息时使用。
 ---
 
 # AI-Meeting Agent Skill
@@ -14,6 +14,7 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 - Agent Chat SSE 流式聊天、接入 DeepSeek、双消息持久化。
 - Agent 配置 CRUD、启动缓存、场景绑定热插拔。
 - Agent 文件上传和 `AgentFileAsset` 持久化。
+- `/agent/**` 执行、Plan/replan、工具批调度和 callback；记忆变更同时读取 `skills/ai-meeting-memory/SKILL.md`。
 
 ## 代码地图
 
@@ -41,7 +42,7 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 
 ### 上下文与记忆（token 预算版）
 
-- 预算: `services/agent/context/tokens.go` 做保守估算（CJK 1 token/字，ASCII 4 字符/token，1.15 安全系数）；`services/agent/context/assembler.go` 按 token 组装 identity/profile/summary/recent，近期消息从最新往前选，放不下就停（最新一条过大才截断）。
+- 预算: `services/agent/context/tokens.go` 做启发式估算（CJK 1 token/字，其他字符约 4 字符/token，1.15 系数）；`services/agent/context/assembler.go` 先按各段上限截断 identity/profile/summary，再给 recent 剩余预算。近期消息从最新往前选，放不下就停（最新一条过大才截断）。这不是精确 tokenizer 或包含所有输入的严格总预算保证。
 - 边界: `compressed_contexts.index` 是 `CoveredThroughSeq`；摘要覆盖 `sequence <= index`，短期只取 `sequence > index`，二者不重叠（`services/agent/context/store.go` 的 `LoadRecentMessagesAfter`）。
 - 压缩: `services/agent/context/compress.go` 只压缩对话消息，不压缩 identity/profile/plan/tool schema；按 token 触发，压缩较旧的 80%，保留最近 20%（最小 600 token），增量合并旧摘要；成功后用 tail 重建 Redis 近期列表。
 - 存储: 短期 Redis List + MySQL `messages` 全量；中期 Redis summary + MySQL `compressed_contexts`（一会话一行，UPDATE）；长期 Redis JSON + MySQL `user_profiles.profile_json`。
@@ -49,11 +50,11 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 - 配置: `agent.context.*`（model_window_tokens / max_output_tokens / soft_limit_tokens / reserve_tokens / profile_max_tokens / summary_max_tokens / recent_max_tokens / compress_threshold_tokens）。
 - ContextReport: `services/agent/context/assembler.go` 产出 `Report`（预算/各段 token/丢弃条数/covered seq/画像事实数），`services/agent/run/service.go` 写入 `agent_runs.context_report_json`，run 详情接口透出。
 - L1 候选: `services/agent/context/profile_rules.go` 在每个用户消息落库后异步跑规则，写入 MySQL `profile_candidates`（不调用 LLM、不改正式画像）；`value_hash` 去重。
-- L2 consolidation: `services/agent/context/profile_consolidate.go` 每 3 个用户回合或 pending 候选 ≥5 触发；输入当前 active facts、候选和最近 user/assistant 对话，输出 `ProfileDiff`；`services/agent/context/profile_apply.go` 负责 add/update/supersede/ask_confirm，冲突低置信不覆盖；`user_profiles` 用 version CAS 更新，确认项落 `profile_confirmations`，审计落 `profile_events`。
-- 画像注入: `services/agent/context/assembler.go` 的 `renderProfile` 只渲染 active facts；旧 `ProfileExtractor` 已不再由 run 服务调用。
+- L2 consolidation: `services/agent/context/profile_consolidate.go` 仅在“无 pending 候选且用户消息不足 3 条”时跳过，任意 pending 候选都可能触发；定义的候选阈值 5 未参与判断。输入当前 active facts、候选和最近 user/assistant 对话，输出 `ProfileDiff`；`services/agent/context/profile_apply.go` 负责 add/update/supersede/ask_confirm，冲突低置信不覆盖；`user_profiles` 用 version CAS 更新，确认项落 `profile_confirmations`，审计落 `profile_events`。
+- 画像注入: `services/agent/context/assembler.go` 的 `renderProfile` 优先渲染 active facts，无 active facts 时回退序列化旧画像 JSON；旧 `ProfileExtractor` 已不再由 run 服务调用。
 - 当前边界: 确认项已有查询/确认接口和调试页入口；工具大结果尚未转 artifact ref。
-- 后台任务: `CompressAsync` / `ConsolidateAsync` 走 `services/agent/context/workers.go` 的 worker pool；`main.go` 停机时先 cancel + Wait，再关 DB/Redis，避免异步任务丢写。
-- 仓储注入: 所有生产服务层通过 `xxxRepository` 接口依赖 MySQL，生产 adapter 在 `services/*/...repository.go`，测试注入 fake；`agent/context`、`interview/runtime`、`metric`、`tools/interview` 也已迁移，服务层不再直连 `mysqlrepo`。
+- 后台任务: 候选捕获、`CompressAsync` / `ConsolidateAsync` 走 `services/agent/context/workers.go` 的任务生命周期管理，每任务启动 goroutine，用 cancel/WaitGroup 退出等待，无固定 worker 或并发上限。`main.go` 在 HTTP Shutdown 后等待这些任务，最多 10s，再停指标并关 DB/Redis；AI 压缩及旧画像 `ExtractAsync` 不在该管理范围内。
+- 仓储注入: 所有生产服务层通过 `xxxRepository` 接口依赖 MySQL，生产 adapter 在服务同级目录的 repository 文件中（如 `services/agent/run/run_repository.go`、`services/agent/context/repository.go`），测试注入 fake；`agent/context`、`interview/runtime`、`metric`、`tools/interview` 也已迁移，服务层不再直连 `mysqlrepo`。
 - 确定性 eval: `internal/eval/cases.json` + `go run ./cmd/eval`，覆盖路由（15）、画像规则（10）、画像冲突（5）；CI 在 race 测试后执行。
 - Live eval: `test/eval/live_cases.json` + `go run ./cmd/liveeval`，用真实模型和 MySQL/Redis 跑 10 条任务，输出 `tmp/live_eval_report.json`；默认 `-isolate=true` 使用独立 eval 用户和 `tmp/eval-runs/<label>/sandbox`，每个用例前清空 sandbox；用例支持 `seed_files` 夹具和 `max_plan_steps`，`-judge` 开启 LLM 逐条语义评分；统计 `completed` / `quality_pass` / `avg_quality` / `judge_pass` / `avg_judge_score`；需要配置和 key，不进 CI。
 - 配额: `services/agent/run/quota.go` 用 Redis 计数控制单用户并发 run 与每日 token；`agent.quota.*` 配置，0 表示不限制；超限返回 `-4012`/429，Redis 故障降级放行。
@@ -67,7 +68,7 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 - 截断: `services/agent/tools/executor.go` 按 UTF-8 字节预算切结果，保证不破坏多字节字符；默认 32KB。
 - 事件: `tool_call` / `tool_result` 新增 `CallID`，便于前端在同一步多个并发调用时关联。
 - 只读且无共享状态的工具（`pdf_parse`、`file_list`、`file_read`、`web_search`、`web_fetch`）已声明 `ConcurrencySafe=true`；写文件、面试状态推进默认不声明，保持串行。
-- 搜索/抓取: `web_search` 支持 `deepseek` / `tavily` / `serper`；`deepseek` 复用 `ai.deepseek.api_key`，搜索走 `/v1/tools/search`，`web_fetch` 走 `/v1/tools/fetch` 返回 Markdown。`web_fetch` 只放行公网 http/https，拒绝 localhost/内网/元数据 IP/非标准端口，正文截断 12000 rune 并标记不可信。
+- 搜索/抓取: `web_search` 支持 `deepseek` / `tavily` / `serper`；`deepseek` 复用 `ai.deepseek.api_key`，搜索走 `/v1/tools/search`，`web_fetch` 走 `/v1/tools/fetch` 返回 Markdown。URL 校验拒绝 localhost、显式内网/元数据 IP、非标准端口和非 http/https；尚无 DNS 解析地址与重定向链校验，不能据此保证所有目标均为公网。正文截断 12000 rune 并标记不可信。
 - 当前边界: 这是"并行批次"，不是带 `depends_on` 的完整 DAG；有先后依赖的调用必须由模型分步发起，后续再引入 GraphScheduler。
 
 ### 生命周期回调（callback 包）
@@ -86,6 +87,7 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 - 规划: `services/agent/plan/planner.go`。`ShouldPlan` 用关键词/长度判断；`Plan` 调 `clients.CallConfiguredAIChat` 输出 JSON，并校验 id/依赖/环/任务数/工具只读。
 - 调度: `services/agent/plan/scheduler.go`。ready-set + 有界并行；依赖非 done → skipped；单任务失败不取消独立分支；支持单任务超时与 ctx 取消。
 - 执行: `services/agent/plan/service.go`。agent 任务用独立 ReAct loop；tool 任务只允许只读工具；llm 任务无工具单次推理；最后用空工具 loop 合成最终回答。
+- 超时: scheduler 对任务应用 `TaskTimeout`，`TotalTimeout` 当前只传给 synthesis loop；`Run` 未创建覆盖 planner/replanner/任务/合成的整体 timeout。agent 任务仍可调用有副作用工具，tool 任务只读约束不等于整个计划只读。
 - 事件: `route` / `plan_ready` / `plan_task_start` / `plan_task_done` / `plan_task_failed` / `plan_task_skipped` / `plan_replanned` / `plan_done`，复用 `services/agent/loop/loop.go` 的 `Event`。
 - 前置路由: `services/agent/plan/router.go` 用规则打分决定是否进 plan，不调用 LLM。强多步信号/中信号/长度/多问号/多行加分；纯问候、明确“直接回答”、短且无强信号减分。`services/agent/run/service.go` 只有 `UsePlan=true` 才调用 `planSvc.Run`，并发送 `route` 事件；`StartResult.PlanMode` 返回 `plan` / `plan_fallback` / `direct`。
 - 路由配置: `agent.plan.mode`（auto/always/never）、`agent.plan.min_score`、`agent.plan.fast_path_runes`。规则是启发式的，边界请求可能欠/过触发；需要更准时可加 cheap classifier，但不要给每个请求都加一次模型调用。
@@ -163,8 +165,9 @@ description: 当需求涉及 Agent 会话、Agent Chat、AgentProperties、Agent
 
 ## 当前风险
 
-- `CreateConversationWithTitle` 忽略传入的 agentID, 固定写 1。
-- ~~上传文件路径没有净化。~~ **已完成: UUID 重命名防路径穿越 + 10MB 大小限制; 类型校验(magic bytes)未做。**
-- 多个 Service 单例不是并发安全初始化, 当前代码只是简单懒加载。
+- 创建会话已支持可选 `agent_id` 并校验启用配置，服务单例已使用 `sync.Once`；旧“固定写 1 / 初始化不安全”结论已过期。
+- 上传已做 UUID 重命名和 10MB 限制，尚无 magic bytes 校验及完整消费链路。
 - `AgentPropertiesLoader` 使用 sync.Map 单实例缓存, 多实例部署时配置变更需重启或手动刷新。
 - `GetByPage` 固定查 10 条, 未使用分页参数。
+- 非流式 run 共享执行继承首个请求 context；SingleFlight 的缓存轮询、续租、结果写入所有权和 panic 清理仍有缺口，详见 `docs/agent-knowledge/references/placeholder-risk-register.md`。
+- 画像合并边界 `LastConsolidatedSeq` 是用户级字段，而消息 sequence 属于会话，跨会话比较需进一步治理。

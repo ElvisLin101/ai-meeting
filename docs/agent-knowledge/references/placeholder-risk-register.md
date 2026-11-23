@@ -1,58 +1,63 @@
-# Placeholder And Drift Register
+# 实现边界与文档漂移登记
 
-这个文件登记"看起来有接口, 但业务尚未完整实现"的位置。修改相关模块时, 先判断是否正在替换这些占位逻辑。
+代码核对日期：2026-11-23。本文件登记当前实现缺口，已完成能力不继续标作占位。修复时更新条目，并以测试证据说明边界。
+
+## 已校正的过期结论
+
+- Agent Chat 已有 SSE 模型调用与 user/assistant 持久化；会话创建支持指定 agent_id，默认 1 并校验配置；服务单例使用 sync.Once。
+- 旧 Agent Chat 不压缩，但 Agent Run 已有 token 预算四层上下文、增量摘要、候选/画像 CAS、确认接口与调试页。
+- 会话和消息统一存 MySQL conversations/messages，用 scene 区分；AiConversation/AgentConversation 是兼容模型，面试创建双写 interview_sessions 与 scene=interview 列表记录，列表失败有补偿删除。
+- 用户密码 bcrypt、旧明文登录迁移、受保护路由 RequireAuth、管理员操作者校验均已实现。
+- 消息和 turn archive 序列使用 session_sequences 原子分配；面试评分、出题、追问、简历预览、记录归档已接真实流程。
+
+## 统一存储与用户隔离
+
+- `repositories/mysql/conversation_repository.go`：DeleteConversation 按 session_id + user_id 删除会话，但子 messages 只按 session_id 删除。仓储未保证父子删除共享归属约束，需核对全部调用入口并修复。
+- `models/agent_runtime.go`：compressed_contexts 仅 session_id 唯一，memory_scope 不是独立唯一维度；AI 当前存原始 sessionID。不能按旧 ai: 前缀文档新增隔离逻辑。
+- `TotalLength` 在 AI 路径存字节数，在 Agent 路径存估算 token 数，跨路径统计不能直接合并。
+
+## SingleFlight
+
+代码：`pkg/singleflight/singleflight.go`、`repositories/redis.go`。
+
+- followerGotResult 与“继续等待”状态均为 0，轮询结果命中可能被忽略；Pub/Sub 通知路径成功不代表轮询兜底正确。
+- leader 执行 context 继承首个 HTTP request context，leader 客户端断连可影响共享执行和 follower。
+- 续租结果/错误未完整处理；Marshal、Redis 结果写入和部分 Pipeline 错误被忽略。结果写入及清理 progress 缺少 ownership/fencing 校验。
+- fn 不响应 cancel 时可能继续执行及续租，接管无法保证旧 leader 停止；panic 路径、锁释放和本地 WaitGroup 等待取消尚不完整。
+- AI 压缩与面试出题更新 writer，Agent run 与画像合并未更新；业务长任务可能被 30s 停滞检测误判。
+- 新 leader 初始占位进度减少首段输出前的误判窗口，未解决上述问题。历史 sfprobe/sfcluster 使用模拟函数，换主中旧/新 leader 返回相同结果且旧主响应取消，不能证明旧主隔离或全部业务路径可靠。
+- 流式 Agent run 使用独立 Redis 幂等锁，不共享 SSE chunk；不能称为流式 SingleFlight 结果复用。
 
 ## Agent
 
-- ~~`api/handlers/agent_handler.go`: `AgentController.Chat` 保存用户消息并异步触发 memory 压缩判断, 但不调用模型, 不保存 assistant 回复。~~ **已完成: Agent Chat SSE 闭环, 对接 DeepSeek, 双消息持久化。**
-- ~~`services/agent/agent_service.go`: `CreateConversationWithTitle` 入参有 `agentID`, 但当前 `AgentID` 固定为 1。~~ **已完成: 创建会话支持指定 agentID(DTO 新增 `agent_id` 字段), 空默认 1, 非空时校验配置存在且启用(`resolveAgentID`), 校验失败返回 -4001。**
-- ~~`services/agent/agent_service.go`: `GetConversationHistoryWithContext` 已接 memory, 但 handler 未使用。~~ **已移除: 该函数已删除, Agent 侧不再使用压缩记忆(见下方"Agent 侧已移除压缩机制")。**
+- `services/agent/context/assembler.go`：system 各段独立截断，再给 recent 剩余预算，启发式 token 估算不是包含全部输入的严格硬预算。
+- `services/agent/context/store.go`：Redis miss 近期消息 MySQL 回填最多 500 条；恢复不等于装入所有未覆盖消息。
+- `services/agent/context/profile_consolidate.go`：仅在无候选且 user 消息不足 3 条时跳过，候选阈值 5 未使用；用户级 LastConsolidatedSeq 与会话级序列比较存在边界。
+- `services/agent/context/workers.go`：每任务 goroutine + cancel/WaitGroup，无固定 worker/队列/并发上限；旧画像 ExtractAsync 与 AI 压缩不在停机等待范围。
+- `services/agent/plan/service.go`：TotalTimeout 只用于 synthesis loop，planner/replanner/任务/合成没有整体超时；tool 任务只读，但 agent 任务可调用有副作用工具。幂等账本只在单进程、单 run 内有效，不能重启续跑。
+- `services/agent/callback/callback.go`：同步回调要求并发安全，无 panic 隔离；planner/replanner 模型调用及 plan 直调 tool 未覆盖；tool end 在整批执行完成后触发。
+- 网页工具目前校验 URL host/显式 IP，未校验 DNS 解析地址与重定向链；公网访问保证需进一步加固。
+- `api/handlers/agent_handler.go`：上传已有 UUID 重命名及 10MB 限制，尚无 magic bytes 校验和完整消费链路。
+- `services/agent/agent_properties_loader.go`：本地配置缓存不自动跨实例同步；AgentProperties GetByPage 固定 10 条。
+- 工具大结果仍截断，未转 artifact ref；工具单步批调度没有 depends_on 图，Plan 的任务图不能当作单步工具 DAG。
 
-## AI
+## 普通 AI
 
-- `api/handlers/ai_handler.go`: `AiMessageController.ChatStream` 已接 SSE, 但流式中断时不会保存不完整 assistant 回复。
-- ~~`repositories/mysql/message_repository.go`: `AiMessage.Sequence` 通过查询当前最大值后加一生成, 高并发同会话写入时可能重复。~~ **已完成: 统一 `messages` 与 `TurnArchive` 的 seq 改用 MySQL `session_sequences` 原子分配(`LAST_INSERT_ID` 技巧), 并发不重复; 相关唯一索引见 `repositories/mysql/database.go` AutoMigrate。**
-- `clients/ai_model_client.go`: 模型调用按 OpenAI-compatible endpoint 解析, 非兼容 provider 需要适配。
-- `config/config.yaml`: `ai.deepseek.api_key` 当前预留为空, 本地运行真实模型前需要填入或通过 `AI_DEEPSEEK_API_KEY` 覆盖。
+- `services/ai/ai_memory_service.go`：字节阈值仅当前实例运行时生效，重启恢复默认；摘要有损，无向量召回。
+- AI 摘要先写 Redis，再独立 goroutine upsert MySQL，存在未持久化窗口；本地兜底摘要按字节切首尾，可能切坏 UTF-8。
+- `services/ai/ai_chat_service.go`：SSE 中断不保存不完整 assistant；AI 压缩独立 goroutine 未纳入 Agent 后台管理。
+- `clients/ai_model_client.go`：OpenAI-compatible 协议解析，非兼容 provider 需适配。
+- AI/Agent 配置密钥仍明文存储；本地配置或环境变量需提供实际模型凭证。
 
-## Interview
+## 面试
 
-- `services/interview/interview_service.go`: `ExtractInterviewQuestions`, `AnswerInterviewQuestion`, `GetNextQuestion`, `GetCurrentQuestion`, `RestoreInterviewSession`, `GetSessionInterviewQuestions`, `GetSessionTotalScore`, `GetSessionInterviewSuggestions`, `GetSessionResumeScore`, `GetRadarChartData` 已接入真实实现。神态评估已移除。
-- ~~`services/interview/interview_service.go`: `SaveInterviewRecordFromRedis` 是空实现。~~ **已完成: 从 MySQL `TurnArchive` 汇总轮次算平均分, 取最后一轮作报告概要, 写入 `InterviewRecord`。**
-- ~~`api/handlers/interview_handler.go`: `PreviewResume` 只返回固定提示。~~ **已完成: 从 MySQL 读 `ResumePath` → 解析 PDF 返回文本。**
-- ~~`InterviewSessionFacade.CreateSession` 写 `InterviewSession`, 但 `PageConversations` 读 `AgentConversation`。~~ **已完成: `CreateSession` 双写 AgentConversation 列表条目(标题"模拟面试"), 保证新建面试会话在列表中可见; 列表条目创建失败时补偿删除 InterviewSession, 保持要么全成功要么失败。**
+- `services/interview/evaluation/extraction_service.go`：hashContent 仅截前 64 字符，可能产生去重 key 碰撞；SingleFlight follower JSON 解码为通用对象，直接断言 *ExtractionResult 不匹配。
+- `services/interview/evaluation/evaluation_service.go`：评分为 JSON 流式调用，未接入 SingleFlight；不能套用出题的去重描述。
+- `services/interview/runtime/snapshot_service.go`：已有 Redis flow 就返回；hot snapshot 命中只回填 flow/score/followup 并返回，不继续补 cold 材料/turn。无恢复锁、scope、EXACT/READ_ONLY 等级判断或完整主数据兜底。
+- 快照刷新归档后最多三次 CAS，失败告警/指标；无 HotRefreshCoordinator、防抖/forceFlush、单调性拒绝或 soft replay。buildHotSnapshot 继承已有 ScoreSum/ScoreCount，未从本轮评分更新，恢复计分完整性仍需验证。
+- 面试会话与列表双写只有补偿，未形成事务；记录按 session 查询仅取第一条，不适合多题记录展示。
+- 答题推进后失败已做条件 CAS 回滚，turn log 失败已有补偿；修改时禁止回退为无条件覆盖并发进度。
 
-## Memory
+## 用户
 
-- `services/ai/ai_memory_service.go`: `SetCompressionThreshold` 是运行时内存配置, 服务重启后恢复默认阈值。
-- ~~`services/ai/ai_memory_service.go`: 只做当前进程内 `sync.Map` 防重复压缩, 多实例部署时仍可能并发压缩同一 AI 会话。~~ **已完成: 已接入分布式 SingleFlight, 全集群同一 session 只压缩一次。**
-- Agent 侧已移除压缩机制, 不再涉及压缩并发或阈值风险; 上下文未来由状态机管理。
-
-## User/Auth
-
-- ~~`services/user/user_service.go`: 密码明文比较。~~ **已完成: 注册 bcrypt 哈希存储; 登录兼容旧明文(`verifyPassword` 检测非 bcrypt 前缀直接比较)并成功后自动迁移为哈希。**
-- ~~`api/middleware/auth.go`: 缺失或无效 token 默认放行。~~ **已完成: 受保护路由统一挂 `RequireAuth`(见 `api/routes/routes.go` 的 `authed` 组), 无有效 JWT 直接 401; 公开接口仅 login/register/check-login/is-admin/has-username。**
-- ~~`api/handlers/user_handler.go`: 管理员设置缺少操作者权限校验。~~ **已完成: `AddAdmin` 要求操作者为已登录管理员, 否则 `-403`。**
-
-## 新增基础设施（无占位）
-
-- `services/agent/agent_scene.go`: 4 个业务场景枚举, 已完整实现, 尚未被面试模块使用。
-- `services/agent/agent_properties_loader.go`: 启动缓存 + 场景解析器, 已完整实现。
-- `pkg/singleflight/singleflight.go`: 分布式 SingleFlight, 已完整实现; 流式心跳已接入 AI 侧压缩路径（`AiMemoryService` 压缩走 `CallConfiguredAIChatStream`, `onChunk` 内调 `writer.Write` 刷新 `progressKey` 时间戳, follower 据此判停滞换主）。Agent 侧不压缩, 不走 SingleFlight。
-- `pkg/singleflight/singleflight.go` 换主竞态(已修复): 新 leader 抢锁成功后清空 `progressKey`, 但 fn 首段输出前存在空窗口, 迟到的旧 follower 会误判新 leader 卡死并 cancel 它, 引发连环换主。**修复**: `runAsLeader` 清理后立即写占位进度 `0:<now>`(TTL LockTTL*2), 消除空窗口。集群压测 `cmd/sfcluster` 暴露此 bug, 修复后换主场景 exec=2 且 0 失败。
-- `cmd/sfcluster/main.go`: 集群(多实例)压测工具, coordinator + N 个独立 worker 进程共享一个 Redis, 验证跨实例去重(exec=1)与换主故障转移(exec=2)。一键脚本 `scripts/sfcluster-run.sh`。
-- `repositories/redis.go`: 全局 `SingleFlight` 实例, 在 `InitRedis` 中初始化。
-
-替换任意占位逻辑后, 从本文件移除或改写对应条目。
-
-## Agent 模块（新增）
-
-- `services/agent/loop/loop.go`: 手写 ReAct 循环, 终止条件(最终回答/max_steps/重复动作/连续工具失败/超时)已实现。
-- `services/agent/tools/`: 工具注册/执行(JSON Schema 校验、超时、panic 恢复、结果截断、审计) + PDF/搜索/沙箱文件/面试工具。
-- `services/agent/tools/batch.go`: 单步 tool call 批调度; 全部工具声明 `ConcurrencySafe` 时并行, 否则整批串行; 结果按原始 call 顺序回填, 失败隔离。
-- `services/agent/plan/`: Plan-and-Execute 编排 (planner/scheduler/service/replanner/ledger); 规划失败回退线性 ReAct; 任务图与结果落 `agent_runs.plan_json`; tool 任务强制只读; replan 在轮次边界串行应用, 受 `max_replans`/计划哈希约束; 幂等账本仅在单 run 进程内有效, 不支持重启续跑。
-- `services/agent/context/`: token 预算四层上下文 + 对话压缩 + L1 规则候选 + L2 画像 consolidation (diff/冲突/确认/CAS)。
-- `services/agent/run/service.go`: run 编排、MySQL 落库、SSE 事件、SingleFlight 去重/幂等锁。
-- `repositories/mysql/`: 会话/消息/压缩快照/画像/候选/确认/审计/身份/run/step/面试行模型。
-- `repositories/redis_hot.go`: 热数据 key 与 MySQL 回填。
-- 已知边界: 流式 run 的 SingleFlight 仅做幂等(不复用 chunk); 画像 L2 为异步、确认项尚无前端消费; 工具批调度尚无 `depends_on` 依赖图与 async 模式。
+- `services/user/user_service.go`：注册查重遇到非 gorm.ErrRecordNotFound 的数据库错误仍继续创建，需完善错误处理。

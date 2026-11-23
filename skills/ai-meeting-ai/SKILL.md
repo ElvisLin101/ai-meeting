@@ -35,7 +35,7 @@ description: 当需求涉及 AI 会话、AI 消息、AI 模型配置、/ai 路�
 - 用 UUID 生成 `session_id`, `user_id` 字段存 JWT `username`。
 - 标题默认 `New AI Conversation`, 首条消息超过 50 字符时截断。
 - 更新会话通过 query 参数 `messageCount` 和 `title`。
-- 删除会话会删除 `ai_conversations`, 同步清理 MySQL `ai_messages` 和 AI 压缩上下文。
+- 删除会话使用统一 `conversations` / `messages` 仓储并清理 AI 压缩上下文；子消息删除的归属边界见当前风险。
 
 `AiChat`
 
@@ -43,11 +43,11 @@ description: 当需求涉及 AI 会话、AI 消息、AI 模型配置、/ai 路�
 - SSE 路由: `POST /api/xunzhi/v1/ai/sessions/:sessionId/chat/stream`。
 - 聊天前校验 `sessionId` 属于当前 JWT `username`。
 - 请求模型前从 `AiMemoryService` 读取 AI 会话长期记忆和近期窗口。
-- 用户消息和 assistant 回复都保存到 MySQL `ai_messages`。
+- 用户消息和 assistant 回复都保存到 MySQL `messages`，会话存 `conversations`（scene=ai）；`AiMessage` / `AiConversation` 是服务转换后的兼容响应模型。
 - 通过 OpenAI-compatible endpoint 调用模型；默认优先读取 `config.yaml` 中 `ai.deepseek` 的 DeepSeek 配置。
 - 会话绑定有效 `AiID` 时优先使用 MySQL `AiProperties`, 未绑定或未找到启用模型时回退到 `ai.deepseek`。
 - **模型配置读取走全局缓存** `clients.GetEnabledAiProperty`（不每次直查 MySQL, 写路径变更自动失效）。
-- 模型回复后更新 `ai_conversations.message_cnt` 和 `updated_at`。
+- 模型回复后更新 `conversations.message_count` 和 `updated_at`。
 - 保存完整一轮对话后异步触发 AI 上下文压缩。
 - 普通 chat 返回 JSON, 响应字段包含 `content`, `user_message_id`, `assistant_message_id`。
 - SSE chat 输出 `message` 事件作为回答增量, `reasoning` 事件作为 DeepSeek `reasoning_content` 增量, 最后输出 `done` 事件携带消息 ID。
@@ -57,8 +57,8 @@ description: 当需求涉及 AI 会话、AI 消息、AI 模型配置、/ai 路�
 - 阈值路由: `GET /api/xunzhi/v1/ai/memory/threshold`, `PUT /api/xunzhi/v1/ai/memory/threshold`。
 - Redis 摘要 key: `memory:ai:{sessionId}:summary`。
 - Redis 索引 key: `memory:ai:{sessionId}:index`。
-- MySQL 压缩快照集合: `compressed_contexts`, `session_id=ai:{sessionId}`。
-- 原始消息集合: MySQL `ai_messages`。
+- MySQL 压缩快照表: `compressed_contexts`，实际 `session_id` 为原始 sessionId，`memory_scope=ai`；旧 `ai:` 前缀 helper 当前未被持久化路径使用。
+- 原始消息表: MySQL `messages`。
 - 压缩只压旧的 80% 消息, 最新 20% 继续通过 `index` 后的 MySQL 原文窗口补齐。
 
 `AiProperties`
@@ -94,9 +94,10 @@ description: 当需求涉及 AI 会话、AI 消息、AI 模型配置、/ai 路�
 
 ## 当前风险
 
-- ~~`AiMessage.Sequence` 仍是查询当前最大值后加一, 高并发同会话写入时仍可能重复。~~ **已完成: `AiMessage`/`AgentMessage`/`TurnArchive` seq 均改用 MySQL 计数器(`repositories/mysql/sequence_repository.go`)原子递增。**
+- 消息序列已由 `repositories/mysql/sequence_repository.go` 原子分配；原“max+1”结论已过期。
 - AI memory 阈值是运行时内存配置, 服务重启后恢复默认值。
 - 非流式 OpenAI-compatible 响应解析只支持 `choices[].message.content` 或 `choices[].text`; 流式解析支持 `delta.content`, `delta.reasoning_content` 和 `text`。
 - SSE 流式调用中途断开时, 已保存 user 消息, 但不会保存不完整 assistant 回复。
 - `AiProperties.ApiKey` 和 `AiProperties.ApiSecret` 明文入库; `config.yaml` 中的 `ai.deepseek.api_key` 也要按本地密钥处理。
 - `UpdateConversation` 使用 query 参数, 不是 JSON body。
+- `repositories/mysql/conversation_repository.go` 删除会话带 user 条件，删除子消息只带 session 条件；调用链必须先验证归属，仓储本身尚未保证两者一致。

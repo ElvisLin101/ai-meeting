@@ -29,7 +29,7 @@ description: 当需求涉及登录、注册、JWT、用户上下文、用户资�
 `AuthMiddleware`
 
 - 全局挂载在 `routes.SetupRouter`, 只做 JWT 解析(有效则设置 `username`/`user_id`), 缺失/无效不拦截——公开接口需要放行。
-- **受保护路由已挂 `RequireAuth`**(见 `routes.SetupRouter` 的 `authed` 组): Agent/AI/Interview/Media 全部 + 用户模块的 logout/资料/管理员/分页, 无有效 JWT 直接 401。
+- **受保护路由已挂 `RequireAuth`**(见 `routes.SetupRouter` 的 `authed` 组): Agent/AI/Interview + 用户模块的 logout/资料/管理员/分页, 无有效 JWT 直接 401；Media 路由已移除。
 - token 有效时设置 `username` 和 `user_id`。
 - `RequireAuth` 检查 `username`, 401 响应 `{"code":-101,"error":"Unauthorized"}`。
 
@@ -60,6 +60,5 @@ description: 当需求涉及登录、注册、JWT、用户上下文、用户资�
 
 ## 当前风险
 
-- ~~密码明文存储和比较。~~ **已完成: bcrypt 哈希 + 旧明文兼容迁移。**
-- ~~中间件默认放行, 安全边界依赖各 handler 手动检查上下文。~~ **已完成: 受保护路由挂 `RequireAuth` 强制认证(公开接口除外)。**
-- ~~管理员设置缺少操作者权限校验。~~ **已完成: `AddAdmin` 校验操作者为管理员。**
+- bcrypt、受保护路由强制认证及管理员权限校验均已实现，旧占位结论已过期。
+- 注册查重遇到非 `gorm.ErrRecordNotFound` 的数据库错误仍继续创建，应补齐错误传播。

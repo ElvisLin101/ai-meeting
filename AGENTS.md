@@ -12,7 +12,7 @@
 
 ## 项目概览
 
-AI-Meeting 是一个 Go 1.24.1 + Gin 后端。入口在 `main.go`, 路由集中在 `api/routes/routes.go`, 业务主要分为用户认证、Agent 会话、AI 会话、面试流程、上下文压缩和媒体接口。
+AI-Meeting 是一个 Go 1.24.1 + Gin 后端。入口在 `main.go`, 路由集中在 `api/routes/routes.go`, 业务主要分为用户认证、Agent 会话与执行、AI 会话、面试流程和上下文压缩。媒体接口已移除。
 
 核心分层:
 
@@ -20,7 +20,7 @@ AI-Meeting 是一个 Go 1.24.1 + Gin 后端。入口在 `main.go`, 路由集中�
 - `services`: 业务流程和跨仓储编排。
 - `models`: GORM 模型和 MySQL 模型。
 - `dto`: HTTP 请求/响应结构。
-- `repositories/mysql`: MySQL 初始化与用户/AI配置/Agent配置/文件资产读写(会话/消息/面试数据已迁 MySQL)。
+- `repositories/mysql`: MySQL 初始化及持久化读写；会话和消息统一使用 `conversations` / `messages`，用 `scene` 区分业务。
 - `repositories`: Redis 热数据（近期对话/摘要/画像/身份）与 SingleFlight。
 - `clients`: 外部 HTTP/API 客户端, 例如 OpenAI-compatible 模型调用。
 - `config`: Viper 配置加载。
@@ -34,7 +34,8 @@ AI-Meeting 是一个 Go 1.24.1 + Gin 后端。入口在 `main.go`, 路由集中�
 | 面试会话、题目、评分、建议、简历预览、面试记录 | `skills/ai-meeting-interview/SKILL.md` | `api/handlers/interview_handler.go`, `services/interview/interview_service.go`, `models/interview.go` |
 | 登录、注册、JWT、用户资料、管理员 | `skills/ai-meeting-user-auth/SKILL.md` | `api/middleware/auth.go`, `api/handlers/user_handler.go`, `services/user/user_service.go`, `models/user.go` |
 | AI 会话、AI 消息、AI 模型配置 | `skills/ai-meeting-ai/SKILL.md` | `api/handlers/ai_handler.go`, `services/ai/ai_service.go`, `models/ai.go` |
-| Agent 循环、工具调用、四层上下文、Agent run | `skills/ai-meeting-agent/SKILL.md` | `services/agent/loop/`, `services/agent/tools/`, `services/agent/context/`, `services/agent/run/` |
+| Agent 循环、工具调用、Plan、生命周期回调、Agent run | `skills/ai-meeting-agent/SKILL.md` | `services/agent/loop/`, `services/agent/tools/`, `services/agent/plan/`, `services/agent/callback/`, `services/agent/run/` |
+| Agent 四层上下文、画像、SingleFlight | `skills/ai-meeting-memory/SKILL.md`（Agent 编排同时读 Agent Skill） | `services/agent/context/`, `pkg/singleflight/singleflight.go` |
 | 路由、模型、跨模块影响 | `docs/agent-knowledge/references/routes-map.md`, `docs/agent-knowledge/references/data-models.md` | `api/routes/routes.go`, `models/*.go` |
 
 ## 全局术语
@@ -52,7 +53,7 @@ AI-Meeting 是一个 Go 1.24.1 + Gin 后端。入口在 `main.go`, 路由集中�
 - 发现 Skill 与代码不一致时, 在变更说明中标注并更新知识文档。
 - 新增或调整 HTTP 接口时, 同步更新 `docs/agent-knowledge/references/routes-map.md`。
 - 新增、删除或改名模型字段时, 同步更新 `docs/agent-knowledge/references/data-models.md`。
-- 不要把示例返回值当成真实业务实现。当前面试流程、AI 调用、Agent 调用和上下文压缩里存在多个占位实现, 详见 `docs/agent-knowledge/references/placeholder-risk-register.md`。
+- 不要把设计、示例和历史压测结果当成实现保证。当前能力和未解决边界详见 `docs/agent-knowledge/references/placeholder-risk-register.md`。
 - Go 代码约束读 `docs/agent-knowledge/rules/go-backend.md`。
 
 ## 统一错误码约定
@@ -61,13 +62,14 @@ AI-Meeting 是一个 Go 1.24.1 + Gin 后端。入口在 `main.go`, 路由集中�
 - Handler 出口统一走 `api/resp` 的 `Respond(c, err, data)` / `Fail(c, code, msg)`, **禁止**散落 `c.JSON(status, gin.H{"error": ...})`。错误响应格式为 `{"code": N, "error": "msg"}`, HTTP 状态码由 `ecode.Error.HTTPStatus()` 映射。
 - 新增业务错误码时同步更新 `pkg/ecode/ecode_biz.go`（含 HTTP 状态注册表 `RegisterHTTPStatus`）。
 - 内部/系统错误可继续用裸 `errors.New`/`fmt.Errorf`, 由 `Respond` 兜底为 `-500` 并保留原文消息。
-- 应用入口 `main.go` 已做优雅停机（SIGTERM/SIGINT → `srv.Shutdown` → 指标落库 → 关连接）, 改动启动/退出流程时同步本约定。
+- 应用入口 `main.go` 已做优雅停机（SIGTERM/SIGINT → HTTP Shutdown，最多 10s → Agent 上下文后台任务 cancel + Wait，最多 10s → 指标 Stop → 关 MySQL/Redis）。后台管理不覆盖 AI 压缩和旧画像提取的独立 goroutine，改动启动/退出流程时同步本约定。
 
 ## 知识防腐机制
 
 - 反向校验: 每次读 Skill 后都对照代码。若代码锚点不存在或行为不符, 先相信代码, 再修 Skill。
 - 知识补充: 如果实现过程中用户补充了新的业务规则, 在提交前沉淀到对应 Skill。
-- Diff 检查: 提交前运行 `scripts/knowledge-check.sh diff`, 让脚本提示可能要更新的 Skill。
+- Diff 检查: 提交前运行 `scripts/knowledge-check.sh diff`, 合并暂存、未暂存和未跟踪文件，去重后提示可能要更新的 Skill 和引用文档。
 - 全量巡检: 周期性运行 `scripts/knowledge-check.sh full`, 检查文档引用的 Go 文件是否仍存在。
+- 检查边界: 脚本检查必要文件和 Go 文件锚点，diff 提供影响面建议；不验证函数、接口语义、字段单位或并发保证。通过检查后仍需用实际代码核对。
 
 ## 每次思考和回答都要用中文, 并叫我一声小林

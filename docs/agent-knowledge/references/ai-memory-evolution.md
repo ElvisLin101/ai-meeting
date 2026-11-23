@@ -1,85 +1,39 @@
-# AI 记忆演进：向量召回
+# AI 记忆演进：尚未实现的向量召回
 
-## 现状与缺口
+代码核对日期：2026-11-23。本文为后续方案评估，仓库当前没有 embedding client、向量索引或召回路径。
 
-当前 AI 侧记忆是**单层有损模型**: 全部历史消息按 80/20 分割, 旧的 80% 调 DeepSeek 生成 ≤500 字摘要, 新的 20% 保留原文窗口, 拼成最终上下文。详见 `memory-context-flow.md`。
+## 当前能力
 
-压缩摘要管「整体上下文连续性」, 但管不了「事实级精准召回」:
+普通 AI 使用摘要与近期 MySQL 原文窗口，按字节阈值压缩；Agent Run 使用 token 预算、摘要、近期 Redis/MySQL 消息、跨会话结构化画像和身份。两条链路均将原文保存在统一 `messages`，摘要有损。
 
-- 摘要是有损的, 早期消息里的具体细节（技术栈版本、项目约束、团队规模、预算数字）被压进摘要后语义融化, 无法精确检索回原文。
-- 用户后续追问「我之前说我用的什么版本」时, 压缩记忆答不准。
-- 记忆按 `session_id=ai:{sessionId}` 隔离, 跨会话完全不可见。
+摘要适合保持话题连续性，结构化画像适合稳定事实；早期原文中的具体版本、数字、约束仍可能无法精准找回。向量召回可以补充相关片段，但不能替代权限校验和原文证据。
 
-## 向量召回补什么
+## 可评估的方案
 
-和压缩记忆**并行加一层**, 两者互补不互替:
+| 方案 | 适用条件 | 代价与边界 |
+| --- | --- | --- |
+| 小规模应用内相似度检索 | 样本较少，用于验证召回价值 | 向量可存 MySQL，经用户/会话过滤后在应用计算相似度；不具备原生向量索引性能 |
+| 专用向量库（如 Qdrant / Milvus） | 数据规模与延迟要求需要索引 | 增加部署、索引、删除同步与备份成本 |
+| 支持向量的数据库或托管服务 | 已有明确版本与能力支持 | 先验证实际版本、索引方式、过滤语义及费用，再决定接入 |
 
-```
-全部历史消息 ─┬─ [压缩]   → 摘要 + 近期窗口    (现有, 管上下文连续性)
-              └─ [向量化] → 向量库              (新增, 管事实精准召回)
-```
+项目 Docker Compose 当前是 App + MySQL 8 + Redis 7。不能声称 MySQL 5.0+ 支持 `$vectorSearch`，该语法不是本项目 MySQL 的能力。现有 DeepSeek chat client 也不能当成 embedding API；需要独立选择并验证 embedding provider、维度、模型版本和接口。
 
-- 压缩记忆回答: 「我们刚才在聊什么」→ 塞 system prompt。
-- 向量召回回答: 「用户之前提过的某个具体事实」→ 检索 top-k 相关片段塞上下文。
+## 建议接入边界
 
-最终 context 拼装: `摘要 + 向量召回片段 + 近期窗口`。
+1. 以 messages 的 message_id / sequence 为原文引用，异步生成 embedding，记录 user_id、session_id、模型版本与索引状态。
+2. 查询时先强制用户隔离，默认限定会话；跨会话检索作为明确产品能力单独定义。
+3. 将原文片段与摘要、近期窗口拼接，按 message_id 去重，分配独立 token 预算并标注出处。
+4. 召回失败降级为现有摘要/近期窗口；消息删除同步清理索引，失败需可重试。
+5. 验证召回准确率、误召回、延迟、成本，再决定扩大索引范围。
 
-## 演进方案（从轻到重）
+## 实现时先读
 
-### 方案 A: 复用 MySQL 向量搜索（推荐起步）
+- `services/ai/ai_memory_service.go`、`services/ai/ai_chat_service.go`：普通 AI 装配和消息提交。
+- `services/agent/context/assembler.go`、`services/agent/context/store.go`：Agent 装配与存储边界。
+- `repositories/mysql/message_repository.go`、`repositories/mysql/compressed_context_repository.go`：原文与摘要持久化。
+- `models/agent_runtime.go`：快照字段；AI TotalLength 为字节，Agent 为估算 token。
+- `memory-context-flow.md`：当前流程；`placeholder-risk-register.md`：当前故障边界。
 
-MySQL 5.0+ 支持 `$vectorSearch`。不引入新基础设施, 改动最小。
+## 验证目标
 
-- 新增集合 `ai_memory_vectors`, 文档结构: `{session_id, message_id, sequence, role, content, embedding, created_at}`。
-- 写入时机: 与压缩并行, 消息落 MySQL `ai_messages` 后异步生成 embedding 写入。
-- 读取时机: `AiMemoryService.GetContext` 中, 除读摘要 + 近期窗口外, 拿当前用户消息做向量检索, top-k 片段拼入上下文。
-- embedding 模型: 走 DeepSeek embedding API 或单独接 embedding 服务。
-
-缺点: MySQL 向量检索性能和召回质量不如专用向量库, 数据量大时有差距。
-
-### 方案 B: 引入专用向量库
-
-Milvus / Weaviate / Qdrant 选一。检索质量好, 但多一个基础设施要部署运维。项目已有 Docker Compose（MySQL + MySQL + Redis）, 再加一个向量库不算太重, 但运维成本上升。
-
-### 方案 C: 记忆分层（完整架构）
-
-```
-L1 近期窗口   (Redis)     — 最近 N 条原文, 零延迟
-L2 压缩摘要   (Redis+MySQL) — 整体上下文, 有损
-L3 向量召回   (向量库)     — 事实级精准检索
-L4 全量历史   (MySQL)     — 审计兜底, 不直接喂模型
-```
-
-当前项目已有 L1/L2/L4, 加 L3 补齐。这是长程记忆的成熟分层模式。
-
-## 涉及的代码锚点
-
-实现时需要改动的位置:
-
-- `services/ai/ai_memory_service.go`: `GetContext` 增加向量检索拼装, `CompressContext` 附近增加向量写入触发。
-- `services/ai/ai_chat_service.go`: `finishAiChat` 中消息落库后增加异步 embedding 生成。
-- `repositories/mysql/`: 新增 vector repository, 或新增集合的读写。
-- `clients/`: 新增 embedding client（若不复用 DeepSeek）。
-- `models/`: 新增 vector 文档模型。
-- `config/config.yaml`: 新增 embedding 模型配置。
-
-## 注意事项
-
-1. **embedding 成本**: 每条消息都向量化会多一次 API 调用。可只对 user 消息或「事实密度高」的消息做, 不必全量。
-2. **召回片段去重**: 向量召回的片段可能和近期窗口重叠（同一条消息既在窗口里又被召回）, 拼装时按 `message_id` 或 `sequence` 去重, 避免浪费 token。
-3. **压缩与向量协同**: 被压缩掉的消息, 其向量应保留——摘要丢了细节, 但向量还能找回, 这正是加向量召回的意义。
-4. **跨会话隔离**: 向量检索默认按 `session_id` 过滤, 避免 A 会话召回 B 会话内容。若要做「用户级长期记忆」（跨会话）, 需单独设计权限和隐私边界。
-5. **阈值单位**: 现有压缩阈值用字节长度（`len()`）而非 token 数, MySQL 字段名 `total_token_count` 实际存字节数。接入向量召回后若需要更精确的 token 预算控制, 应一并修正此处。
-
-## 修改时必查
-
-- `docs/agent-knowledge/references/memory-context-flow.md`: 现有压缩记忆完整流程。
-- `services/ai/ai_memory_service.go`: 现有 `GetContext` / `CompressContext` / `buildContextWithWindow` 逻辑。
-- `repositories/mysql/compressed_context_repository.go`: 现有持久化模式参考。
-- `models/agent_runtime.go`: 现有模型字段参考。
-
-## 验证建议
-
-- 构造长对话使消息被压缩, 再追问早期具体事实, 检查向量召回能否命中原文片段。
-- 检查召回片段与近期窗口不重复。
-- 清空向量库后检查降级行为（应回退到纯压缩摘要, 不阻断对话）。
+长对话压缩后仍能检索早期具体事实；召回不重复近期窗口、不越过用户/会话权限；索引缺失不阻断聊天，删除与重建可验证。上述目标尚未实现，不能写入已实现能力列表。
