@@ -34,7 +34,7 @@ processing、题锁、flow CAS 各有职责，不构成 MySQL/Redis 跨存储事
 代码：`services/interview/runtime/snapshot_service.go`。
 
 1. Redis 已有 flow：立即返回，不检查其他运行态 key 是否齐全。
-2. 无 flow 且有 MySQL hot snapshot：回填 flow、score、follow-up 后立即返回，不继续补齐 cold 材料和 turn log。
+2. 无 flow 且有 MySQL hot snapshot：先原子恢复计分聚合，再回填 flow 与 follow-up。现存 Redis 计分聚合优先，恢复后的平均分与实时计分一样四舍五入。该分支直接返回，不继续补齐 cold 材料和 turn log。
 3. 无 hot snapshot：尝试读取 cold snapshot 与 archives 回填对应数据，最后返回 nil；没有统一的完整性判定或写入许可等级。
 
 当前没有恢复锁/rehydrate scope，没有 EXACT / READ_ONLY 等级检查，没有主数据完整兜底。代码中出现的设计常量不代表这些机制已接入。
@@ -42,10 +42,10 @@ processing、题锁、flow CAS 各有职责，不构成 MySQL/Redis 跨存储事
 ## RefreshAfterAnswerCommitted 实际刷新
 
 1. 读取当前 hot snapshot；读失败返回，LastMutationID 已等于 requestID 则短路；否则将轮次归档到 MySQL。
-2. buildHotSnapshot 构建检查点，有旧快照则最多三次版本 CAS，没有则 upsert。
+2. buildHotSnapshot 构建检查点，同时从 Redis 原子读取累计分和计分次数。缺少聚合时沿用已有快照值。通过版本 CAS 写快照，首次插入冲突时也重读并重试。
 3. 失败写 warn，CAS 重试耗尽记录 metric；并未通过协调器安排防抖、强制 flush 或定时重试。调用方先记录 replay 再异步刷新，因此可回放成功响应时检查点未必已更新。
 
-当前没有 HotRefreshCoordinator、单调性拒绝或 soft replay。buildHotSnapshot 的 ScoreSum/ScoreCount 继承已有热快照，未从本轮评分累加；需验证丢 Redis 后的计分完整性。
+当前没有 HotRefreshCoordinator、统一的单调性拒绝或 soft replay。旧热快照缺少计分聚合且 Redis 聚合也已丢失时，恢复流程无法补回历史分数。
 
 ## 已实现与待实现的区别
 

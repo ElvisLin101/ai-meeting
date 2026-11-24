@@ -1,9 +1,11 @@
 package runtime
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
+	"ai-meeting/internal/testutil"
 	"ai-meeting/models"
 )
 
@@ -113,5 +115,77 @@ func TestBuildHotSnapshot_TurnWindowTrim(t *testing.T) {
 	}
 	if snap.RecentTurnCount != models.HotSnapshotRecentTurnLimit {
 		t.Errorf("RecentTurnCount = %d", snap.RecentTurnCount)
+	}
+}
+
+type scoreSnapshotRepository struct {
+	snapshotRepository
+	hot *models.InterviewRuntimeHotSnapshot
+}
+
+func (r *scoreSnapshotRepository) FindHotSnapshot(context.Context, string) (*models.InterviewRuntimeHotSnapshot, error) {
+	return r.hot, nil
+}
+
+func (r *scoreSnapshotRepository) ArchiveTurn(context.Context, string, string, models.InterviewTurnLog, int64) (int64, error) {
+	return 1, nil
+}
+
+func (r *scoreSnapshotRepository) CompareAndSetHotSnapshot(_ context.Context, _ string, version int64, snap *models.InterviewRuntimeHotSnapshot) (bool, error) {
+	if (r.hot == nil && version != 0) || (r.hot != nil && r.hot.SnapshotVersion != version) {
+		return false, nil
+	}
+	r.hot = snap
+	return true, nil
+}
+
+func TestSnapshotService_PersistsAndRestoresScoreAggregate(t *testing.T) {
+	ctx := context.Background()
+	const sessionID = "session-score"
+	rdb := testutil.NewTestRedis(t)
+	scores := NewScoreCache(rdb)
+	repo := &scoreSnapshotRepository{}
+	service := NewSnapshotService(rdb, NewFlowCache(rdb), scores, nil, nil)
+	service.repo = repo
+	flow := &models.InterviewFlowState{Status: models.FlowAsking, CurrentQuestionNumber: "2", Version: 3}
+
+	if _, _, _, err := scores.AddScore(ctx, sessionID, 88); err != nil {
+		t.Fatal(err)
+	}
+	service.RefreshAfterAnswerCommitted(ctx, sessionID, "user", "answer-1", flow, &models.InterviewTurnLog{Score: 88})
+	if repo.hot == nil || repo.hot.ScoreSum != 88 || repo.hot.ScoreCount != 1 {
+		t.Fatalf("first snapshot should persist score sum/count (88,1), got %+v", repo.hot)
+	}
+
+	if _, _, _, err := scores.AddScore(ctx, sessionID, 91); err != nil {
+		t.Fatal(err)
+	}
+	service.RefreshAfterAnswerCommitted(ctx, sessionID, "user", "answer-2", flow, &models.InterviewTurnLog{Score: 91})
+	service.RefreshAfterAnswerCommitted(ctx, sessionID, "user", "follow-up", flow, &models.InterviewTurnLog{Score: 5, IsFollowUp: true})
+	if repo.hot.ScoreSum != 179 || repo.hot.ScoreCount != 2 {
+		t.Fatalf("follow-up should not change sum/count (179,2), got (%d,%d)", repo.hot.ScoreSum, repo.hot.ScoreCount)
+	}
+
+	if err := scores.ResetScore(ctx, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	if recoveredFlow, err := service.EnsureRuntime(ctx, sessionID); err != nil || recoveredFlow == nil {
+		t.Fatalf("restore runtime: flow=%v err=%v", recoveredFlow, err)
+	}
+	if avg, err := scores.GetTotalScore(ctx, sessionID); err != nil || avg != 90 {
+		t.Fatalf("restored score = %d, err = %v, want rounded score 90", avg, err)
+	}
+	if sum, count, avg, err := scores.AddScore(ctx, sessionID, 70); err != nil || sum != 249 || count != 3 || avg != 83 {
+		t.Fatalf("add after restore = (%d,%d,%d,%v), want (249,3,83,nil)", sum, count, avg, err)
+	}
+
+	if err := rdb.Del(ctx, flowKey(sessionID)).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if recoveredFlow, err := service.EnsureRuntime(ctx, sessionID); err != nil || recoveredFlow == nil {
+		t.Fatalf("restore flow with live score: flow=%v err=%v", recoveredFlow, err)
+	}
+	if avg, err := scores.GetTotalScore(ctx, sessionID); err != nil || avg != 83 {
+		t.Fatalf("restore should preserve live score, got %d, err = %v", avg, err)
 	}
 }

@@ -49,7 +49,7 @@ description: 当需求涉及 AI 或 Agent Run 上下文、压缩摘要、画像�
 - Redis SET NX 租约选 leader，Pub/Sub 通知 follower，轮询检查进度；leader 流式 `writer.Write` 记录 `累计字节:时间戳`，停滞超过 30s 可触发接管。
 - 取消信号用 Pub/Sub 与 cancel key 轮询传递；新 leader 初始占位进度减少首段输出前的误判窗口。
 - Redis 故障可降级进程内合并，writer 为 no-op；非流式 Agent run 共享结果，流式 run 使用独立 Redis 幂等锁，不共享 chunk。
-- 当前存在 follower 缓存命中状态与“继续等待”同值的问题；轮询命中可能被忽略。共享执行继承 leader 请求 context，断连可能影响其他等待者。
+- 即使错过 Pub/Sub 通知，follower 在锁已释放且轮询读到缓存结果时也会返回。共享执行继承 leader 请求 context，断连可能影响其他等待者。
 - 续租和写结果错误未完整处理，结果/进度写入缺少 ownership/fencing 保护；不响应 cancel 的执行、panic 清理及本地等待取消仍需治理。占位进度修复不等于故障接管强一致。
 - Agent run 和画像合并未更新 writer，长任务可能被停滞检测误判。历史模拟压测不能证明这些业务路径可靠。
 

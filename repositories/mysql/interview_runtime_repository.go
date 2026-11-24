@@ -28,25 +28,6 @@ func FindHotSnapshot(ctx context.Context, sessionID string) (*models.InterviewRu
 	return hotRowToModel(&row), nil
 }
 
-// UpsertHotSnapshot 覆盖写入热快照（无 CAS）
-func UpsertHotSnapshot(ctx context.Context, snap *models.InterviewRuntimeHotSnapshot) error {
-	row := hotModelToRow(snap)
-	row.UpdatedAt = time.Now()
-	if row.CreatedAt.IsZero() {
-		row.CreatedAt = row.UpdatedAt
-	}
-	return DB.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "session_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"user_id", "session_status", "snapshot_version", "snapshot_level",
-			"flow_json", "score_sum", "score_count", "follow_up_questions_json",
-			"recent_turns_json", "recent_turn_count", "archive_watermark",
-			"last_turn_seq", "last_applied_request_id", "last_mutation_id",
-			"last_committed_question_number", "updated_at",
-		}),
-	}).Create(row).Error
-}
-
 // CompareAndSetHotSnapshot CAS 更新热快照
 func CompareAndSetHotSnapshot(ctx context.Context, sessionID string, expectedVersion int64, snap *models.InterviewRuntimeHotSnapshot) (bool, error) {
 	row := hotModelToRow(snap)
@@ -88,11 +69,8 @@ func CompareAndSetHotSnapshot(ctx context.Context, sessionID string, expectedVer
 		return false, err
 	}
 	if count == 0 {
-		err := DB.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(row).Error
-		if err != nil {
-			return false, err
-		}
-		return true, nil
+		res := DB.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(row)
+		return res.RowsAffected > 0, res.Error
 	}
 	return false, nil
 }

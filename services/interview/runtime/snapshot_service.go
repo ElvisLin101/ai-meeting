@@ -15,8 +15,8 @@ import (
 // SnapshotService 面试运行态快照服务
 //
 // 两条链路:
-//   refreshSnapshot: 答题 commit 后把 Redis 运行态刷到 Mongo（CAS + 幂等短路）
-//   ensureRuntime: Redis miss 后从 Mongo 快照+归档重建 Redis
+//   refreshSnapshot: 答题 commit 后把 Redis 运行态刷到 MySQL（CAS + 幂等短路）
+//   ensureRuntime: Redis miss 后从 MySQL 快照+归档重建 Redis
 // ============================================================
 
 const (
@@ -56,14 +56,14 @@ func NewSnapshotService(rdb *redis.Client, flowCache *FlowCache, scoreCache *Sco
 	}
 }
 
-// RefreshAfterAnswerCommitted 答题 commit 后刷新快照到 Mongo
+// RefreshAfterAnswerCommitted 答题 commit 后刷新快照到 MySQL
 // flow: 当前 flow 状态, turn: 本轮 turn log, requestID: 幂等键
 func (s *SnapshotService) RefreshAfterAnswerCommitted(ctx context.Context, sessionID, userID, requestID string, flow *models.InterviewFlowState, turn *models.InterviewTurnLog) {
 	for attempt := 0; attempt < casMaxRetries; attempt++ {
 		// 读当前热快照
 		hot, err := s.repository().FindHotSnapshot(ctx, sessionID)
 		if err != nil {
-			// 读快照失败(如 Mongo 抖动): 跳过本轮刷新, 绝不能走 Upsert 把现有快照覆盖成 version=1
+			// 读取快照失败时跳过本轮刷新，等待下次更新。
 			logrus.Warnf("Failed to read hot snapshot, skip refresh, session=%s, err=%v", sessionID, err)
 			return
 		}
@@ -90,15 +90,15 @@ func (s *SnapshotService) RefreshAfterAnswerCommitted(ctx context.Context, sessi
 
 		// 构造热快照 patch
 		newSnap := buildHotSnapshot(sessionID, userID, flow, hot, turn, requestID, archiveWatermark, snapshotVersion)
-
-		// CAS 写入
-		var ok bool
-		if hot != nil {
-			ok, err = s.repository().CompareAndSetHotSnapshot(ctx, sessionID, hot.SnapshotVersion, newSnap)
-		} else {
-			err = s.repository().UpsertHotSnapshot(ctx, newSnap)
-			ok = err == nil
+		sum, count, err := s.scoreCache.readAggregate(ctx, sessionID)
+		if err != nil {
+			logrus.Warnf("Failed to read score aggregate for snapshot, session=%s, err=%v", sessionID, err)
+		} else if count > 0 {
+			newSnap.ScoreSum, newSnap.ScoreCount = sum, count
 		}
+
+		// 首次插入若遇到并发写入，也按 CAS 冲突重读重试。
+		ok, err := s.repository().CompareAndSetHotSnapshot(ctx, sessionID, snapshotVersion-1, newSnap)
 		if err != nil {
 			logrus.Warnf("Hot snapshot CAS failed (attempt %d), session=%s, err=%v", attempt+1, sessionID, err)
 			time.Sleep(time.Duration(casBaseBackoffMs*(attempt+1)) * time.Millisecond)
@@ -114,7 +114,7 @@ func (s *SnapshotService) RefreshAfterAnswerCommitted(ctx context.Context, sessi
 	metric.GetMetricService().Record(models.MetricLog{Module: "snapshot", Event: "cas_exhausted", Success: false, SessionID: sessionID})
 }
 
-// RefreshColdSnapshot 出题后刷新冷快照到 Mongo
+// RefreshColdSnapshot 出题后刷新冷快照到 MySQL
 func (s *SnapshotService) RefreshColdSnapshot(ctx context.Context, sessionID, userID, interviewType, direction string, questions, suggestions map[string]string, resumeContext map[string]interface{}, resumeScore int) {
 	snap := &models.InterviewRuntimeColdSnapshot{
 		SessionID:       sessionID,
@@ -136,7 +136,7 @@ func (s *SnapshotService) RefreshColdSnapshot(ctx context.Context, sessionID, us
 	}
 }
 
-// EnsureRuntime Redis miss 后从 Mongo 重建运行态
+// EnsureRuntime Redis miss 后从 MySQL 重建运行态
 // 返回重建的 flow, 或 nil 表示无法恢复
 func (s *SnapshotService) EnsureRuntime(ctx context.Context, sessionID string) (*models.InterviewFlowState, error) {
 	// 1. Redis 命中?
@@ -151,16 +151,15 @@ func (s *SnapshotService) EnsureRuntime(ctx context.Context, sessionID string) (
 	// 2. 从热快照重建
 	hot, err := s.repository().FindHotSnapshot(ctx, sessionID)
 	if err == nil && hot != nil {
+		// 先恢复计分，再发布 flow，避免答题请求看到可用的流程却从零开始计分。
+		if hot.ScoreCount > 0 {
+			if err := s.scoreCache.restoreAggregate(ctx, sessionID, hot.ScoreSum, hot.ScoreCount); err != nil {
+				return nil, fmt.Errorf("restore interview score aggregate: %w", err)
+			}
+		}
 		// 写回 Redis
 		if err := s.flowCache.SaveFlow(ctx, sessionID, &hot.Flow); err != nil {
 			logrus.Warnf("Failed to write flow back to Redis, session=%s, err=%v", sessionID, err)
-		}
-		// 恢复分数
-		if hot.ScoreCount > 0 {
-			avg := hot.ScoreSum / hot.ScoreCount
-			s.rdb.Set(ctx, scoreKey(sessionID), fmt.Sprintf("%d", avg), cacheTTLHours*time.Hour)
-			s.rdb.Set(ctx, scoreSumKey(sessionID), fmt.Sprintf("%d", hot.ScoreSum), cacheTTLHours*time.Hour)
-			s.rdb.Set(ctx, scoreCountKey(sessionID), fmt.Sprintf("%d", hot.ScoreCount), cacheTTLHours*time.Hour)
 		}
 		// 恢复追问题
 		if len(hot.FollowUpQuestions) > 0 {

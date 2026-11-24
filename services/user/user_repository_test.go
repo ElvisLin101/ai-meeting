@@ -132,6 +132,20 @@ func TestUserServiceRegisterExisting(t *testing.T) {
 	}
 }
 
+func TestUserServiceRegisterStopsOnLookupError(t *testing.T) {
+	lookupErr := errors.New("database read failed")
+	repo := &fakeUserRepository{findErr: lookupErr}
+	svc := &UserService{repo: repo}
+
+	err := svc.Register(dto.UserRegisterReqDTO{Username: "alice", Password: "secret"})
+	if !errors.Is(err, lookupErr) || !ecode.Is(err, ecode.ServerErr) {
+		t.Fatalf("want database lookup error with server error code, got %v", err)
+	}
+	if repo.created != nil {
+		t.Fatal("lookup failure should stop user creation")
+	}
+}
+
 func TestUserServiceRegisterCreatesHashedUser(t *testing.T) {
 	repo := &fakeUserRepository{findErr: gorm.ErrRecordNotFound}
 	svc := &UserService{repo: repo}

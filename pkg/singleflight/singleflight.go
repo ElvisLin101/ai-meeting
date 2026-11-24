@@ -144,7 +144,7 @@ func (g *DistributedGroup) Do(ctx context.Context, key string, fn StreamFn) (int
 
 		// 4. 我是从节点 → 等待结果
 		g.record("follower_waiting", true, key)
-		result, reason, err := g.runAsFollower(ctx, lockKey, resultKey, channel, progressKey, cancelKey, cancelChan)
+		result, reason, err := g.runAsFollower(ctx, lockKey, resultKey, channel, progressKey, cancelKey, cancelChan, FollowerPoll)
 		if err != nil {
 			return nil, err
 		}
@@ -307,17 +307,18 @@ func (g *DistributedGroup) watchCancel(ctx context.Context, cancelKey, cancelCha
 type followerReason int
 
 const (
-	followerGotResult     followerReason = iota // 主节点完成，拿到结果
+	followerWaiting       followerReason = iota // 主节点仍在执行，继续等待
+	followerGotResult                           // 主节点完成，拿到结果
 	followerLeaderTimeout                       // 主节点卡死/超时，需要换主
 	followerCtxDone                             // 自己超时/取消
 )
 
-func (g *DistributedGroup) runAsFollower(ctx context.Context, lockKey, resultKey, channel, progressKey, cancelKey, cancelChan string) (interface{}, followerReason, error) {
+func (g *DistributedGroup) runAsFollower(ctx context.Context, lockKey, resultKey, channel, progressKey, cancelKey, cancelChan string, pollInterval time.Duration) (interface{}, followerReason, error) {
 	pubsub := g.redis.Subscribe(ctx, channel)
 	defer pubsub.Close()
 	msgCh := pubsub.Channel()
 
-	ticker := time.NewTicker(FollowerPoll)
+	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
 	// 记录上次检查到的进度，用于判断主节点输出是否在变化
@@ -343,7 +344,7 @@ func (g *DistributedGroup) runAsFollower(ctx context.Context, lockKey, resultKey
 		case <-ticker.C:
 			// 检查主节点状态
 			result, reason := g.checkLeaderResult(ctx, lockKey, resultKey, progressKey, cancelKey, cancelChan, &lastProgress)
-			if reason != 0 { // 0 表示主节点正常，继续等
+			if reason != followerWaiting {
 				return result, reason, nil
 			}
 		}
@@ -357,14 +358,14 @@ func (g *DistributedGroup) checkLeader(ctx context.Context, lockKey, resultKey, 
 }
 
 // checkLeaderResult 检查主节点是否健康。
-// 返回 (result, 0) = 主节点正常，继续等待
+// 返回 (nil, followerWaiting) = 继续等待
 // 返回 (result, followerGotResult) = 主节点已完成（兜底读到结果）
 // 返回 (nil, followerLeaderTimeout) = 主节点卡死/超时
 func (g *DistributedGroup) checkLeaderResult(ctx context.Context, lockKey, resultKey, progressKey, cancelKey, cancelChan string, lastProgress *string) (interface{}, followerReason) {
 	// 1. 检查锁是否还在
 	lockExists, err := g.redis.Exists(ctx, lockKey).Result()
 	if err != nil {
-		return nil, 0 // Redis 出错，不急着换主，继续等
+		return nil, followerWaiting // Redis 出错，不急着换主，继续等
 	}
 	if lockExists == 0 {
 		// 锁不在了，检查结果是否已写入（主节点可能完成了但 Pub 消息丢了）
@@ -388,7 +389,7 @@ func (g *DistributedGroup) checkLeaderResult(ctx context.Context, lockKey, resul
 	if err != nil {
 		if *lastProgress == "" {
 			*lastProgress = "init" // 第一次检查，跳过一个周期给 leader 启动时间
-			return nil, 0
+			return nil, followerWaiting
 		}
 		// 后续检查 progressKey 仍不存在 → leader 长时间无输出，换主
 		g.notifyCancel(ctx, cancelKey, cancelChan, leaderNodeID)
@@ -400,13 +401,13 @@ func (g *DistributedGroup) checkLeaderResult(ctx context.Context, lockKey, resul
 	if currentProgress != *lastProgress {
 		// 进度有变化，主节点在干活
 		*lastProgress = currentProgress
-		return nil, 0
+		return nil, followerWaiting
 	}
 
 	// 进度没变化，检查是否超过停滞阈值
 	parts := splitProgress(currentProgress)
 	if len(parts) != 2 {
-		return nil, 0
+		return nil, followerWaiting
 	}
 	lastUpdateMs := parts[1]
 	stalledDuration := time.Since(time.UnixMilli(lastUpdateMs))
@@ -418,7 +419,7 @@ func (g *DistributedGroup) checkLeaderResult(ctx context.Context, lockKey, resul
 		return nil, followerLeaderTimeout
 	}
 
-	return nil, 0
+	return nil, followerWaiting
 }
 
 // notifyCancel 通知旧主节点停止 AI 调用（双通道）

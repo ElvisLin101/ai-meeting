@@ -44,7 +44,7 @@ description: 当需求涉及登录、注册、JWT、用户上下文、用户资�
 
 - 路由: `POST /api/xunzhi/v1/users/register`。
 - 当前先查重, 再创建普通用户, `status=1`, `is_admin=false`。
-- 查重时除 `gorm.ErrRecordNotFound` 以外的 DB 错误目前会继续创建用户, 修复时要保持错误语义清晰。
+- 查到用户时返回 `ErrUsernameExists`。只有 `gorm.ErrRecordNotFound` 才继续创建，其他数据库错误带上下文返回。
 
 `UserAdmin`
 
@@ -61,4 +61,3 @@ description: 当需求涉及登录、注册、JWT、用户上下文、用户资�
 ## 当前风险
 
 - bcrypt、受保护路由强制认证及管理员权限校验均已实现，旧占位结论已过期。
-- 注册查重遇到非 `gorm.ErrRecordNotFound` 的数据库错误仍继续创建，应补齐错误传播。

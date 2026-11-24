@@ -75,15 +75,20 @@ func (s *UserService) Login(req dto.UserLoginReqDTO) (*models.User, error) {
 
 // Register 用户注册
 func (s *UserService) Register(req dto.UserRegisterReqDTO) error {
-	if _, err := s.repository().FindUserByUsername(req.Username); err == nil {
+	repo := s.repository()
+	_, err := repo.FindUserByUsername(req.Username)
+	if err == nil {
 		return ecode.New(ecode.ErrUsernameExists, "username already exists")
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return ecode.Wrap(err, "注册查重失败")
 	}
 	hashed, err := hashPassword(req.Password)
 	if err != nil {
 		return ecode.Wrap(err, "密码哈希失败")
 	}
 	user := models.User{Username: req.Username, Password: hashed, Email: req.Email, Phone: req.Phone, IsAdmin: false, Status: 1}
-	return s.repository().CreateUser(&user)
+	return repo.CreateUser(&user)
 }
 
 // GetUserByUsername 根据用户名查询用户

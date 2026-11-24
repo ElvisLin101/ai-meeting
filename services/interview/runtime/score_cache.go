@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"fmt"
+	"strconv"
 
 	"github.com/go-redis/redis/v8"
 )
@@ -25,6 +27,21 @@ redis.call('EXPIRE', KEYS[1], tonumber(ARGV[2]))
 redis.call('EXPIRE', KEYS[2], tonumber(ARGV[2]))
 redis.call('EXPIRE', KEYS[3], tonumber(ARGV[2]))
 return {sum, cnt, avg}
+`
+
+// 恢复分数时保留已存在的聚合，避免覆盖其他请求刚写入的成绩。
+const restoreScoreAggregateScript = `
+local sum = tonumber(redis.call('GET', KEYS[1]))
+local cnt = tonumber(redis.call('GET', KEYS[2]))
+if not sum or not cnt or cnt <= 0 then
+    sum = tonumber(ARGV[1])
+    cnt = tonumber(ARGV[2])
+end
+local ttl = tonumber(ARGV[3])
+redis.call('SET', KEYS[1], sum, 'EX', ttl)
+redis.call('SET', KEYS[2], cnt, 'EX', ttl)
+redis.call('SET', KEYS[3], math.floor((sum / cnt) + 0.5), 'EX', ttl)
+return 1
 `
 
 // ScoreCache 面试分数缓存
@@ -59,6 +76,35 @@ func (c *ScoreCache) AddScore(ctx context.Context, sessionID string, score int) 
 	count = int(vals[1].(int64))
 	avg = int(vals[2].(int64))
 	return sum, count, avg, nil
+}
+
+// readAggregate 一次读取同一计分时点的累计分和计分次数。
+func (c *ScoreCache) readAggregate(ctx context.Context, sessionID string) (sum, count int, err error) {
+	values, err := c.rdb.MGet(ctx, scoreSumKey(sessionID), scoreCountKey(sessionID)).Result()
+	if err != nil {
+		return 0, 0, err
+	}
+	sumText, sumOK := values[0].(string)
+	countText, countOK := values[1].(string)
+	if !sumOK || !countOK {
+		return 0, 0, nil
+	}
+	sum, err = strconv.Atoi(sumText)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid cached score sum: %w", err)
+	}
+	count, err = strconv.Atoi(countText)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid cached score count: %w", err)
+	}
+	return sum, count, nil
+}
+
+func (c *ScoreCache) restoreAggregate(ctx context.Context, sessionID string, sum, count int) error {
+	return redis.NewScript(restoreScoreAggregateScript).Run(ctx, c.rdb,
+		[]string{scoreSumKey(sessionID), scoreCountKey(sessionID), scoreKey(sessionID)},
+		sum, count, cacheTTLHours*3600,
+	).Err()
 }
 
 // GetTotalScore 读取当前平均分

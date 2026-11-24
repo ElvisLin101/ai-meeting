@@ -10,7 +10,7 @@ import (
 
 // ============================================================
 // checkLeader 停滞/换主判定逻辑测试
-//   返回 0                      = 主节点正常, 继续等待
+//   followerWaiting           = 主节点正常, 继续等待
 //   followerGotResult          = 主节点已完成(兜底读到结果)
 //   followerLeaderTimeout      = 主节点卡死/超时, 需换主
 // ============================================================
@@ -26,17 +26,17 @@ func TestCheckLeader_Healthy(t *testing.T) {
 
 	last := ""
 	// 首次检查: 跳过初始化周期
-	if reason := g.checkLeader(ctx, lockKey, resultKey, progressKey, cancelKey, "CCHAN", &last); reason != 0 {
-		t.Fatalf("first check reason = %d, want 0", reason)
+	if reason := g.checkLeader(ctx, lockKey, resultKey, progressKey, cancelKey, "CCHAN", &last); reason != followerWaiting {
+		t.Fatalf("first check reason = %d, want followerWaiting", reason)
 	}
 	// 进度有推进 → 健康
 	g.redis.Set(ctx, progressKey, fmt.Sprintf("20:%d", now+1), LockTTL*2)
-	if reason := g.checkLeader(ctx, lockKey, resultKey, progressKey, cancelKey, "CCHAN", &last); reason != 0 {
-		t.Fatalf("advancing leader reason = %d, want 0", reason)
+	if reason := g.checkLeader(ctx, lockKey, resultKey, progressKey, cancelKey, "CCHAN", &last); reason != followerWaiting {
+		t.Fatalf("advancing leader reason = %d, want followerWaiting", reason)
 	}
 	// 进度停滞但在阈值内 → 健康
-	if reason := g.checkLeader(ctx, lockKey, resultKey, progressKey, cancelKey, "CCHAN", &last); reason != 0 {
-		t.Fatalf("stable-within-threshold reason = %d, want 0", reason)
+	if reason := g.checkLeader(ctx, lockKey, resultKey, progressKey, cancelKey, "CCHAN", &last); reason != followerWaiting {
+		t.Fatalf("stable-within-threshold reason = %d, want followerWaiting", reason)
 	}
 	if cancelKeyVal, _ := g.redis.Get(ctx, cancelKey).Result(); cancelKeyVal != "" {
 		t.Errorf("cancel key should be empty, got %q", cancelKeyVal)
@@ -84,6 +84,20 @@ func TestCheckLeader_LockExpiredWithResult(t *testing.T) {
 	}
 }
 
+func TestRunAsFollower_UsesPolledResultWithoutNotification(t *testing.T) {
+	g, server := newTestGroup(t)
+	if err := server.Set("result", `{"val":"final"}`); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	got, reason, err := g.runAsFollower(ctx, "lock", "result", "channel", "progress", "cancel", "cancel-channel", 5*time.Millisecond)
+	if err != nil || reason != followerGotResult || got != "final" {
+		t.Fatalf("follower = (%v, %v, %v), want (final, followerGotResult, nil)", got, reason, err)
+	}
+}
+
 func TestCheckLeader_LockExpiredNoResult(t *testing.T) {
 	g, _ := newTestGroup(t)
 	ctx := context.Background()
@@ -109,8 +123,8 @@ func TestCheckLeader_ProgressLost(t *testing.T) {
 
 	last := ""
 	// 首次检查: progressKey 不存在 → 跳过一周期给 leader 启动时间
-	if reason := g.checkLeader(ctx, lockKey, resultKey, progressKey, cancelKey, "CCHAN", &last); reason != 0 {
-		t.Fatalf("first check reason = %d, want 0", reason)
+	if reason := g.checkLeader(ctx, lockKey, resultKey, progressKey, cancelKey, "CCHAN", &last); reason != followerWaiting {
+		t.Fatalf("first check reason = %d, want followerWaiting", reason)
 	}
 	// 后续 progressKey 仍不存在 → 换主
 	reason := g.checkLeader(ctx, lockKey, resultKey, progressKey, cancelKey, "CCHAN", &last)
