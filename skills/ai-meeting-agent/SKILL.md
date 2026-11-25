@@ -169,5 +169,5 @@ description: 当需求涉及 Agent 会话、Agent Run、ReAct、工具批调度�
 - 上传已做 UUID 重命名和 10MB 限制，尚无 magic bytes 校验及完整消费链路。
 - `AgentPropertiesLoader` 使用 sync.Map 单实例缓存, 多实例部署时配置变更需重启或手动刷新。
 - `GetByPage` 固定查 10 条, 未使用分页参数。
-- 非流式 run 共享执行继承首个请求 context；SingleFlight 的缓存轮询、续租、结果写入所有权和 panic 清理仍有缺口，详见 `docs/agent-knowledge/references/placeholder-risk-register.md`。
+- 非流式 run 共享执行继承首个请求 context；SingleFlight 的续租、结果写入所有权和 panic 清理仍有缺口，详见 `docs/agent-knowledge/references/placeholder-risk-register.md`。
 - 画像合并边界 `LastConsolidatedSeq` 是用户级字段，而消息 sequence 属于会话，跨会话比较需进一步治理。

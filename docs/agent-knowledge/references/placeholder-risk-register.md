@@ -20,7 +20,6 @@
 
 代码：`pkg/singleflight/singleflight.go`、`repositories/redis.go`。
 
-- followerGotResult 与“继续等待”状态均为 0，轮询结果命中可能被忽略；Pub/Sub 通知路径成功不代表轮询兜底正确。
 - leader 执行 context 继承首个 HTTP request context，leader 客户端断连可影响共享执行和 follower。
 - 续租结果/错误未完整处理；Marshal、Redis 结果写入和部分 Pipeline 错误被忽略。结果写入及清理 progress 缺少 ownership/fencing 校验。
 - fn 不响应 cancel 时可能继续执行及续租，接管无法保证旧 leader 停止；panic 路径、锁释放和本地 WaitGroup 等待取消尚不完整。
@@ -54,10 +53,6 @@
 - `services/interview/evaluation/extraction_service.go`：hashContent 仅截前 64 字符，可能产生去重 key 碰撞；SingleFlight follower JSON 解码为通用对象，直接断言 *ExtractionResult 不匹配。
 - `services/interview/evaluation/evaluation_service.go`：评分为 JSON 流式调用，未接入 SingleFlight；不能套用出题的去重描述。
 - `services/interview/runtime/snapshot_service.go`：已有 Redis flow 就返回；hot snapshot 命中只回填 flow/score/followup 并返回，不继续补 cold 材料/turn。无恢复锁、scope、EXACT/READ_ONLY 等级判断或完整主数据兜底。
-- 快照刷新归档后最多三次 CAS，失败告警/指标；无 HotRefreshCoordinator、防抖/forceFlush、单调性拒绝或 soft replay。buildHotSnapshot 继承已有 ScoreSum/ScoreCount，未从本轮评分更新，恢复计分完整性仍需验证。
+- 快照刷新归档后最多三次 CAS，失败告警/指标；无 HotRefreshCoordinator、防抖/forceFlush、统一的单调性拒绝或 soft replay。旧热快照缺少计分聚合且 Redis 聚合已丢失时，恢复流程无法补回历史分数。
 - 面试会话与列表双写只有补偿，未形成事务；记录按 session 查询仅取第一条，不适合多题记录展示。
 - 答题推进后失败已做条件 CAS 回滚，turn log 失败已有补偿；修改时禁止回退为无条件覆盖并发进度。
-
-## 用户
-
-- `services/user/user_service.go`：注册查重遇到非 gorm.ErrRecordNotFound 的数据库错误仍继续创建，需完善错误处理。

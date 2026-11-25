@@ -49,7 +49,7 @@ MySQL `conversations` / `messages` 统一保存会话和全量消息，scene 区
 
 AI 压缩写 SingleFlight 进度；Agent 非流式 run 与画像合并未使用 writer，超过 30s 无进度可能被误判。流式 Agent run 用独立幂等锁，不共享 chunk。
 
-`pkg/singleflight/singleflight.go` 的 follower 缓存命中状态、请求 context 继承、续租失败、结果写入 ownership、panic 清理仍有缺口，详见 `placeholder-risk-register.md`。初始占位进度只减少首段输出前的误判，不能证明旧 leader 已隔离。
+`pkg/singleflight/singleflight.go` 的 follower 在锁已释放且读到缓存结果时会结束等待。请求 context 继承、续租失败、结果写入 ownership、panic 清理仍有缺口，详见 `placeholder-risk-register.md`。初始占位进度只减少首段输出前的误判，不能证明旧 leader 已隔离。
 
 ## 验证重点
 

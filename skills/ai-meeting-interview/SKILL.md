@@ -22,7 +22,7 @@ description: 当需求涉及面试会话、面试题、作答评分、建议、�
 - Service: `services/interview/interview_service.go`。
 - 状态机: `services/interview/flow/flow_state_machine.go`, `services/interview/flow/follow_up_rule.go`。
 - 答题流水线: `services/interview/flow/answer_pipeline.go`(编排: 幂等→锁→评分→推进flow→写分→turn log; 失败走条件回滚), `services/interview/flow/idempotency_service.go`(processing/replay双key), `services/interview/flow/turn_repair_service.go`(turn log 写失败异步补偿)。
-- 快照/恢复: `services/interview/runtime/snapshot_service.go`（`EnsureRuntime` 分支回填 Redis、`RefreshAfterAnswerCommitted` 归档并最多三次 CAS 写热快照；完整边界见 runtime 引用文档）。
+- 快照/恢复: `services/interview/runtime/snapshot_service.go`（答题提交后归档并保存 Redis 的计分聚合；恢复时先回填分数再发布 flow；完整边界见 runtime 引用文档）。
 - 通用分布式锁: `pkg/lock/lock.go`(题级锁 SetNX+Lua)。
 - AI 调用(评分/出题/追问): `services/interview/evaluation/evaluation_service.go`, `services/interview/evaluation/extraction_service.go`, `services/interview/evaluation/followup_service.go`, `services/interview/evaluation/prompt.go`, `services/interview/evaluation/response_parser.go`。复用 configured AI client（aiID=0，config fallback）；出题接入 SingleFlight + 流式心跳，评分走 JSON 流式解析而未接入 SingleFlight。
 - 运行态缓存: `services/interview/runtime/cache_keys.go`, `services/interview/runtime/flow_cache.go`, `services/interview/runtime/score_cache.go`, `services/interview/runtime/turn_log_cache.go`, `services/interview/runtime/question_cache.go`(题目/建议/简历上下文)。

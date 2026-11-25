@@ -13,13 +13,13 @@
 | 普通 AI | JSON/SSE 聊天、configured 模型、字节阈值压缩摘要 | 无向量召回，中断不保存不完整 assistant |
 | 统一存储 | MySQL conversations/messages、原子 sequence、快照与画像/run/面试表 | 删除子消息归属约束仍需修复；跨存储写入不统一为事务 |
 | 面试 | 出题/评分/追问、状态机 CAS、条件回滚、幂等/题锁、归档/基础恢复 | hot 命中不补 cold/turn，无恢复等级和刷新协调器 |
-| 并发去重 | Redis SingleFlight、AI 压缩/出题流式进度、非流式 run 合并 | 缓存轮询、context、续租、ownership/fencing 与 panic 清理有缺口 |
+| 并发去重 | Redis SingleFlight、轮询复用缓存结果、AI 压缩/出题流式进度、非流式 run 合并 | context、续租、ownership/fencing 与 panic 清理有缺口 |
 | 工程 | JWT/bcrypt、错误码、仓储接口注入、确定性/live eval、CI | 后台管理无固定并发上限；CI 未接知识检查 |
 
 ## 优先治理方向
 
 1. 修复统一会话删除的子消息授权约束，并覆盖未拥有会话的请求。
-2. 以故障测试驱动 SingleFlight：follower 轮询结果、首请求断连、续租失败、不响应 cancel 的旧 leader、所有权写入及 panic 清理；让实际业务路径明确进度策略。
+2. 以故障测试驱动 SingleFlight：首请求断连、续租失败、不响应 cancel 的旧 leader、所有权写入及 panic 清理；让实际业务路径明确进度策略。
 3. 修复出题 key 的内容哈希与 follower 类型解码；验证业务去重，区分出题和评分路径。
 4. 验证面试热快照分数/轮次完整性、局部 Redis key 缺失和并发恢复；再实现恢复互斥、等级和刷新协调器。
 5. 为 Plan 定义整体 deadline 和有副作用任务策略；按需求评估持久任务账本和重启续跑。

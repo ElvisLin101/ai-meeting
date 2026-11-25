@@ -90,7 +90,7 @@ Redis 热数据（`repositories/redis_hot.go`）：
 - `InterviewQuestionRow` -> MySQL `interview_questions`
 - `InterviewHotSnapshotRow` -> MySQL `interview_session_runtime_hot_snapshot`
   - `FlowJSON`/`FollowUpQuestionsJSON`/`RecentTurnsJSON` 以 JSON 文本存储；`SnapshotVersion` 做 CAS
-  - 当前热快照构建继承旧 ScoreSum/ScoreCount，未从本轮评估累加；恢复计分完整性需验证
+  - 热快照刷新时保存 Redis 中同一次读取的 `ScoreSum` / `ScoreCount`，恢复时按与实时计分相同的规则计算平均分
 - `InterviewColdSnapshotRow` -> MySQL `interview_session_runtime_cold_snapshot`
 - `InterviewTurnArchiveRow` -> MySQL `interview_session_turn_archive`
   - 唯一索引 `(session_id, request_id)` 幂等、`(session_id, seq)` 单调；seq 由 `session_sequences`（前缀 `turn:`）分配
